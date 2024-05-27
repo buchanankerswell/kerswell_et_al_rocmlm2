@@ -1,0 +1,17 @@
+name: rocmlm
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - seaborn
+  - matplotlib
+  - gitpython
+  - pyyaml
+  - tqdm
+  - opencv
+  - tabulate
