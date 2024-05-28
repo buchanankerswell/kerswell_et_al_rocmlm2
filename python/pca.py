@@ -196,7 +196,7 @@ def convert_to_feot(df, digits=3):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # normalize volatile free !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def normalize_volatile_free(df, oxides, volatiles, loi, digits=3):
+def normalize_volatile_free(df, oxides, volatiles, digits=3):
     """
     """
     # Copy df
@@ -204,7 +204,7 @@ def normalize_volatile_free(df, oxides, volatiles, loi, digits=3):
 
     # Normalization components
     ox = oxides
-    vol = volatiles + loi
+    vol = volatiles
 
     # Sum oxides with and without volatiles
     data["total_ox"] = data[ox].sum(axis=1).round(digits)
@@ -278,15 +278,14 @@ class MixingArray:
         self.verbose = verbose
 
         # Earthchem data
-        self.earthchem_filename = "earthchem-combined-igneous-metamorphic-xenolith.txt"
+        self.earthchem_filename = "earthchem-combined-deschamps-2013.txt"
         self.metadata = ["SAMPLEID", "SOURCE", "REFERENCE", "LATITUDE", "LONGITUDE",
                          "COMPOSITION", "ROCKNAME"]
         self.oxides_system = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2",
-                              "FE2O3", "CR2O3", "H2O"]
+                              "FE2O3", "CR2O3", "LOI"]
         self.oxides = ["SIO2", "AL2O3", "CAO", "MGO", "FEOT", "K2O", "NA2O", "TIO2", "FE2O3",
-                       "CR2O3", "FE2O3T", "FEO", "NIO", "MNO", "P2O5", "H2O"]
-        self.loi = ["LOI"]
-        self.volatiles = ["CO2"]
+                       "CR2O3", "FE2O3T", "FEO", "NIO", "MNO", "P2O5", "LOI"]
+        self.volatiles = ["H2O", "CO2"]
         self.trace = ["CR", "NI"]
         self.digits = 3
         self.earthchem_raw = pd.DataFrame()
@@ -324,11 +323,9 @@ class MixingArray:
         metadata = self.metadata
         oxides_system = self.oxides_system
         oxides = self.oxides
-        loi = self.loi
         volatiles = self.volatiles
         trace = self.trace
         oxides_methods = [string + "METH" for string in oxides]
-        loi_methods = [string + "METH" for string in loi]
         volatiles_methods = [string + "METH" for string in volatiles]
         trace_methods = [string + "METH" for string in trace]
         digits = self.digits
@@ -350,7 +347,7 @@ class MixingArray:
         data.columns = [col.replace(" ", "") for col in data.columns]
 
         # Select columns
-        data = data[metadata + oxides + oxides_methods + loi + loi_methods + volatiles +
+        data = data[metadata + oxides + oxides_methods + volatiles +
                     volatiles_methods + trace + trace_methods]
 
         # Round values
@@ -370,30 +367,40 @@ class MixingArray:
         # Get self attributes
         data = self.earthchem_raw.copy()
         oxides = self.oxides
-        loi = self.loi
         volatiles = self.volatiles
         digits = self.digits
         verbose = self.verbose
 
         # Rock names meta groups
-        peridotite = ["peridotite", "harzburgite", "lherzolite", "dunite", "wehrlite"]
+        peridotite = ["peridotite", "harzburgite", "lherzolite", "dunite", "wehrlite",
+                      "abyssal peridotite", "ultramafic rock", "harzburgite-lherzholite",
+                      "harzburgite-dunite"]
         pyroxenite = ["pyroxenite", "websterite", "hornblendite", "clinopyroxenite",
                       "orthopyroxenite"]
+        serpentinite = ["serpentinite", "serpentinized peridotite",
+                        "serpentinized harzburgite", "serpentinite muds",
+                        "serpentinized lherzolite", "antigorite serpentinite",
+                        "serpentinized mylonite"]
+        metamorphic = ["amphibolite", "blueschist", "meta-basalt", "eclogite",
+                       "meta-gabbro", "metabasite", "hydrated peridotite",
+                       "chlorite harzburgite"]
         xenolith = ["peridotite-xenolith", "pyroxenite-xenolith", "eclogite-xenolith"]
-        metamorphic = ["serpentinite", "amphibolite", "blueschist", "meta-basalt",
-                       "eclogite", "meta-gabbro", "metabasite"]
+        other = ["limburgite", "chromitite", "unknown", "olivine-rich troctolite",
+                 "hydrated cumulate"]
 
         # Keep only samples with required oxides
-        condition = data[["SIO2", "MGO", "AL2O3", "CAO", "H2O"]].notna().all(axis=1)
+        condition = data[["SIO2", "MGO", "AL2O3", "CAO", "LOI"]].notna().all(axis=1)
         data = data.loc[condition]
 
         # Drop unknown rocks
-        data = data[~data["ROCKNAME"].isin(["unknown"])]
+        data = data[~data["ROCKNAME"].isin(xenolith + other)]
 
         # Add new rock type column
-        conditions = [data["ROCKNAME"].isin(peridotite), data["ROCKNAME"].isin(pyroxenite),
-                      data["ROCKNAME"].isin(xenolith), data["ROCKNAME"].isin(metamorphic)]
-        values = ["peridotite", "pyroxenite", "xenolith", "metamorphic"]
+        conditions = [data["ROCKNAME"].isin(peridotite),
+                      data["ROCKNAME"].isin(pyroxenite),
+                      data["ROCKNAME"].isin(serpentinite),
+                      data["ROCKNAME"].isin(metamorphic)]
+        values = ["peridotite", "pyroxenite", "serpentinite", "metamorphic"]
         data["ROCKTYPE"] = np.select(conditions, values, default="other")
 
         # Function to remove outliers based on IQR
@@ -419,7 +426,7 @@ class MixingArray:
         data = convert_to_fe2o3t(data, digits)
 
         # Normalize to volatile free basis
-        data = normalize_volatile_free(data, oxides, volatiles, loi, digits)
+        data = normalize_volatile_free(data, oxides, volatiles, digits)
 
         # Convert all Fe oxides to FEOT
         data = convert_to_feot(data)
@@ -675,7 +682,7 @@ class MixingArray:
 
         try:
             # Define sample centroids
-            centroids = data[data["ROCKTYPE"] != "xenolith"
+            centroids = data[~data["ROCKTYPE"].isin(["xenolith", "other"])
                              ].groupby("ROCKTYPE")[["PC1", "PC2"]].median()
 
             # Initialize endpoints
@@ -709,16 +716,16 @@ class MixingArray:
                 median_x = np.median(data.loc[condition, "PC1"])
 
                 # Define adjustment factor
-                median_adjustment_q1x = 0
-                median_adjustment_q1y = 0
-                median_adjustment_q2x = -1.6
+                median_adjustment_q1x = 1.0
+                median_adjustment_q1y = 0.8
+                median_adjustment_q2x = -0.6
                 median_adjustment_q2y = 1.0
                 median_adjustment_q3x = 0
                 median_adjustment_q3y = 0
-                median_adjustment_q4x = -0.5
-                median_adjustment_q4y = -0.7
-                top_adjustment = 0
-                bottom_adjustment = 0
+                median_adjustment_q4x = 0
+                median_adjustment_q4y = 0
+                top_adjustment = 1.2
+                bottom_adjustment = 1.2
 
                 # Adjust endpoint for PC1
                 if quadrant == "Q1":
@@ -868,10 +875,10 @@ class MixingArray:
             all_bottoms[oxs] = all_bottoms[
                 oxs].apply(lambda x: x.apply(lambda y: max(0.001, y)))
 
-            # Increase TIO2 by 20% for mixing arrays so that F melt is consistent with PUM
-            all_mixing["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.2)
-            all_tops["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.2)
-            all_bottoms["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.2)
+#            # Increase TIO2 by 20% for mixing arrays so that F melt is consistent with PUM
+#            all_mixing["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.2)
+#            all_tops["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.2)
+#            all_bottoms["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.2)
 
             # Calculate F melt
             ti_init = all_mixing["TIO2"].max()
@@ -992,9 +999,9 @@ class MixingArray:
             random_synthetic[oxs] = random_synthetic[oxs].apply(
                 lambda x: x.apply(lambda y: max(0.001, y)))
 
-            # Increase TIO2 by 20% for mixing arrays so that F melt is consistent with PUM
-            random_synthetic["TIO2"] = (random_synthetic["TIO2"] +
-                                        (random_synthetic["TIO2"] * 0.2))
+#            # Increase TIO2 by 20% for mixing arrays so that F melt is consistent with PUM
+#            random_synthetic["TIO2"] = (random_synthetic["TIO2"] +
+#                                        (random_synthetic["TIO2"] * 0.2))
 
             # Calculate F melt
             random_synthetic["R_TIO2"] = round(random_synthetic["TIO2"] / ti_init, digits)

@@ -3132,8 +3132,8 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
     colormap = plt.cm.get_cmap("tab10")
 
     # Legend order
-    legend_order = ["peridotite", "pyroxenite", "xenolith", "metamorphic"]
-    legend_lab = ["perid", "pyrox", "xeno", "meta"]
+    legend_order = ["peridotite", "pyroxenite", "metamorphic", "serpentinite"]
+    legend_lab = ["perid", "pyrox", "meta", "serp"]
 
     fname = f"{filename}-mixing-array"
 
@@ -3143,11 +3143,11 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
     ax.axhline(y=0, color="black", linestyle="-", linewidth=0.5)
     ax.axvline(x=0, color="black", linestyle="-", linewidth=0.5)
 
-    oxs = ["SIO2", "MGO", "FEO", "AL2O3", "TIO2", "H2O", "CAO", "NA2O"]
-    x_offset_text = [0, 0, 0, 0, 0, 0, 0, 0]
-    y_offset_text = [0, 0, 0, 0, 0, 0, 0, 0]
-    text_fac, arrow_fac = 3.5, 1.8
-    x_offset_arrow, y_offset_arrow = 0, 0
+    oxs = ["SIO2", "MGO", "FEO", "AL2O3", "TIO2", "LOI", "CAO", "NA2O"]
+    x_offset_text = [1, 1, 1, 1, 1, 1, 1, 1]
+    y_offset_text = [2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5]
+    text_fac, arrow_fac = 2.8, 1.3
+    x_offset_arrow, y_offset_arrow = 1, 2.5
 
     for oxide, x_off, y_off in zip(oxs, x_offset_text, y_offset_text):
         if oxide == "AL2O3":
@@ -3160,15 +3160,15 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
             oxide_label = "MgO"
         elif oxide == "FEO":
             oxide_label = "FeOT"
-        elif oxide == "H2O":
-            oxide_label = "H$_2$O"
+        elif oxide == "LOI":
+            oxide_label = "LOI"
         elif oxide == "CAO":
             oxide_label = "CaO"
         elif oxide == "NA2O":
             oxide_label = "Na$_2$O"
 
         ax.arrow(x_offset_arrow, y_offset_arrow, loadings.at[0, oxide] *
-                 arrow_fac, loadings.at[1, oxide] * 1.8, width=0.1,
+                 arrow_fac, loadings.at[1, oxide] * arrow_fac, width=0.1,
                  head_width=0.4, color="black")
         ax.text(x_off + (loadings.at[0, oxide] * text_fac),
                 y_off + (loadings.at[1, oxide] * text_fac), oxide_label,
@@ -3334,13 +3334,12 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
 # visualize harker diagrams !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
-                              filename="earthchem", figwidth=6.3, figheight=6.3,
+                              filename="earthchem", figwidth=6.3, figheight=5.8,
                               fontsize=22):
     """
     """
     # Get mixing array attributes
-    oxides = [ox for ox in mixing_array.oxides_system if ox not in ["SIO2", "CR2O3", "K2O",
-                                                                    "FE2O3", "H2O"]]
+    oxides = [ox for ox in mixing_array.oxides_system if ox not in ["SIO2", "FE2O3"]]
     n_pca_components = mixing_array.n_pca_components
     data = mixing_array.earthchem_filtered
 
@@ -3378,7 +3377,7 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
     warnings.filterwarnings("ignore", category=FutureWarning, module="seaborn")
 
     # Create a grid of subplots
-    num_plots = len(oxides) + 1
+    num_plots = len(oxides)
 
     if num_plots == 1:
         num_cols = 1
@@ -3404,7 +3403,7 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
     axes = axes.flatten()
 
     # Legend order
-    legend_order = ["peridotite", "pyroxenite", "xenolith", "metamorphic"]
+    legend_order = ["peridotite", "pyroxenite", "metamorphic", "serpentinite"]
 
     for k, y in enumerate(oxides):
         ax = axes[k]
@@ -3451,7 +3450,7 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
                           linewidth=1.5, alpha=1),
                 fontsize=fontsize * 0.579, zorder=8)
 
-        if k < (num_plots - num_cols - 1):
+        if k < (num_plots - num_cols):
             ax.set_xticks([])
 
         ax.set_xlim(xmin - (xmin * 0.02), xmax + (xmax * 0.02))
