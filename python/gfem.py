@@ -12,6 +12,7 @@ import shutil
 import itertools
 import subprocess
 from datetime import datetime
+from utils import parse_arguments, check_arguments
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # parallel computing !!
@@ -31,6 +32,12 @@ import pandas as pd
 from sklearn.impute import KNNImputer
 from scipy.interpolate import interp1d
 from sklearn.metrics import r2_score, mean_squared_error
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualization !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+from visualize import (visualize_gfem_pt_range, visualize_gfem, visualize_gfem_diff,
+                       visualize_prem_comps, compose_dataset_plots)
 
 #######################################################
 ## .1.             Helper Functions              !!! ##
@@ -2059,3 +2066,43 @@ class GFEMModel:
                     return None
 
         return None
+
+#######################################################
+## .3.   Build GFEM for RocMLM training data     !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# main !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def main():
+    """
+    """
+    # Parse and check arguments
+    valid_args = check_arguments(parse_arguments(), "gfem.py")
+    locals().update(valid_args)
+
+    # Sample sources
+    sources = {"benchmark": "assets/data/benchmark-samples-pca.csv",
+               "middle": "assets/data/synthetic-samples-mixing-middle.csv",
+               "random": "assets/data/synthetic-samples-mixing-random.csv"}
+
+    # Build GFEM models
+    gfems = {}
+    for name, source in sources.items():
+        sids = get_sampleids(source, "all")
+        gfems[name] = build_gfem_models(source, sids)
+
+    # Visualize GFEM models
+    visualize_gfem_pt_range(gfems["benchmark"][0])
+    visualize_prem_comps(gfems["middle"] + gfems["random"])
+
+    for name, models in gfems.items():
+        visualize_gfem(models)
+        visualize_gfem_diff(models)
+        compose_dataset_plots(models)
+
+    print("GFEM models built and visualized!")
+
+    return None
+
+if __name__ == "__main__":
+    main()

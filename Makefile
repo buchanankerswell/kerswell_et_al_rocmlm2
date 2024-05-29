@@ -12,14 +12,10 @@ CONDAPYTHON = $$(conda run -n $(CONDAENVNAME) which python)
 DATADIR = assets/data
 # Python scripts
 PYTHON = \
-				 python/build-gfems.py \
-				 python/initialize.py \
 				 python/gfem.py \
-				 python/create-mixing-arrays.py \
 				 python/pca.py \
 				 python/rocmlm.py \
-				 python/scripting.py \
-				 python/train-rocmlms.py \
+				 python/utils.py \
 				 python/visualize.py \
 				 python/write-md-tables.py
 # Cleanup directories
@@ -43,16 +39,16 @@ write_md_tables: $(LOGFILE) $(PYTHON)
 	@echo "=============================================" $(LOG)
 
 rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
-	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/train-rocmlms.py $(LOG)
+	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/rocmlm.py $(LOG)
 	@echo "=============================================" $(LOG)
 
 gfems: mixing_arrays
-	@$(CONDAPYTHON) -u python/build-gfems.py $(LOG)
+	@$(CONDAPYTHON) -u python/gfem.py $(LOG)
 	@echo "=============================================" $(LOG)
 
 mixing_arrays: initialize
 	@if [ ! -e "$(DATADIR)/benchmark-samples-pca.csv" ]; then \
-		$(CONDAPYTHON) -u python/create-mixing-arrays.py $(LOG); \
+		$(CONDAPYTHON) -u python/pca.py $(LOG); \
 	else \
 		echo "Mixing arrays found!" $(LOG); \
 	fi
@@ -64,7 +60,7 @@ get_assets: $(DATADIR)
 
 $(DATADIR): $(LOGFILE) $(PYTHON)
 	@if [ ! -d "$(DATADIR)" ]; then \
-		$(CONDAPYTHON) -u python/initialize.py $(LOG); \
+		$(CONDAPYTHON) -u python/utils.py $(LOG); \
 	else \
 		echo "GFEM programs and data files found!" $(LOG); \
 	fi

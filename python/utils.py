@@ -643,3 +643,24 @@ def check_arguments(args, script):
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     return valid_args
+
+#######################################################
+## .2.               Initialize                  !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# main !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def main():
+    """
+    """
+    download_and_unzip(("https://files.osf.io/v1/resources/k23tb/providers/osfstorage/"
+                       "649149796513ba03733a3536/?zip="), "all", "assets")
+    compile_magemin()
+    compile_perplex()
+    print_session_info("python/conda-environment.yaml")
+    print("Initializing done!")
+
+    return None
+
+if __name__ == "__main__":
+    main()

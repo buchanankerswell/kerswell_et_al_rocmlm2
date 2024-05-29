@@ -11,6 +11,7 @@ import warnings
 import subprocess
 from scipy.interpolate import interp1d
 from sklearn.metrics import r2_score, mean_squared_error
+warnings.simplefilter("ignore", category=RuntimeWarning)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # dataframes and arrays !!
@@ -22,7 +23,7 @@ import pandas as pd
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GFEM models !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from gfem import GFEMModel
+from gfem import GFEMModel, get_geotherm, get_1d_reference_models
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
@@ -35,153 +36,16 @@ import matplotlib.lines as mlines
 import matplotlib.ticker as ticker
 import matplotlib.patches as mpatches
 from PIL import Image, ImageDraw, ImageFont
-from matplotlib.colors import ListedColormap, Normalize, SymLogNorm
 from matplotlib.colorbar import ColorbarBase
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.colors import ListedColormap, Normalize, SymLogNorm
 
-warnings.simplefilter("ignore", category=RuntimeWarning)
 #######################################################
 ## .1.              Visualizations               !!! ##
 #######################################################
-
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+ .1.1            Helper Functions              !!! ++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# get geotherm !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_geotherm(results, target, threshold, Qs=55e-3, Ts=273, A1=1e-6, A2=2.2e-8, k1=2.3,
-                 k2=3.0, crust_thickness=35, litho_thickness=150, mantle_potential=1573):
-    """
-    """
-    # Get P results
-    P = results["P"]
-
-    # Get PT and target values and transform units
-    df = pd.DataFrame({"P": results["P"], "T": results["T"],
-                       target: results[target]}).sort_values(by="P")
-
-    # Geotherm Parameters
-    Z_min = np.min(P) * 35e3
-    Z_max = np.max(P) * 35e3
-    z = np.linspace(Z_min, Z_max, len(P))
-    T_geotherm = np.zeros(len(P))
-
-    # Layer1 (crust)
-    # A1 Radiogenic heat production (W/m^3)
-    # k1 Thermal conductivity (W/mK)
-    D1 = crust_thickness * 1e3 # Thickness (m)
-
-    # Layer2 (lithospheric mantle)
-    # A2 Radiogenic heat production (W/m^3)
-    # k2 Thermal conductivity (W/mK)
-    D2 = litho_thickness * 1e3
-
-    # Calculate heat flow at the top of each layer
-    Qt2 = Qs - (A1 * D1)
-    Qt1 = Qs
-
-    # Calculate T at the top of each layer
-    Tt1 = Ts
-    Tt2 = Tt1 + (Qt1 * D1 / k1) - (A1 / 2 / k1 * D1**2)
-    Tt3 = Tt2 + (Qt2 * D2 / k2) - (A2 / 2 / k2 * D2**2)
-
-    # Calculate T within each layer
-    for j in range(len(P)):
-        potential_temp = mantle_potential + 0.5e-3 * z[j]
-        if z[j] <= D1:
-            T_geotherm[j] = Tt1 + (Qt1 / k1 * z[j]) - (A1 / (2 * k1) * z[j]**2)
-            if T_geotherm[j] >= potential_temp:
-                T_geotherm[j] = potential_temp
-        elif D1 < z[j] <= D2 + D1:
-            T_geotherm[j] = Tt2 + (Qt2 / k2 * (z[j] - D1)) - (A2 / (2 * k2) *
-                                                              (z[j] - D1)**2)
-            if T_geotherm[j] >= potential_temp:
-                T_geotherm[j] = potential_temp
-        elif z[j] > D2 + D1:
-            T_geotherm[j] = Tt3 + 0.5e-3 * (z[j] - D1 - D2)
-            if T_geotherm[j] >= potential_temp:
-                T_geotherm[j] = potential_temp
-
-    P_geotherm = np.round(z / 35e3, 1)
-    T_geotherm = np.round(T_geotherm, 2)
-
-    df["geotherm_P"] = P_geotherm
-    df["geotherm_T"] = T_geotherm
-
-    # Subset df along geotherm
-    df = df[abs(df["T"] - df["geotherm_T"]) < threshold]
-
-    # Extract the three vectors
-    P_values = df["P"].values
-    T_values = df["T"].values
-    targets = df[target].values
-
-    return P_values, T_values, targets
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# get 1d reference models !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_1d_reference_models():
-    """
-    """
-    # Data asset dir
-    data_dir = "assets/data"
-
-    # Check for data dir
-    if not os.path.exists(data_dir):
-        raise Exception(f"Data not found at {data_dir}!")
-
-    # Reference model paths
-    ref_paths = {"prem": f"{data_dir}/PREM_1s.csv", "stw105": f"{data_dir}/STW105.csv"}
-
-    # Define column headers
-    prem_cols = ["radius", "depth", "rho", "Vp", "Vph", "Vs", "Vsh", "eta", "Q_mu",
-                 "Q_kappa"]
-    stw105_cols = ["radius", "rho", "Vp", "Vs", "unk1", "unk2", "Vph", "Vsh", "eta"]
-
-    ref_cols = {"prem": prem_cols, "stw105": stw105_cols}
-    columns_to_keep = ["depth", "P", "rho", "Vp", "Vs"]
-
-    # Initialize reference models
-    ref_models = {}
-
-    # Load reference models
-    for name, path in ref_paths.items():
-        if not os.path.exists(path):
-            raise Exception(f"Refernce model {name} not found at {path}!")
-
-        # Read reference model
-        model = pd.read_csv(path, header=None, names=ref_cols[name])
-
-        # Transform units
-        if name == "stw105":
-            model["depth"] = (model["radius"].max() - model["radius"]) / 1e3
-            model["rho"] = model["rho"] / 1e3
-            model["Vp"] = model["Vp"] / 1e3
-            model["Vs"] = model["Vs"] / 1e3
-            model.sort_values(by=["depth"], inplace=True)
-
-        def calculate_pressure(row):
-            z = row["depth"]
-            depths = model[model["depth"] <= z]["depth"] * 1e3
-            rhos = model[model["depth"] <= z]["rho"] * 1e3
-            rho_integral = np.trapz(rhos, x=depths)
-            pressure = 9.81 * rho_integral / 1e9
-            return pressure
-
-        model["P"] = model.apply(calculate_pressure, axis=1)
-
-        # Clean up df
-        model = model[columns_to_keep]
-        model = model.round(3)
-
-        # Save model
-        ref_models[name] = model
-
-    return ref_models
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # combine plots horizontally !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -996,7 +860,6 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+ .1.2          Plotting Functions              !!! ++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # visualize gfem pt range !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1400,15 +1263,6 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     print("Model efficiency GFEM:")
     print(summary_stats_gfem["model_efficiency"])
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-#    print("RMSE rho:")
-#    print(summary_stats["rmse_val_mean_rho"])
-#    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-#    print("RMSE Vp:")
-#    print(summary_stats["rmse_val_mean_Vp"])
-#    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-#    print("RMSE Vs:")
-#    print(summary_stats["rmse_val_mean_Vs"])
-#    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     # Set plot style and settings
     plt.rcParams["legend.facecolor"] = "0.9"

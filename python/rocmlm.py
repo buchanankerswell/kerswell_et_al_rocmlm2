@@ -11,6 +11,8 @@ import joblib
 import traceback
 import itertools
 from tqdm import tqdm
+from gfem import get_sampleids, build_gfem_models
+from utils import parse_arguments, check_arguments
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # parallel computing !!
@@ -26,11 +28,6 @@ from scipy.ndimage import gaussian_filter
 from scipy.interpolate import RegularGridInterpolator
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# plotting !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-import matplotlib.pyplot as plt
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 from sklearn.tree import DecisionTreeRegressor
@@ -41,6 +38,12 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_squared_error, r2_score
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+import matplotlib.pyplot as plt
+from visualize import (visualize_rocmlm_performance, visualize_rocmlm, compose_rocmlm_plots)
 
 #######################################################
 ## .1.             Helper Functions              !!! ##
@@ -1364,3 +1367,52 @@ class RocMLM:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
             return None
+
+#######################################################
+## .3.              Train RocMLMs                !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# main !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def main():
+    """
+    """
+    # Parse and check arguments
+    valid_args = check_arguments(parse_arguments(), "rocmlm.py")
+    locals().update(valid_args)
+
+    # Sample sources
+    sources = {"benchmark": "assets/data/benchmark-samples-pca.csv",
+               "middle": "assets/data/synthetic-samples-mixing-middle.csv",
+               "random": "assets/data/synthetic-samples-mixing-random.csv"}
+
+    # Build GFEM models
+    gfems = {}
+    for name, source in sources.items():
+        sids = get_sampleids(source, "all")
+        gfems[name] = build_gfem_models(source, sids)
+
+    # Combine synthetic models for RocMLM training
+    training_data = {"benchmark": gfems["benchmark"],
+                     "synthetic": gfems["middle"] + gfems["random"]}
+
+    # Train RocMLMs
+    rocmlms = {}
+    for name, models in training_data.items():
+        rocmlms[name] = train_rocmlms(models)
+        evaluate_lut_efficiency(name, models)
+
+    # Visualize RocMLMs
+    visualize_rocmlm_performance()
+
+    for name, models in rocmlms.items():
+        for model in models:
+            visualize_rocmlm(model)
+            compose_rocmlm_plots(model)
+
+    print("RocMLMs trained and visualized!")
+
+    return None
+
+if __name__ == "__main__":
+    main()

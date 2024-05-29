@@ -7,8 +7,9 @@
 import os
 import math
 import warnings
-from scipy import stats
 import traceback
+from scipy import stats
+from utils import parse_arguments, check_arguments
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # dataframes and arrays !!
@@ -24,8 +25,13 @@ from sklearn.impute import KNNImputer
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualization !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+from visualize import visualize_mixing_array, visualize_harker_diagrams
+
 #######################################################
-## .0.             Helper Functions              !!! ##
+## .1.             Helper Functions              !!! ##
 #######################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # convert to nio !!
@@ -259,7 +265,7 @@ def samples_to_csv(sampleids, source, filename):
     return None
 
 #######################################################
-## .0.            MixingArray Class              !!! ##
+## .2.            MixingArray Class              !!! ##
 #######################################################
 class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1029,3 +1035,47 @@ class MixingArray:
             self.error = e
 
             return None
+
+#######################################################
+## .3.            Create Mixing Array            !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# main !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def main():
+    """
+    """
+    # Parse arguments and check
+    args = parse_arguments()
+    valid_args = check_arguments(args, "pca.py")
+
+    # Load valid arguments
+    locals().update(valid_args)
+
+    # Create mixing array
+    mixing_array = MixingArray()
+    mixing_array.create_mixing_array()
+    print("Mixing array created!")
+
+    # Csv file for synthetic benchmark samples
+    filename = "assets/data/synthetic-samples-benchmarks.csv"
+
+    # Save synthetic benchmark models
+    sources = ["assets/data/synthetic-samples-mixing-tops.csv",
+               "assets/data/synthetic-samples-mixing-middle.csv",
+               "assets/data/synthetic-samples-mixing-bottoms.csv"]
+    sampleids = [["st000", "st128"], ["sm000", "sm128"], ["sb000", "sb128"]]
+
+    for source, sids in zip(sources, sampleids):
+        samples_to_csv(sids, source, filename)
+
+    # Visualize mixing array
+    visualize_harker_diagrams(mixing_array)
+    visualize_mixing_array(mixing_array)
+
+    print("Mixing array visualized!")
+
+    return None
+
+if __name__ == "__main__":
+    main()
