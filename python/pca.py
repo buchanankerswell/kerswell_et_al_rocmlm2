@@ -25,11 +25,6 @@ from sklearn.impute import KNNImputer
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# visualization !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from visualize import visualize_mixing_array, visualize_harker_diagrams
-
 #######################################################
 ## .1.             Helper Functions              !!! ##
 #######################################################
@@ -399,14 +394,15 @@ class MixingArray:
         data = data.loc[condition]
 
         # Drop unknown rocks
+#        data = data[~data["ROCKNAME"].isin(xenolith + pyroxenite + metamorphic + other)]
         data = data[~data["ROCKNAME"].isin(xenolith + other)]
 
         # Add new rock type column
         conditions = [data["ROCKNAME"].isin(peridotite),
-                      data["ROCKNAME"].isin(pyroxenite),
                       data["ROCKNAME"].isin(serpentinite),
+                      data["ROCKNAME"].isin(pyroxenite),
                       data["ROCKNAME"].isin(metamorphic)]
-        values = ["peridotite", "pyroxenite", "serpentinite", "metamorphic"]
+        values = ["peridotite", "serpentinite", "pyroxenite", "metamorphic"]
         data["ROCKTYPE"] = np.select(conditions, values, default="other")
 
         # Function to remove outliers based on IQR
@@ -419,8 +415,8 @@ class MixingArray:
             return group[~outlier_rows]
 
         # Remove outliers for each rock type
-        data = data.groupby("ROCKNAME").apply(remove_outliers, 1.5)
-        data.reset_index(drop=True, inplace=True)
+        data = (data.groupby("ROCKNAME", group_keys=False)[data.columns.tolist()]
+                .apply(remove_outliers, 1.5))
 
         # Convert all Cr to CR2O3
         data = convert_to_cr2o3(data, digits)
@@ -587,15 +583,21 @@ class MixingArray:
 
         print("Imputing missing oxides ...")
 
-        # Initialize KNN imputer
-        imputer = KNNImputer(weights="distance")
+        # Group by rockname and apply KNN imputer
+        imputed_dataframes = []
+        for rockname, subset in data.groupby("ROCKNAME"):
+            subset = subset.reset_index(drop=True)
 
-        # Impute missing values for each oxide
-        for col in oxides:
-            column_to_impute = data[[col]]
-            imputer.fit(column_to_impute)
-            imputed_values = imputer.transform(column_to_impute).round(digits)
-            data[col] = imputed_values
+            for col in oxides:
+                column_to_impute = subset[[col]]
+                imputer = KNNImputer(weights="distance")
+                imputed_values = imputer.fit_transform(column_to_impute).round(digits)
+                subset[col] = imputed_values
+
+            imputed_dataframes.append(subset)
+
+        # Recombine imputed subsets
+        imputed_data = pd.concat(imputed_dataframes, ignore_index=True)
 
         # Normalize compositions
         normalized_values = data.apply(self._normalize_sample_composition, axis=1)
@@ -722,10 +724,10 @@ class MixingArray:
                 median_x = np.median(data.loc[condition, "PC1"])
 
                 # Define adjustment factor
-                median_adjustment_q1x = 1.0
-                median_adjustment_q1y = 0.8
-                median_adjustment_q2x = -0.6
-                median_adjustment_q2y = 1.0
+                median_adjustment_q1x = 0
+                median_adjustment_q1y = 0
+                median_adjustment_q2x = 0
+                median_adjustment_q2y = 0
                 median_adjustment_q3x = 0
                 median_adjustment_q3y = 0
                 median_adjustment_q4x = 0
@@ -1045,6 +1047,8 @@ class MixingArray:
 def main():
     """
     """
+    from visualize import visualize_mixing_array, visualize_harker_diagrams
+
     # Parse arguments and check
     args = parse_arguments()
     valid_args = check_arguments(args, "pca.py")
@@ -1064,7 +1068,7 @@ def main():
     sources = ["assets/data/synthetic-samples-mixing-tops.csv",
                "assets/data/synthetic-samples-mixing-middle.csv",
                "assets/data/synthetic-samples-mixing-bottoms.csv"]
-    sampleids = [["st000", "st128"], ["sm000", "sm128"], ["sb000", "sb128"]]
+    sampleids = [["st000", "st129"], ["sm000", "sm129"], ["sb000", "sb129"]]
 
     for source, sids in zip(sources, sampleids):
         samples_to_csv(sids, source, filename)

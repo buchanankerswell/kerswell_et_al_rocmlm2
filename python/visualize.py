@@ -1594,7 +1594,7 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
     # Change endmember sampleids
     if sample_id == "sm000":
         sample_id = "DSUM"
-    elif sample_id == "sm128":
+    elif sample_id == "sm129":
         sample_id = "PSUM"
 
     # Set plot style and settings
@@ -1795,7 +1795,7 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
         # Change endmember sampleids
         if sample_id == "sm000":
             sample_id = "DSUM"
-        elif sample_id == "sm128":
+        elif sample_id == "sm129":
             sample_id = "PSUM"
 
         for i, target in enumerate(targets):
@@ -2942,7 +2942,7 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
 
             # Calculate F melt
             ti_init = df_synth_bench.loc[
-                df_synth_bench["SAMPLEID"] == "sm128", "TIO2"].iloc[0]
+                df_synth_bench["SAMPLEID"] == "sm129", "TIO2"].iloc[0]
             df_bench["R_TIO2"] = round(df_bench["TIO2"] / ti_init, 3)
             df_bench["F_MELT_BATCH"] = round(
                 ((D_tio2 / df_bench["R_TIO2"]) - D_tio2) / (1 - D_tio2), 3)
@@ -2986,8 +2986,8 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
     colormap = plt.cm.get_cmap("tab10")
 
     # Legend order
-    legend_order = ["peridotite", "pyroxenite", "metamorphic", "serpentinite"]
-    legend_lab = ["perid", "pyrox", "meta", "serp"]
+    legend_order = ["peridotite", "serpentinite", "pyroxenite", "metamorphic"]
+    legend_lab = ["perid", "serp", "pyrx", "meta"]
 
     fname = f"{filename}-mixing-array"
 
@@ -2998,10 +2998,10 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
     ax.axvline(x=0, color="black", linestyle="-", linewidth=0.5)
 
     oxs = ["SIO2", "MGO", "FEO", "AL2O3", "TIO2", "LOI", "CAO", "NA2O"]
-    x_offset_text = [1, 1, 1, 1, 1, 1, 1, 1]
-    y_offset_text = [2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5]
+    x_offset_text = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    y_offset_text = [4.5, 4.5, 4.5, 4.5, 4.5, 4.5, 4.5, 4.5]
     text_fac, arrow_fac = 2.8, 1.3
-    x_offset_arrow, y_offset_arrow = 1, 2.5
+    x_offset_arrow, y_offset_arrow = 1.0, 4.5
 
     for oxide, x_off, y_off in zip(oxs, x_offset_text, y_offset_text):
         if oxide == "AL2O3":
@@ -3084,7 +3084,7 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
     sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
                     x="PC1", y="PC2", facecolor="white", edgecolor="black",
                     linewidth=2, s=150, legend=False, ax=ax2, zorder=6)
-    sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm128"],
+    sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
                     x="PC1", y="PC2", facecolor="white", edgecolor="black",
                     marker="D", linewidth=2, s=150, legend=False, ax=ax2,
                     zorder=6)
@@ -3097,8 +3097,8 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
                           edgecolor="black", linewidth=1.5, alpha=0.8),
                 fontsize=fontsize * 0.833, zorder=8)
     ax2.annotate("PSUM", xy=(
-        df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm128", "PC1"].iloc[0],
-        df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm128",
+        df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "PC1"].iloc[0],
+        df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129",
                            "PC2"].iloc[0]), xytext=(10, -25),
                  textcoords="offset points",
                 bbox=dict(boxstyle="round,pad=0.1", facecolor="white",
@@ -3147,10 +3147,10 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
     sns.scatterplot(data=data, x="PC1", y="D_FRAC", facecolor="0.6",
                     edgecolor="None", linewidth=2, s=8, legend=False, ax=ax2,
                     zorder=0)
-    sns.scatterplot(data=df_synth_middle, x="PC1", y="D_FRAC", hue=D_col,
+    sns.scatterplot(data=df_synth_middle, x="PC1", y=D_col, hue=D_col,
                     palette=pal, edgecolor="None", linewidth=2, s=31,
                     legend=False, ax=ax2, zorder=0)
-    sns.scatterplot(data=df_synth_random, x="PC1", y="D_FRAC", hue=D_col,
+    sns.scatterplot(data=df_synth_random, x="PC1", y=D_col, hue=D_col,
                     palette=pal, edgecolor="None", linewidth=2, s=21,
                     legend=False, ax=ax2, zorder=0)
     mrkr = ["s", "^", "P"]
@@ -3257,7 +3257,7 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
     axes = axes.flatten()
 
     # Legend order
-    legend_order = ["peridotite", "pyroxenite", "metamorphic", "serpentinite"]
+    legend_order = ["peridotite", "serpentinite", "pyroxenite", "metamorphic"]
 
     for k, y in enumerate(oxides):
         ax = axes[k]
@@ -3280,7 +3280,7 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
         sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
                         x="SIO2", y=y, facecolor="white", edgecolor="black",
                         linewidth=2, s=75, legend=False, ax=ax, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm128"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
                         x="SIO2", y=y, facecolor="white", edgecolor="black", marker="D",
                         linewidth=2, s=75, legend=False, ax=ax, zorder=6)
 
@@ -3295,9 +3295,9 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
                           linewidth=1.5, alpha=1),
                 fontsize=fontsize * 0.579, zorder=8)
             ax.annotate(
-                "PSUM", xy=(df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm128",
+                "PSUM", xy=(df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129",
                                                "SIO2"].iloc[0],
-                            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm128",
+                            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129",
                                                y].iloc[0]),
                 xytext=(10, 0), textcoords="offset points",
                 bbox=dict(boxstyle="round,pad=0.1", facecolor="white", edgecolor="black",

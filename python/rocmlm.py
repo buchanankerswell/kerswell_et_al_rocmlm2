@@ -11,6 +11,7 @@ import joblib
 import traceback
 import itertools
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 from gfem import get_sampleids, build_gfem_models
 from utils import parse_arguments, check_arguments
 
@@ -38,12 +39,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_squared_error, r2_score
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# visualize !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-import matplotlib.pyplot as plt
-from visualize import (visualize_rocmlm_performance, visualize_rocmlm, compose_rocmlm_plots)
 
 #######################################################
 ## .1.             Helper Functions              !!! ##
@@ -1377,6 +1372,9 @@ class RocMLM:
 def main():
     """
     """
+    from visualize import (visualize_rocmlm_performance, visualize_rocmlm,
+                           compose_rocmlm_plots)
+
     # Parse and check arguments
     valid_args = check_arguments(parse_arguments(), "rocmlm.py")
     locals().update(valid_args)

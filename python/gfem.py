@@ -33,12 +33,6 @@ from sklearn.impute import KNNImputer
 from scipy.interpolate import interp1d
 from sklearn.metrics import r2_score, mean_squared_error
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# visualization !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from visualize import (visualize_gfem_pt_range, visualize_gfem, visualize_gfem_diff,
-                       visualize_prem_comps, compose_dataset_plots)
-
 #######################################################
 ## .1.             Helper Functions              !!! ##
 #######################################################
@@ -2076,6 +2070,9 @@ class GFEMModel:
 def main():
     """
     """
+    from visualize import (visualize_gfem_pt_range, visualize_gfem, visualize_gfem_diff,
+                           visualize_prem_comps, compose_dataset_plots)
+
     # Parse and check arguments
     valid_args = check_arguments(parse_arguments(), "gfem.py")
     locals().update(valid_args)

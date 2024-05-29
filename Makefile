@@ -12,10 +12,10 @@ CONDAPYTHON = $$(conda run -n $(CONDAENVNAME) which python)
 DATADIR = assets/data
 # Python scripts
 PYTHON = \
-				 python/gfem.py \
 				 python/pca.py \
-				 python/rocmlm.py \
+				 python/gfem.py \
 				 python/utils.py \
+				 python/rocmlm.py \
 				 python/visualize.py \
 				 python/write-md-tables.py
 # Cleanup directories

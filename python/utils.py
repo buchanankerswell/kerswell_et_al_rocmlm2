@@ -14,9 +14,9 @@ import datetime
 import argparse
 import platform
 import subprocess
-import pkg_resources
 from git import Repo
 import urllib.request
+import importlib.metadata
 
 #######################################################
 ## .1.  General Helper Functions for Scripting   !!! ##
@@ -50,34 +50,27 @@ def print_session_info(condafile):
     """
     # Print session info
     print("Session info:")
-
     print(f"    Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     # Print Python version
     version_string = ".".join(map(str, sys.version_info))
-
     print(f"    Python Version: {version_string}")
 
     # Print package versions
     print("    Loaded packages:")
-
     conda_packages = get_conda_packages(condafile)
 
     for package in conda_packages:
         if isinstance(package, str) and package != "python":
             package_name = package.split("=")[0]
-
             try:
-                version = pkg_resources.get_distribution(package_name).version
-
-                print(f"        {package_name} Version: {version}")
-
-            except pkg_resources.DistributionNotFound:
+                version = importlib.metadata.version(package_name)
+                print(f"        {package_name} version: {version}")
+            except importlib.metadata.PackageNotFoundError:
                 print(f"        {package_name} not found ...")
 
     # Print operating system information
     os_info = platform.platform()
-
     print(f"    Operating System: {os_info}")
 
     return None
