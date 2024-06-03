@@ -20,9 +20,9 @@ def main():
 
         # Drop columns
         df = df.drop(columns=["REFERENCE", "FE2O3", "PC1", "PC2", "R_TIO2", "F_MELT_BATCH",
-                              "F_MELT_FRAC", "D_BATCH"])
+                              "F_MELT_FRAC", "XI_BATCH"])
         df_synth = df_synth.drop(columns=["FE2O3", "PC1", "PC2", "R_TIO2", "F_MELT_BATCH",
-                                          "F_MELT_FRAC", "D_BATCH"])
+                                          "F_MELT_FRAC", "XI_BATCH"])
 
         # Get synth samples
         df_synth = df_synth[df_synth["SAMPLEID"].isin(["sm000", "sm128"])]
@@ -33,13 +33,13 @@ def main():
         df_combined = pd.concat([df, df_synth], ignore_index=True).sort_values(by="SAMPLEID")
 
         # Subset columns
-        cols = ["SAMPLEID", "SIO2", "TIO2", "AL2O3", "FEO", "MGO", "CAO", "NA2O", "D_FRAC"]
+        cols = ["SAMPLEID", "SIO2", "TIO2", "AL2O3", "FEO", "MGO", "CAO", "NA2O", "XI_FRAC"]
         df_combined = df_combined[cols]
 
         # Rename columns
         col_headers = {"SAMPLEID": "Sample", "SIO2": "SiO$_2^{*}$", "TIO2": "TiO$_2^{*}$",
                        "AL2O3": "Al$_2$O$_3^{*}$", "FEO": "FeOT$^{*}$", "MGO": "MgO$^{*}$",
-                       "CAO": "CaO$^{*}$", "NA2O": "Na$_2$O$^{*}$", "D_FRAC": "$\\xi$"}
+                       "CAO": "CaO$^{*}$", "NA2O": "Na$_2$O$^{*}$", "XI_FRAC": "$\\xi$"}
 
         df_combined.rename(columns=col_headers, inplace=True)
         df_combined.sort_values(by="$\\xi$", inplace=True)

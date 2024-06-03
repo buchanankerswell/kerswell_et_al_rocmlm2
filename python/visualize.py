@@ -23,7 +23,7 @@ import pandas as pd
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GFEM models !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from gfem import GFEMModel, get_geotherm, get_1d_reference_models
+from gfem import GFEMModel
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
@@ -139,92 +139,37 @@ def compose_dataset_plots(gfem_models):
     """
     """
     # Parse and sort models
-    magemin_models = [m if m.program == "magemin" and m.dataset == "valid" else
-                      None for m in gfem_models]
-    magemin_models = sorted(magemin_models, key=lambda m: (m.sample_id if m else ""))
-
-    perplex_models = [m if m.program == "perplex" and m.dataset == "valid" else
-                      None for m in gfem_models]
-    perplex_models = sorted(perplex_models, key=lambda m: (m.sample_id if m else ""))
+    perplex_models = gfem_models
+    perplex_models = sorted(perplex_models, key=lambda m: (m.sid if m else ""))
 
     # Iterate through all models
-    for magemin_model, perplex_model in zip(magemin_models, perplex_models):
-        magemin = True if magemin_model is not None else False
+    for perplex_model in perplex_models:
         perplex = True if perplex_model is not None else False
 
-        if not magemin and not perplex:
+        if not perplex:
             continue
 
-        if magemin and perplex:
-            # Get model data
-            if magemin_model.sample_id == perplex_model.sample_id:
-                sample_id = magemin_model.sample_id
-            else:
-                raise ValueError("Model samples are not the same!")
-            if magemin_model.res == perplex_model.res:
-                res = magemin_model.res
-            else:
-                raise ValueError("Model resolutions are not the same!")
-            if magemin_model.dataset == perplex_model.dataset:
-                dataset = magemin_model.dataset
-            else:
-                raise ValueError("Model datasets are not the same!")
-            if magemin_model.targets == perplex_model.targets:
-                targets = magemin_model.targets
-            else:
-                raise ValueError("Model targets are not the same!")
-            if magemin_model.model_prefix == perplex_model.model_prefix:
-                model_prefix = magemin_model.model_prefix
-            else:
-                raise ValueError("Model prefix are not the same!")
-            if magemin_model.verbose == perplex_model.verbose:
-                verbose = magemin_model.verbose
-            else:
-                verbose = 1
-
-            program = "magemin + perplex"
-            fig_dir_mage = magemin_model.fig_dir
-            fig_dir_perp = perplex_model.fig_dir
-            fig_dir_diff = f"figs/gfem/diff_{sample_id}_{res}"
-
-            fig_dir = f"figs/gfem/{sample_id}_{res}"
-            os.makedirs(fig_dir, exist_ok=True)
-
-        elif magemin and not perplex:
-            # Get model data
-            program = "magemin"
-            sample_id = magemin_model.sample_id
-            res = magemin_model.res
-            dataset = magemin_model.dataset
-            targets = magemin_model.targets
-            fig_dir = magemin_model.fig_dir
-            model_prefix = magemin_model.model_prefix
-            verbose = magemin_model.verbose
-
-        elif perplex and not magemin:
-            # Get model data
-            program = "perplex"
-            sample_id = perplex_model.sample_id
-            res = perplex_model.res
-            dataset = perplex_model.dataset
-            targets = perplex_model.targets
-            fig_dir = perplex_model.fig_dir
-            model_prefix = perplex_model.model_prefix
-            verbose = perplex_model.verbose
+        # Get model data
+        sid = perplex_model.sid
+        res = perplex_model.res
+        targets = perplex_model.targets
+        fig_dir = perplex_model.fig_dir
+        model_prefix = perplex_model.model_prefix
+        verbose = perplex_model.verbose
 
         # Rename targets
         targets_rename = [target.replace("_", "-") for target in targets]
 
         if verbose >= 1:
-            print(f"Composing {model_prefix} [{program}] ...")
+            print(f"Composing GFEM model {model_prefix} ...")
 
         # Check for existing plots
         existing_figs = []
         for target in targets_rename:
-            fig_1 = f"{fig_dir}/image2-{sample_id}-{dataset}-{target}.png"
-            fig_2 = f"{fig_dir}/image3-{sample_id}-{dataset}-{target}.png"
-            fig_3 = f"{fig_dir}/image4-{sample_id}-{dataset}-{target}.png"
-            fig_4 = f"{fig_dir}/image9-{sample_id}-{dataset}.png"
+            fig_1 = f"{fig_dir}/image2-{sid}-{target}.png"
+            fig_2 = f"{fig_dir}/image3-{sid}-{target}.png"
+            fig_3 = f"{fig_dir}/image4-{sid}-{target}.png"
+            fig_4 = f"{fig_dir}/image9-{sid}.png"
 
             check = ((os.path.exists(fig_3) and os.path.exists(fig_4)) |
                      (os.path.exists(fig_1) and os.path.exists(fig_2)) |
@@ -237,12 +182,20 @@ def compose_dataset_plots(gfem_models):
         if existing_figs:
             return None
 
-        if magemin and perplex:
-            for target in targets_rename:
-                if target not in ["assemblage", "variance"]:
+        for target in targets_rename:
+            if target not in ["assemblage", "variance"]:
+                combine_plots_horizontally(
+                    f"{fig_dir}/perplex-{sid}-{target}.png",
+                    f"{fig_dir}/grad-perplex-{sid}-{target}.png",
+                    f"{fig_dir}/image2-{sid}-{target}.png",
+                    caption1="a)",
+                    caption2="b)"
+                )
+
+                if target in ["rho", "Vp", "Vs"]:
                     combine_plots_horizontally(
-                        f"{fig_dir_mage}/magemin-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir_perp}/perplex-{sample_id}-{dataset}-{target}.png",
+                        f"{fig_dir}/perplex-{sid}-{target}.png",
+                        f"{fig_dir}/grad-perplex-{sid}-{target}.png",
                         f"{fig_dir}/temp1.png",
                         caption1="a)",
                         caption2="b)"
@@ -250,142 +203,57 @@ def compose_dataset_plots(gfem_models):
 
                     combine_plots_horizontally(
                         f"{fig_dir}/temp1.png",
-                        f"{fig_dir_diff}/diff-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/image3-{sample_id}-{dataset}-{target}.png",
+                        f"{fig_dir}/prem-{sid}-{target}.png",
+                        f"{fig_dir}/image3-{sid}-{target}.png",
                         caption1="",
                         caption2="c)"
                     )
 
-                if target in ["rho", "Vp", "Vs"]:
-                    combine_plots_horizontally(
-                        f"{fig_dir_mage}/magemin-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir_perp}/perplex-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/temp1.png",
-                        caption1="a)",
-                        caption2="b)"
-                    )
+        if all(item in targets_rename for item in ["rho", "Vp", "Vs"]):
+            captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
+            targets = ["rho", "Vp", "Vs"]
 
-                    combine_plots_horizontally(
-                        f"{fig_dir_diff}/diff-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir_diff}/prem-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/temp2.png",
-                        caption1="c)",
-                        caption2="d)"
-                    )
-
-                    combine_plots_vertically(
-                        f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/temp2.png",
-                        f"{fig_dir}/image4-{sample_id}-{dataset}-{target}.png",
-                        caption1="",
-                        caption2=""
-                    )
-
-                for dir in [fig_dir_mage, fig_dir_perp, fig_dir_diff]:
-                    shutil.rmtree(dir)
-
-        elif magemin and not perplex:
-            for target in targets_rename:
-                if target not in ["assemblage", "variance"]:
-                    combine_plots_horizontally(
-                        f"{fig_dir}/magemin-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/grad-magemin-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/image2-{sample_id}-{dataset}-{target}.png",
-                        caption1="a)",
-                        caption2="b)"
-                    )
-
-                    if target in ["rho", "Vp", "Vs"]:
-                        combine_plots_horizontally(
-                            f"{fig_dir}/magemin-{sample_id}-{dataset}-{target}.png",
-                            f"{fig_dir}/grad-magemin-{sample_id}-{dataset}-{target}.png",
-                            f"{fig_dir}/temp1.png",
-                            caption1="a)",
-                            caption2="b)"
-                        )
-
-                        combine_plots_horizontally(
-                            f"{fig_dir}/temp1.png",
-                            f"{fig_dir}/prem-{sample_id}-{dataset}-{target}.png",
-                            f"{fig_dir}/image3-{sample_id}-{dataset}-{target}.png",
-                            caption1="",
-                            caption2="c)"
-                        )
-
-        elif perplex and not magemin:
-            for target in targets_rename:
-                if target not in ["assemblage", "variance"]:
-                    combine_plots_horizontally(
-                        f"{fig_dir}/perplex-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/grad-perplex-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/image2-{sample_id}-{dataset}-{target}.png",
-                        caption1="a)",
-                        caption2="b)"
-                    )
-
-                    if target in ["rho", "Vp", "Vs"]:
-                        combine_plots_horizontally(
-                            f"{fig_dir}/perplex-{sample_id}-{dataset}-{target}.png",
-                            f"{fig_dir}/grad-perplex-{sample_id}-{dataset}-{target}.png",
-                            f"{fig_dir}/temp1.png",
-                            caption1="a)",
-                            caption2="b)"
-                        )
-
-                        combine_plots_horizontally(
-                            f"{fig_dir}/temp1.png",
-                            f"{fig_dir}/prem-{sample_id}-{dataset}-{target}.png",
-                            f"{fig_dir}/image3-{sample_id}-{dataset}-{target}.png",
-                            caption1="",
-                            caption2="c)"
-                        )
-
-            if all(item in targets_rename for item in ["rho", "Vp", "Vs"]):
-                captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-                targets = ["rho", "Vp", "Vs"]
-
-                for i, target in enumerate(targets):
-                    combine_plots_horizontally(
-                        f"{fig_dir}/perplex-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/grad-perplex-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/temp1.png",
-                        caption1=captions[i][0],
-                        caption2=captions[i][1]
-                    )
-
-                    combine_plots_horizontally(
-                        f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/prem-{sample_id}-{dataset}-{target}.png",
-                        f"{fig_dir}/temp-{target}.png",
-                        caption1="",
-                        caption2=captions[i][2]
-                    )
-
-                combine_plots_vertically(
-                    f"{fig_dir}/temp-rho.png",
-                    f"{fig_dir}/temp-Vp.png",
+            for i, target in enumerate(targets):
+                combine_plots_horizontally(
+                    f"{fig_dir}/perplex-{sid}-{target}.png",
+                    f"{fig_dir}/grad-perplex-{sid}-{target}.png",
                     f"{fig_dir}/temp1.png",
-                    caption1="",
-                    caption2=""
+                    caption1=captions[i][0],
+                    caption2=captions[i][1]
                 )
 
-                combine_plots_vertically(
+                combine_plots_horizontally(
                     f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/temp-Vs.png",
-                    f"{fig_dir}/image9-{sample_id}-{dataset}.png",
+                    f"{fig_dir}/prem-{sid}-{target}.png",
+                    f"{fig_dir}/temp-{target}.png",
                     caption1="",
-                    caption2=""
+                    caption2=captions[i][2]
                 )
+
+            combine_plots_vertically(
+                f"{fig_dir}/temp-rho.png",
+                f"{fig_dir}/temp-Vp.png",
+                f"{fig_dir}/temp1.png",
+                caption1="",
+                caption2=""
+            )
+
+            combine_plots_vertically(
+                f"{fig_dir}/temp1.png",
+                f"{fig_dir}/temp-Vs.png",
+                f"{fig_dir}/image9-{sid}.png",
+                caption1="",
+                caption2=""
+            )
 
         # Clean up directory
         tmp_files = glob.glob(f"{fig_dir}/temp*.png")
         prem_files = glob.glob(f"{fig_dir}/prem*.png")
         grad_files = glob.glob(f"{fig_dir}/grad*.png")
         diff_files = glob.glob(f"{fig_dir}/diff*.png")
-        mgm_files = glob.glob(f"{fig_dir}/mage*.png")
         ppx_files = glob.glob(f"{fig_dir}/perp*.png")
 
-        for file in tmp_files + prem_files + grad_files + mgm_files + ppx_files:
+        for file in tmp_files + prem_files + grad_files + ppx_files:
             os.remove(file)
 
     return None
@@ -397,94 +265,39 @@ def create_dataset_movies(gfem_models):
     """
     """
     # Parse and sort models
-    magemin_models = [m if m.program == "magemin" and m.dataset == "valid" else
-                      None for m in gfem_models]
-    magemin_models = sorted(magemin_models, key=lambda m: (m.sample_id if m else ""))
-
-    perplex_models = [m if m.program == "perplex" and m.dataset == "valid" else
-                      None for m in gfem_models]
-    perplex_models = sorted(perplex_models, key=lambda m: (m.sample_id if m else ""))
+    perplex_models = gfem_models
+    perplex_models = sorted(perplex_models, key=lambda m: (m.sid if m else ""))
 
     # Iterate through all models
-    for magemin_model, perplex_model in zip(magemin_models, perplex_models):
-        magemin = True if magemin_model is not None else False
+    for perplex_model in perplex_models:
         perplex = True if perplex_model is not None else False
 
-        if not magemin and not perplex:
+        if not perplex:
             continue
 
-        if magemin and perplex:
-            # Get model data
-            if magemin_model.sample_id == perplex_model.sample_id:
-                sample_id = magemin_model.sample_id
-            else:
-                raise ValueError("Model samples are not the same!")
-            if magemin_model.res == perplex_model.res:
-                res = magemin_model.res
-            else:
-                raise ValueError("Model resolutions are not the same!")
-            if magemin_model.dataset == perplex_model.dataset:
-                dataset = magemin_model.dataset
-            else:
-                raise ValueError("Model datasets are not the same!")
-            if magemin_model.targets == perplex_model.targets:
-                targets = magemin_model.targets
-            else:
-                raise ValueError("Model targets are not the same!")
-            if magemin_model.model_prefix == perplex_model.model_prefix:
-                model_prefix = magemin_model.model_prefix
-            else:
-                raise ValueError("Model prefix are not the same!")
-            if magemin_model.verbose == perplex_model.verbose:
-                verbose = magemin_model.verbose
-            else:
-                verbose = 1
-
-            program = "magemin + perplex"
-            fig_dir_mage = magemin_model.fig_dir
-            fig_dir_perp = perplex_model.fig_dir
-            fig_dir_diff = f"figs/gfem/diff_{sample_id}_{res}"
-
-            fig_dir = f"figs/gfem/{sample_id}_{res}"
-            os.makedirs(fig_dir, exist_ok=True)
-
-        elif magemin and not perplex:
-            # Get model data
-            program = "magemin"
-            sample_id = magemin_model.sample_id
-            res = magemin_model.res
-            dataset = magemin_model.dataset
-            targets = magemin_model.targets
-            fig_dir = magemin_model.fig_dir
-            model_prefix = magemin_model.model_prefix
-            verbose = magemin_model.verbose
-
-        elif perplex and not magemin:
-            # Get model data
-            program = "perplex"
-            sample_id = perplex_model.sample_id
-            res = perplex_model.res
-            dataset = perplex_model.dataset
-            targets = perplex_model.targets
-            fig_dir = perplex_model.fig_dir
-            model_prefix = perplex_model.model_prefix
-            verbose = perplex_model.verbose
+        # Get model data
+        sid = perplex_model.sid
+        res = perplex_model.res
+        targets = perplex_model.targets
+        fig_dir = perplex_model.fig_dir
+        model_prefix = perplex_model.model_prefix
+        verbose = perplex_model.verbose
 
         # Rename targets
         targets_rename = [target.replace("_", "-") for target in targets]
 
         # Check for existing movies
-        if sample_id not in ["PUM", "DMM", "PYR"]:
-            if "sb" in sample_id:
+        if sid not in ["PUM", "DMM", "PYR"]:
+            if "sb" in sid:
                 pattern = "sb???"
                 prefix = "sb"
-            if "sm" in sample_id:
+            if "sm" in sid:
                 pattern = "sm???"
                 prefix = "sm"
-            if "st" in sample_id:
+            if "st" in sid:
                 pattern = "st???"
                 prefix = "st"
-            if "sr" in sample_id:
+            if "sr" in sid:
                 pattern = "sr???"
                 prefix = "sr"
 
@@ -504,23 +317,17 @@ def create_dataset_movies(gfem_models):
                 return None
 
             else:
-                print(f"Creating movie for {prefix} samples [{program}] ...")
+                print(f"Creating movie for {prefix} samples ...")
 
                 if not os.path.exists("figs/movies"):
                     os.makedirs("figs/movies", exist_ok=True)
 
                 for target in targets_rename:
-                    if perplex and magemin:
-                        ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
-                                  f"'figs/gfem/{pattern}_{res}/image2-{pattern}-{dataset}-"
-                                  f"{target}.png' -vf 'scale=3915:1432' -c:v h264 -pix_fmt "
-                                  f"yuv420p 'figs/movies/image2-{prefix}-{target}.mp4'")
-                    else:
-                        ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
-                                  f"'figs/gfem/{program[:4]}_{pattern}_{res}/image2-"
-                                  f"{pattern}-{dataset}-{target}.png' -vf 'scale=3915:1432' "
-                                  f"-c:v h264 -pix_fmt yuv420p 'figs/movies/image2-{prefix}-"
-                                  f"{target}.mp4'")
+                    ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
+                              f"'figs/gfem/{pattern}_{res}/image2-"
+                              f"{pattern}-{target}.png' -vf 'scale=3915:1432' "
+                              f"-c:v h264 -pix_fmt yuv420p 'figs/movies/image2-{prefix}-"
+                              f"{target}.mp4'")
 
                     try:
                         subprocess.run(ffmpeg, stdout=subprocess.DEVNULL,
@@ -531,23 +338,16 @@ def create_dataset_movies(gfem_models):
 
                 if all(item in targets_rename for item in ["rho", "Vp", "Vs"]):
                     for target in ["rho", "Vp", "Vs"]:
-                        if perplex and magemin:
-                            ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
-                                      f"'figs/gfem/{pattern}_{res}/image3-{pattern}-"
-                                      f"{dataset}-{target}.png' -vf 'scale=5832:1432' -c:v "
-                                      f"h264 -pix_fmt yuv420p 'figs/movies/image3-{prefix}-"
-                                      f"{target}.mp4'")
-                        else:
-                            ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
-                                      f"'figs/gfem/{program[:4]}_{pattern}_{res}/image3-"
-                                      f"{pattern}-{dataset}-{target}.png' -vf 'scale=5832:"
-                                      f"1432' -c:v h264 -pix_fmt yuv420p 'figs/movies/"
-                                      f"image3-{prefix}-{target}.mp4'")
-                            ffmpeg2 = (f"ffmpeg -i 'figs/movies/image3-"
-                                       f"{prefix}-{target}.mp4' -filter_complex "
-                                       f"'[0:v]reverse,fifo[r];[0:v][r] concat=n=2:v=1 [v]' "
-                                       f"-map '[v]' 'figs/movies/image3-{prefix}-{target}-"
-                                       f"bounce.mp4'")
+                        ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
+                                  f"'figs/gfem/{pattern}_{res}/image3-"
+                                  f"{pattern}-{target}.png' -vf 'scale=5832:"
+                                  f"1432' -c:v h264 -pix_fmt yuv420p 'figs/movies/"
+                                  f"image3-{prefix}-{target}.mp4'")
+                        ffmpeg2 = (f"ffmpeg -i 'figs/movies/image3-"
+                                   f"{prefix}-{target}.mp4' -filter_complex "
+                                   f"'[0:v]reverse,fifo[r];[0:v][r] concat=n=2:v=1 [v]' "
+                                   f"-map '[v]' 'figs/movies/image3-{prefix}-{target}-"
+                                   f"bounce.mp4'")
 
                         try:
                             subprocess.run(ffmpeg, stdout=subprocess.DEVNULL,
@@ -558,20 +358,14 @@ def create_dataset_movies(gfem_models):
                         except subprocess.CalledProcessError as e:
                             print(f"Error running FFmpeg command: {e}")
 
-                    if perplex and magemin:
-                        ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
-                                  f"'figs/gfem/{pattern}_{res}/image9-{pattern}-{dataset}."
-                                  f"png' -vf 'scale=5842:4296' -c:v h264 -pix_fmt yuv420p "
-                                  f"'figs/movies/image9-{prefix}.mp4'")
-                    else:
-                        ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
-                                  f"'figs/gfem/{program[:4]}_{pattern}_{res}/image9-"
-                                  f"{pattern}-{dataset}.png' -vf 'scale=5842:4296' -c:v "
-                                  f"h264 -pix_fmt yuv420p 'figs/movies/image9-{prefix}.mp4'")
-                        ffmpeg2 = (f"ffmpeg -i 'figs/movies/image9-{prefix}.mp4' -"
-                                   f"filter_complex '[0:v]reverse,fifo[r];[0:v][r] "
-                                   f"concat=n=2:v=1 [v]' -map '[v]' 'figs/movies/image9-"
-                                   f"{prefix}-bounce.mp4'")
+                    ffmpeg = (f"ffmpeg -framerate 15 -pattern_type glob -i "
+                              f"'figs/gfem/{pattern}_{res}/image9-"
+                              f"{pattern}.png' -vf 'scale=5842:4296' -c:v "
+                              f"h264 -pix_fmt yuv420p 'figs/movies/image9-{prefix}.mp4'")
+                    ffmpeg2 = (f"ffmpeg -i 'figs/movies/image9-{prefix}.mp4' -"
+                               f"filter_complex '[0:v]reverse,fifo[r];[0:v][r] "
+                               f"concat=n=2:v=1 [v]' -map '[v]' 'figs/movies/image9-"
+                               f"{prefix}-bounce.mp4'")
 
                     try:
                         subprocess.run(ffmpeg, stdout=subprocess.DEVNULL,
@@ -591,10 +385,9 @@ def compose_rocmlm_plots(rocmlm, skip=1):
     """
     """
     # Get ml model attributes
-    program = rocmlm.program
     model_prefix = rocmlm.model_prefix
     ml_model_label = rocmlm.ml_model_label
-    sample_ids = rocmlm.sample_ids
+    sids = rocmlm.sids
     res = rocmlm.res
     targets = rocmlm.targets
     fig_dir = rocmlm.fig_dir
@@ -605,7 +398,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
     targets_rename = [target.replace("_", "-") for target in targets]
 
     # Don't skip benchmark samples
-    if any(sample in sample_ids for sample in ["PUM", "DMM", "PYR"]):
+    if any(sample in sids for sample in ["PUM", "DMM", "PYR"]):
         skip = 1
     else:
         # Need to skip double for synthetic samples bc X_res training starts at 2 ...
@@ -614,14 +407,14 @@ def compose_rocmlm_plots(rocmlm, skip=1):
     # Check for existing plots
     existing_figs = []
     for target in targets_rename:
-        for sample_id in rocmlm.sample_ids[::skip]:
-            fig_1 = f"{fig_dir}/prem-{sample_id}-{ml_model_label}-{target}.png"
-            fig_2 = f"{fig_dir}/surf-{sample_id}-{ml_model_label}-{target}.png"
-            fig_3 = f"{fig_dir}/surf9-{sample_id}-{ml_model_label}.png"
-            fig_4 = f"{fig_dir}/image-{sample_id}-{ml_model_label}-{target}.png"
-            fig_5 = f"{fig_dir}/image9-{sample_id}-{ml_model_label}-profile.png"
-            fig_6 = f"{fig_dir}/image9-{sample_id}-{ml_model_label}-diff.png"
-            fig_7 = f"{fig_dir}/image12-{sample_id}-{ml_model_label}.png"
+        for sid in rocmlm.sids[::skip]:
+            fig_1 = f"{fig_dir}/prem-{sid}-{ml_model_label}-{target}.png"
+            fig_2 = f"{fig_dir}/surf-{sid}-{ml_model_label}-{target}.png"
+            fig_3 = f"{fig_dir}/surf9-{sid}-{ml_model_label}.png"
+            fig_4 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}.png"
+            fig_5 = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
+            fig_6 = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
+            fig_7 = f"{fig_dir}/image12-{sid}-{ml_model_label}.png"
 
             check = ((os.path.exists(fig_1) and os.path.exists(fig_2) and
                       os.path.exists(fig_3) and os.path.exists(fig_4) and
@@ -638,14 +431,14 @@ def compose_rocmlm_plots(rocmlm, skip=1):
         return None
 
     for target in targets_rename:
-        for sample_id in rocmlm.sample_ids[::skip]:
+        for sid in rocmlm.sids[::skip]:
             if verbose >= 1:
-                print(f"Composing {model_prefix}-{sample_id}-{target} [{program}] ...")
+                print(f"Composing {model_prefix}-{sid}-{target} ...")
 
             if target in ["rho", "Vp", "Vs"]:
                 combine_plots_horizontally(
-                    f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets.png",
-                    f"{fig_dir}/{model_prefix}-{sample_id}-{target}-predictions.png",
+                    f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
+                    f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
                     f"{fig_dir}/temp1.png",
                     caption1="a)",
                     caption2="b)"
@@ -653,15 +446,15 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                 combine_plots_horizontally(
                     f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/{model_prefix}-{sample_id}-{target}-prem.png",
-                    f"{fig_dir}/prem-{sample_id}-{ml_model_label}-{target}.png",
+                    f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png",
+                    f"{fig_dir}/prem-{sid}-{ml_model_label}-{target}.png",
                     caption1="",
                     caption2="c)"
                 )
 
             combine_plots_horizontally(
-                f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets-surf.png",
-                f"{fig_dir}/{model_prefix}-{sample_id}-{target}-surf.png",
+                f"{fig_dir}/{model_prefix}-{sid}-{target}-targets-surf.png",
+                f"{fig_dir}/{model_prefix}-{sid}-{target}-surf.png",
                 f"{fig_dir}/temp1.png",
                 caption1="a)",
                 caption2="b)"
@@ -669,15 +462,15 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
             combine_plots_horizontally(
                 f"{fig_dir}/temp1.png",
-                f"{fig_dir}/{model_prefix}-{sample_id}-{target}-diff-surf.png",
-                f"{fig_dir}/surf-{sample_id}-{ml_model_label}-{target}.png",
+                f"{fig_dir}/{model_prefix}-{sid}-{target}-diff-surf.png",
+                f"{fig_dir}/surf-{sid}-{ml_model_label}-{target}.png",
                 caption1="",
                 caption2="c)"
             )
 
             combine_plots_horizontally(
-                f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets.png",
-                f"{fig_dir}/{model_prefix}-{sample_id}-{target}-predictions.png",
+                f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
+                f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
                 f"{fig_dir}/temp1.png",
                 caption1="a)",
                 caption2="b)"
@@ -685,8 +478,8 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
             combine_plots_horizontally(
                 f"{fig_dir}/temp1.png",
-                f"{fig_dir}/{model_prefix}-{sample_id}-{target}-diff.png",
-                f"{fig_dir}/image-{sample_id}-{ml_model_label}-{target}.png",
+                f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png",
+                f"{fig_dir}/image-{sid}-{ml_model_label}-{target}.png",
                 caption1="",
                 caption2="c)"
             )
@@ -697,8 +490,8 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                 for i, target in enumerate(targets):
                     combine_plots_horizontally(
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-predictions.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
                         f"{fig_dir}/temp1.png",
                         caption1=captions[i][0],
                         caption2=captions[i][1]
@@ -706,7 +499,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                     combine_plots_horizontally(
                         f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-prem.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png",
                         f"{fig_dir}/temp-{target}.png",
                         caption1="",
                         caption2=captions[i][2]
@@ -723,7 +516,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
                 combine_plots_vertically(
                     f"{fig_dir}/temp1.png",
                     f"{fig_dir}/temp-Vs.png",
-                    f"{fig_dir}/image9-{sample_id}-{ml_model_label}-profile.png",
+                    f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png",
                     caption1="",
                     caption2=""
                 )
@@ -734,8 +527,8 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                 for i, target in enumerate(targets):
                     combine_plots_horizontally(
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-predictions.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
                         f"{fig_dir}/temp1.png",
                         caption1=captions[i][0],
                         caption2=captions[i][1]
@@ -743,7 +536,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                     combine_plots_horizontally(
                         f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-diff.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png",
                         f"{fig_dir}/temp-{target}.png",
                         caption1="",
                         caption2=captions[i][2]
@@ -760,7 +553,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
                 combine_plots_vertically(
                     f"{fig_dir}/temp1.png",
                     f"{fig_dir}/temp-Vs.png",
-                    f"{fig_dir}/image9-{sample_id}-{ml_model_label}-diff.png",
+                    f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png",
                     caption1="",
                     caption2=""
                 )
@@ -772,8 +565,8 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                 for i, target in enumerate(targets):
                     combine_plots_vertically(
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-predictions.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
                         f"{fig_dir}/temp1.png",
                         caption1=captions[i][0],
                         caption2=captions[i][1]
@@ -781,7 +574,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                     combine_plots_vertically(
                         f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-diff.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png",
                         f"{fig_dir}/temp2.png",
                         caption1="",
                         caption2=captions[i][2]
@@ -789,7 +582,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                     combine_plots_vertically(
                         f"{fig_dir}/temp2.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-prem.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png",
                         f"{fig_dir}/temp-{target}.png",
                         caption1="",
                         caption2=captions[i][3]
@@ -806,7 +599,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
                 combine_plots_horizontally(
                     f"{fig_dir}/temp1.png",
                     f"{fig_dir}/temp-Vs.png",
-                    f"{fig_dir}/image12-{sample_id}-{ml_model_label}.png",
+                    f"{fig_dir}/image12-{sid}-{ml_model_label}.png",
                     caption1="",
                     caption2=""
                 )
@@ -817,8 +610,8 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                 for i, target in enumerate(targets):
                     combine_plots_horizontally(
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-targets-surf.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-surf.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-targets-surf.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-surf.png",
                         f"{fig_dir}/temp1.png",
                         caption1=captions[i][0],
                         caption2=captions[i][1]
@@ -826,7 +619,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
 
                     combine_plots_horizontally(
                         f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{model_prefix}-{sample_id}-{target}-diff-surf.png",
+                        f"{fig_dir}/{model_prefix}-{sid}-{target}-diff-surf.png",
                         f"{fig_dir}/temp-{target}.png",
                         caption1="",
                         caption2=captions[i][2]
@@ -843,7 +636,7 @@ def compose_rocmlm_plots(rocmlm, skip=1):
                 combine_plots_vertically(
                     f"{fig_dir}/temp1.png",
                     f"{fig_dir}/temp-Vs.png",
-                    f"{fig_dir}/surf9-{sample_id}-{ml_model_label}.png",
+                    f"{fig_dir}/surf9-{sid}-{ml_model_label}.png",
                     caption1="",
                     caption2=""
                 )
@@ -851,9 +644,8 @@ def compose_rocmlm_plots(rocmlm, skip=1):
     # Clean up directory
     rocmlm_files = glob.glob(f"{fig_dir}/rocmlm*.png")
     tmp_files = glob.glob(f"{fig_dir}/temp*.png")
-    program_files = glob.glob(f"{fig_dir}/{program[:4]}*.png")
 
-    for file in rocmlm_files + tmp_files + program_files:
+    for file in rocmlm_files + tmp_files:
         os.remove(file)
 
     return None
@@ -898,14 +690,15 @@ def visualize_gfem_pt_range(gfem_model, fig_dir="figs/other", T_mantle1=673, T_m
                       "ring$\\rightarrow$brg (Akaogi07)": [-0.0024, -0.0028]}
 
     # Set plot style and settings
-    plt.rcParams["legend.facecolor"] = "0.9"
-    plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
-    plt.rcParams["figure.autolayout"] = "True"
     plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
     plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
+    plt.rcParams["legend.facecolor"] = "0.9"
+    plt.rcParams["legend.loc"] = "upper left"
+    plt.rcParams["legend.fontsize"] = "small"
+    plt.rcParams["figure.autolayout"] = "True"
 
     # Legend colors
     colormap = plt.cm.get_cmap("tab10")
@@ -1019,9 +812,9 @@ def visualize_gfem_pt_range(gfem_model, fig_dir="figs/other", T_mantle1=673, T_m
 
     # Get geotherm (non-adiabatic)
     results = pd.DataFrame({"P": P_gt, "T": T_gt, "rho": rho_gt})
-    P_geotherm, T_geotherm, _ = get_geotherm(results, "rho", geotherm_threshold,
-                                             Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                             litho_thickness=1, mantle_potential=1573)
+    P_geotherm, T_geotherm, _ = GFEMModel._get_geotherm(
+        results, "rho", geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+        mantle_potential=1573)
 
     # Plot mantle geotherms
     plt.plot(T_cropped_geotherm1, geotherm1_cropped, ":", color="black")
@@ -1180,14 +973,13 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     data_rocmlm["program"] = data_rocmlm.apply(label_rocmlm_model, axis=1)
     data_rocmlm.drop(["n_targets", "k_folds", "inference_time_std"], axis=1, inplace=True)
     data_rocmlm.rename(columns={"inference_time_mean": "time"}, inplace=True)
-    data_rocmlm["dataset"] = "train"
 
     # Calculate efficiency in milliseconds/Megabyte
     data_rocmlm["model_efficiency"] = (data_rocmlm["time"] * 1e3 *
                                        data_rocmlm["model_size_mb"])
 
     # Select columns
-    data_rocmlm = data_rocmlm[["sample", "program", "dataset", "size", "time",
+    data_rocmlm = data_rocmlm[["sample", "program", "size", "time",
                                "model_size_mb", "model_efficiency", "rmse_val_mean_rho",
                                "rmse_val_mean_Vp", "rmse_val_mean_Vs"]]
 
@@ -1196,9 +988,7 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
 
     # Relabel programs
     def label_programs(row):
-        if row["program"] == "magemin":
-            return "MAGEMin"
-        elif row["program"] == "perplex":
+        if row["program"] == "perplex":
             return "Perple_X"
         elif row["program"] == "lut":
             return "Lookup Table"
@@ -1206,9 +996,6 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
             return row["program"]
 
     data["program"] = data.apply(label_programs, axis=1)
-
-    # Filter out validation dataset
-    data = data[data["dataset"] == "train"]
 
     # Filter samples and programs
     data = data[data["sample"].isin(["SYNTH258", "SYNTH129", "SYNTH65", "SYNTH33"])]
@@ -1266,14 +1053,15 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     # Set plot style and settings
-    plt.rcParams["legend.facecolor"] = "0.9"
-    plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = False
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
-    plt.rcParams["figure.autolayout"] = True
     plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
     plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
+    plt.rcParams["legend.facecolor"] = "0.9"
+    plt.rcParams["legend.loc"] = "upper left"
+    plt.rcParams["legend.fontsize"] = "small"
+    plt.rcParams["figure.autolayout"] = "True"
 
     # Define marker types for each program
     marker_dict = {"Lookup Table": "o", "RocMLM (DT)": "d", "RocMLM (KN)": "s",
@@ -1400,8 +1188,8 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # visualize prem !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def visualize_prem(program, sample_id, dataset, res, target, target_unit,
-                   geotherms=["low", "mid", "high"], results_mgm=None, results_ppx=None,
+def visualize_prem(sid, res, target, target_unit,
+                   geotherms=["low", "mid", "high"], results_gfem=None,
                    results_ml=None, model=None, title=None, fig_dir="figs", filename=None,
                    figwidth=6.3, figheight=4.725, fontsize=22):
     """
@@ -1422,28 +1210,27 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
         geotherms = geotherms + ["mid"]
 
     # Get 1D reference models
-    ref_models = get_1d_reference_models()
+    ref_models = GFEMModel.get_1d_reference_models()
 
     # Get 1D refernce model profiles
     P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
     P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
 
     # Initialize geotherms
-    P_mgm, P_ppx, P_ml, P_pyr = None, None, None, None
-    P_mgm2, P_ppx2, P_ml2, P_pyr2 = None, None, None, None
-    P_mgm3, P_ppx3, P_ml3, P_pyr3 = None, None, None, None
-    target_mgm, target_ppx, target_ml, target_pyr = None, None, None, None
-    target_mgm2, target_ppx2, target_ml2, target_pyr2 = None, None, None, None
-    target_mgm3, target_ppx3, target_ml3, target_pyr3 = None, None, None, None
+    P_gfem, P_ml, P_pyr = None, None, None
+    P_gfem2, P_ml2, P_pyr2 = None, None, None
+    P_gfem3, P_ml3, P_pyr3 = None, None, None
+    target_gfem, target_ml, target_pyr = None, None, None
+    target_gfem2, target_ml2, target_pyr2 = None, None, None
+    target_gfem3, target_ml3, target_pyr3 = None, None, None
 
     # Get benchmark models
-    pyr_path = f"gfems/{program[:4]}_PYR_{dataset[0]}{res}/results.csv"
+    pyr_path = f"gfems/PYR{res}/results.csv"
     source = "assets/data/benchmark-samples-pca.csv"
     targets = ["rho", "Vp", "Vs"]
 
-    if os.path.exists(pyr_path) and sample_id != "PYR":
-        pyr_model = GFEMModel(program, dataset, "PYR", source, res, 1, 28, 773, 2273, "all",
-                              targets, False, 0, False)
+    if os.path.exists(pyr_path) and sid != "PYR":
+        pyr_model = GFEMModel("PYR", source, res, 1, 28, 773, 2273)
         results_pyr = pyr_model.results
     else:
         results_pyr = None
@@ -1463,63 +1250,50 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
         geotherm_threshold = 1.25
 
     # Extract target values along a geotherm
-    if results_mgm:
+    if results_gfem:
         if "low" in geotherms:
-            P_mgm, _, target_mgm = get_geotherm(results_mgm, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1173)
+            P_gfem, _, target_gfem = GFEMModel._get_geotherm(
+                results_gfem, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1173)
         if "mid" in geotherms:
-            P_mgm2, _, target_mgm2 = get_geotherm(results_mgm, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1573)
+            P_gfem2, _, target_gfem2 = GFEMModel._get_geotherm(
+                results_gfem, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1573)
         if "high" in geotherms:
-            P_mgm3, _, target_mgm3 = get_geotherm(results_mgm, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1773)
-    if results_ppx:
-        if "low" in geotherms:
-            P_ppx, _, target_ppx = get_geotherm(results_ppx, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1173)
-        if "mid" in geotherms:
-            P_ppx2, _, target_ppx2 = get_geotherm(results_ppx, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1573)
-        if "high" in geotherms:
-            P_ppx3, _, target_ppx3 = get_geotherm(results_ppx, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1773)
+            P_gfem3, _, target_gfem3 = GFEMModel._get_geotherm(
+                results_gfem, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1773)
     if results_ml:
         if "low" in geotherms:
-            P_ml, _, target_ml = get_geotherm(results_ml, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1173)
+            P_ml, _, target_ml = GFEMModel._get_geotherm(
+                results_ml, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1173)
         if "mid" in geotherms:
-            P_ml2, _, target_ml2 = get_geotherm(results_ml, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1573)
+            P_ml2, _, target_ml2 = GFEMModel._get_geotherm(
+                results_ml, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1573)
         if "high" in geotherms:
-            P_ml3, _, target_ml3 = get_geotherm(results_ml, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1773)
+            P_ml3, _, target_ml3 = GFEMModel._get_geotherm(
+                results_ml, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1773)
     if results_pyr:
         if "low" in geotherms:
-            P_pyr, _, target_pyr = get_geotherm(results_pyr, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1173)
+            P_pyr, _, target_pyr = GFEMModel._get_geotherm(
+                results_pyr, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1173)
         if "mid" in geotherms:
-            P_pyr2, _, target_pyr2 = get_geotherm(results_pyr, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1573)
+            P_pyr2, _, target_pyr2 = GFEMModel._get_geotherm(
+                results_pyr, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1573)
         if "high" in geotherms:
-            P_pyr3, _, target_pyr3 = get_geotherm(results_pyr, target, geotherm_threshold,
-                                                  Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                                  litho_thickness=1, mantle_potential=1773)
+            P_pyr3, _, target_pyr3 = GFEMModel._get_geotherm(
+                results_pyr, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1773)
 
     # Get min and max P
-    P_min = min(np.nanmin(P) for P in [P_mgm, P_mgm2, P_mgm3, P_ppx, P_ppx2, P_ppx3, P_ml,
+    P_min = min(np.nanmin(P) for P in [P_gfem, P_gfem2, P_gfem3, P_ml,
                                        P_ml2, P_ml3, P_pyr, P_pyr2, P_pyr3] if P is not None)
-    P_max = max(np.nanmax(P) for P in [P_mgm, P_mgm2, P_mgm3, P_ppx, P_ppx2, P_ppx3, P_ml,
+    P_max = max(np.nanmax(P) for P in [P_gfem, P_gfem2, P_gfem3, P_ml,
                                        P_ml2, P_ml3, P_pyr, P_pyr2, P_pyr3] if P is not None)
 
     # Create cropping mask
@@ -1531,26 +1305,16 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
     P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
 
     # Crop results
-    if results_mgm:
+    if results_gfem:
         if "low" in geotherms:
-            mask_mgm = (P_mgm >= P_min) & (P_mgm <= P_max)
-            P_mgm, target_mgm = P_mgm[mask_mgm], target_mgm[mask_mgm]
+            mask_gfem = (P_gfem >= P_min) & (P_gfem <= P_max)
+            P_gfem, target_gfem = P_gfem[mask_gfem], target_gfem[mask_gfem]
         if "mid" in geotherms:
-            mask_mgm2 = (P_mgm2 >= P_min) & (P_mgm2 <= P_max)
-            P_mgm2, target_mgm2 = P_mgm2[mask_mgm2], target_mgm2[mask_mgm2]
+            mask_gfem2 = (P_gfem2 >= P_min) & (P_gfem2 <= P_max)
+            P_gfem2, target_gfem2 = P_gfem2[mask_gfem2], target_gfem2[mask_gfem2]
         if "high" in geotherms:
-            mask_mgm3 = (P_mgm3 >= P_min) & (P_mgm3 <= P_max)
-            P_mgm3, target_mgm3 = P_mgm3[mask_mgm3], target_mgm3[mask_mgm3]
-    if results_ppx:
-        if "low" in geotherms:
-            mask_ppx = (P_ppx >= P_min) & (P_ppx <= P_max)
-            P_ppx, target_ppx = P_ppx[mask_ppx], target_ppx[mask_ppx]
-        if "mid" in geotherms:
-            mask_ppx2 = (P_ppx2 >= P_min) & (P_ppx2 <= P_max)
-            P_ppx2, target_ppx2 = P_ppx2[mask_ppx2], target_ppx2[mask_ppx2]
-        if "high" in geotherms:
-            mask_ppx3 = (P_ppx3 >= P_min) & (P_ppx3 <= P_max)
-            P_ppx3, target_ppx3 = P_ppx3[mask_ppx3], target_ppx3[mask_ppx3]
+            mask_gfem3 = (P_gfem3 >= P_min) & (P_gfem3 <= P_max)
+            P_gfem3, target_gfem3 = P_gfem3[mask_gfem3], target_gfem3[mask_gfem3]
     if results_ml:
         if "low" in geotherms:
             mask_ml = (P_ml >= P_min) & (P_ml <= P_max)
@@ -1577,8 +1341,8 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
     interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
 
     # New x values for interpolation
-    if results_ppx:
-        x_new = np.linspace(P_min, P_max, len(P_ppx2))
+    if results_gfem:
+        x_new = np.linspace(P_min, P_max, len(P_gfem2))
     if results_ml:
         x_new = np.linspace(P_min, P_max, len(P_ml2))
 
@@ -1593,20 +1357,21 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
     inf_mask_stw105 = np.isinf(target_stw105)
 
     # Change endmember sampleids
-    if sample_id == "sm000":
-        sample_id = "DSUM"
-    elif sample_id == "sm129":
-        sample_id = "PSUM"
+    if sid == "sm000":
+        sid = "DSUM"
+    elif sid == "sm129":
+        sid = "PSUM"
 
     # Set plot style and settings
-    plt.rcParams["legend.facecolor"] = "0.9"
-    plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
-    plt.rcParams["figure.autolayout"] = "True"
     plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
     plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
+    plt.rcParams["legend.facecolor"] = "0.9"
+    plt.rcParams["legend.loc"] = "upper left"
+    plt.rcParams["legend.fontsize"] = "small"
+    plt.rcParams["figure.autolayout"] = "True"
 
     # Colormap
     colormap = plt.cm.get_cmap("tab10")
@@ -1615,21 +1380,21 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
     fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
 
     # Plot GFEM and RocMLM profiles
-    if results_ppx and not results_ml:
+    if results_gfem and not results_ml:
         if "low" in geotherms:
-            ax1.plot(target_ppx, P_ppx, "-", linewidth=3, color=colormap(0),
-                     label=f"{sample_id}-1173")
-            ax1.fill_betweenx(P_ppx, target_ppx * (1 - 0.05), target_ppx * (1 + 0.05),
+            ax1.plot(target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
+                     label=f"{sid}-1173")
+            ax1.fill_betweenx(P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
                               color=colormap(0), alpha=0.2)
         if "mid" in geotherms:
-            ax1.plot(target_ppx2, P_ppx2, "-", linewidth=3, color=colormap(2),
-                     label=f"{sample_id}-1573")
-            ax1.fill_betweenx(P_ppx2, target_ppx2 * (1 - 0.05), target_ppx2 * (1 + 0.05),
+            ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
+                     label=f"{sid}-1573")
+            ax1.fill_betweenx(P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
                               color=colormap(2), alpha=0.2)
         if "high" in geotherms:
-            ax1.plot(target_ppx3, P_ppx3, "-", linewidth=3, color=colormap(1),
-                     label=f"{sample_id}-1773")
-            ax1.fill_betweenx(P_ppx3, target_ppx3 * (1 - 0.05), target_ppx3 * (1 + 0.05),
+            ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
+                     label=f"{sid}-1773")
+            ax1.fill_betweenx(P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
                               color=colormap(1), alpha=0.3)
     if results_ml:
         if "low" in geotherms:
@@ -1670,20 +1435,13 @@ def visualize_prem(program, sample_id, dataset, res, target, target_unit,
     text_spacing_y = 0.1
 
     # Compute metrics
-    if results_mgm and not results_ml:
-        nan_mask_mgm2 = np.isnan(target_mgm2)
-        nan_mask = nan_mask_mgm2 | nan_mask_prem | inf_mask_prem
-        P_mgm2, target_mgm2 = P_mgm2[~nan_mask], target_mgm2[~nan_mask]
+    if results_gfem and not results_ml:
+        nan_mask_gfem2 = np.isnan(target_gfem2)
+        nan_mask = nan_mask_gfem2 | nan_mask_prem | inf_mask_prem
+        P_gfem2, target_gfem2 = P_gfem2[~nan_mask], target_gfem2[~nan_mask]
         P_prem, target_prem = P_prem[~nan_mask], target_prem[~nan_mask]
-        rmse = np.sqrt(mean_squared_error(target_prem, target_mgm2))
-        r2 = r2_score(target_prem, target_mgm2)
-    elif results_ppx and not results_ml:
-        nan_mask_ppx2 = np.isnan(target_ppx2)
-        nan_mask = nan_mask_ppx2 | nan_mask_prem | inf_mask_prem
-        P_ppx2, target_ppx2 = P_ppx2[~nan_mask], target_ppx2[~nan_mask]
-        P_prem, target_prem = P_prem[~nan_mask], target_prem[~nan_mask]
-        rmse = np.sqrt(mean_squared_error(target_prem, target_ppx2))
-        r2 = r2_score(target_prem, target_ppx2)
+        rmse = np.sqrt(mean_squared_error(target_prem, target_gfem2))
+        r2 = r2_score(target_prem, target_gfem2)
     elif results_ml:
         nan_mask_ml2 = np.isnan(target_ml2)
         nan_mask = nan_mask_ml2 | nan_mask_prem | inf_mask_prem
@@ -1744,7 +1502,7 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
         os.makedirs(fig_dir, exist_ok=True)
 
     # Get 1D reference models
-    ref_models = get_1d_reference_models()
+    ref_models = GFEMModel.get_1d_reference_models()
 
     # Get correct Depletion column
     D_col = "D_FRAC"
@@ -1757,27 +1515,28 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
         df_synth_bench = pd.read_csv(df_synth_bench_path)
 
     # Set plot style and settings
-    plt.rcParams["legend.facecolor"] = "0.9"
-    plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
-    plt.rcParams["figure.autolayout"] = "True"
     plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
     plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
+    plt.rcParams["legend.facecolor"] = "0.9"
+    plt.rcParams["legend.loc"] = "upper left"
+    plt.rcParams["legend.fontsize"] = "small"
+    plt.rcParams["figure.autolayout"] = "True"
 
     # Colormap
     colormap = plt.cm.get_cmap("tab10")
 
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(figwidth * 3, figheight))
 
-    for j, model in enumerate([model for model in gfem_models if model.dataset == "train"]):
+    for j, model in enumerate(gfem_models):
         # Get gfem model data
         res = model.res
         xi = model.fertility_index
         targets = model.targets
         results = model.results
-        sample_id = model.sample_id
+        sid = model.sid
 
         # Set geotherm threshold for extracting depth profiles
         if res <= 8:
@@ -1794,10 +1553,10 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
             geotherm_threshold = 1.25
 
         # Change endmember sampleids
-        if sample_id == "sm000":
-            sample_id = "DSUM"
-        elif sample_id == "sm129":
-            sample_id = "PSUM"
+        if sid == "sm000":
+            sid = "DSUM"
+        elif sid == "sm129":
+            sid = "PSUM"
 
         for i, target in enumerate(targets):
             if target == "rho":
@@ -1810,9 +1569,9 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
             P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
 
             # Extract target values along a geotherm
-            P2, _, target2 = get_geotherm(
-                results, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8,
-                k1=3.0, litho_thickness=1, mantle_potential=1573)
+            P2, _, target2 = GFEMModel._get_geotherm(
+                results, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0,
+                litho_thickness=1, mantle_potential=1573)
 
             # Get min and max P
             P_min = np.nanmin(P2)
@@ -1857,10 +1616,10 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
                 ax.plot(target_stw105, P_stw105, ":", linewidth=4.5, color="forestgreen",
                         label="STW105", zorder=7)
 
-            if sample_id == "PSUM":
+            if sid == "PSUM":
                 ax.plot(target2, P2, "-", linewidth=6.5, color=sm.to_rgba(xi),
                         label="PSUM", zorder=6)
-            if sample_id == "DSUM":
+            if sid == "DSUM":
                 ax.plot(target2, P2, "-", linewidth=6.5, color=sm.to_rgba(xi),
                         label="DSUM", zorder=6)
 
@@ -1925,15 +1684,15 @@ def visualize_target_array(P, T, target_array, target, title, palette, color_dis
         os.makedirs(fig_dir, exist_ok=True)
 
     # Set plot style and settings
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
     plt.rcParams["legend.facecolor"] = "0.9"
     plt.rcParams["legend.loc"] = "upper left"
     plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
     plt.rcParams["figure.autolayout"] = "True"
-    plt.rcParams["figure.dpi"] = 300
-    plt.rcParams["savefig.bbox"] = "tight"
 
     # Set geotherm threshold for extracting depth profiles
     res = target_array.shape[0]
@@ -1952,15 +1711,15 @@ def visualize_target_array(P, T, target_array, target, title, palette, color_dis
 
     # Get geotherm
     results = pd.DataFrame({"P": P, "T": T, target: target_array.flatten()})
-    P_geotherm, T_geotherm, _ = get_geotherm(results, target, geotherm_threshold,
-                                             Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                             litho_thickness=1, mantle_potential=1173)
-    P_geotherm2, T_geotherm2, _ = get_geotherm(results, target, geotherm_threshold,
-                                               Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                               litho_thickness=1, mantle_potential=1573)
-    P_geotherm3, T_geotherm3, _ = get_geotherm(results, target, geotherm_threshold,
-                                               Qs=250e-3, A1=2.2e-8, k1=3.0,
-                                               litho_thickness=1, mantle_potential=1773)
+    P_geotherm, T_geotherm, _ = GFEMModel._get_geotherm(
+        results, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+        mantle_potential=1173)
+    P_geotherm2, T_geotherm2, _ = GFEMModel._get_geotherm(
+        results, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+        mantle_potential=1573)
+    P_geotherm3, T_geotherm3, _ = GFEMModel._get_geotherm(
+        results, target, geotherm_threshold, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+        mantle_potential=1773)
 
     if color_discrete:
         # Discrete color palette
@@ -2167,15 +1926,15 @@ def visualize_target_surf(P, T, target_array, target, title, palette, color_disc
         os.makedirs(fig_dir, exist_ok=True)
 
     # Set plot style and settings
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
     plt.rcParams["legend.facecolor"] = "0.9"
     plt.rcParams["legend.loc"] = "upper left"
     plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
     plt.rcParams["figure.autolayout"] = "True"
-    plt.rcParams["figure.dpi"] = 300
-    plt.rcParams["savefig.bbox"] = "tight"
 
     if color_discrete:
         # Discrete color palette
@@ -2355,39 +2114,31 @@ def visualize_target_surf(P, T, target_array, target, title, palette, color_disc
 def visualize_gfem(gfem_models, edges=True, palette="bone", verbose=1):
     """
     """
-    for model in [m if m.dataset == "valid" else None for m in gfem_models]:
+    for model in gfem_models:
         # Check for model
         if model is None:
             continue
 
         # Get model data
-        program = model.program
-        sample_id = model.sample_id
-        model_prefix = model.model_prefix
+        sid = model.sid
         res = model.res
-        dataset = model.dataset
         targets = model.targets
-        mask_geotherm = model.mask_geotherm
         results = model.results
-        P, T = results["P"], results["T"]
-        target_array = model.target_array
         fig_dir = model.fig_dir
         verbose = model.verbose
-
-        if program == "magemin":
-            program_title = "MAGEMin"
-        elif program == "perplex":
-            program_title = "Perple_X"
+        model_prefix = model.model_prefix
+        P, T = results["P"], results["T"]
+        target_array = model.target_array
 
         if verbose >= 1:
-            print(f"Visualizing {model_prefix} [{program}] ...")
+            print(f"Visualizing GFEM model {model_prefix} ...")
 
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            fig_1 = f"{fig_dir}/image3-{sample_id}-{dataset}-{target}.png"
-            fig_2 = f"{fig_dir}/image4-{sample_id}-{dataset}-{target}.png"
-            fig_3 = f"{fig_dir}/image9-{sample_id}-{dataset}.png"
+            fig_1 = f"{fig_dir}/image3-{sid}-{target}.png"
+            fig_2 = f"{fig_dir}/image4-{sid}-{target}.png"
+            fig_3 = f"{fig_dir}/image9-{sid}.png"
 
             check = ((os.path.exists(fig_1) and os.path.exists(fig_3)) |
                      (os.path.exists(fig_1) and os.path.exists(fig_3)))
@@ -2433,12 +2184,12 @@ def visualize_gfem(gfem_models, edges=True, palette="bone", verbose=1):
             target_rename = target.replace("_", "-")
 
             # Print filepath
-            filename = f"{program}-{sample_id}-{dataset}-{target_rename}.png"
+            filename = f"{sid}-{target_rename}.png"
             if verbose >= 2:
                 print(f"Saving figure: {filename}")
 
             # Plot targets
-            visualize_target_array(P, T, square_target, target, program_title, palette,
+            visualize_target_array(P, T, square_target, target, "GFEM",  palette,
                                    color_discrete, color_reverse, vmin, vmax, None, None,
                                    fig_dir, filename)
             if edges:
@@ -2463,8 +2214,8 @@ def visualize_gfem(gfem_models, edges=True, palette="bone", verbose=1):
                                        color_discrete, color_reverse, vmin_mag, vmax_mag,
                                        None, None, fig_dir, f"grad-{filename}", False)
 
-            filename = f"prem-{sample_id}-{dataset}-{target_rename}.png"
-            filename2 = f"prem-{sample_id}-{dataset}-{target_rename}-1557.png"
+            filename = f"prem-{sid}-{target_rename}.png"
+            filename2 = f"prem-{sid}-{target_rename}-1557.png"
 
             # Plot PREM comparisons
             if target == "rho":
@@ -2472,217 +2223,22 @@ def visualize_gfem(gfem_models, edges=True, palette="bone", verbose=1):
                 if verbose >= 2:
                     print(f"Saving figure: {filename}")
 
-                if program == "magemin":
-                    results_mgm = results
-                    results_ppx = None
-                    visualize_prem(program, sample_id, dataset, res, target, "g/cm$^3$",
-                                   ["low", "mid", "high"], results_mgm, results_ppx,
-                                   title="Depth Profile", fig_dir=fig_dir, filename=filename)
-                    visualize_prem(program, sample_id, dataset, res, target, "g/cm$^3$",
-                                   ["mid"], results_mgm, results_ppx, title="Depth Profile",
-                                   fig_dir=fig_dir, filename=filename2)
-
-                elif program == "perplex":
-                    results_mgm = None
-                    results_ppx = results
-                    visualize_prem(program, sample_id, dataset, res, target, "g/cm$^3$",
-                                   ["low", "mid", "high"], results_mgm, results_ppx,
-                                   title="Depth Profile", fig_dir=fig_dir, filename=filename)
-                    visualize_prem(program, sample_id, dataset, res, target, "g/cm$^3$",
-                                   ["mid"], results_mgm, results_ppx, title="Depth Profile",
-                                   fig_dir=fig_dir, filename=filename2)
+                results_gfem = results
+                visualize_prem(sid, res, target, "g/cm$^3$", ["low", "mid", "high"],
+                               results_gfem, title="Depth Profile", fig_dir=fig_dir,
+                               filename=filename)
+                visualize_prem(sid, res, target, "g/cm$^3$", ["mid"], results_gfem,
+                               title="Depth Profile", fig_dir=fig_dir, filename=filename2)
 
             if target in ["Vp", "Vs"]:
                 # Print filepath
                 if verbose >= 2:
                     print(f"Saving figure: {filename}")
 
-                if program == "magemin":
-                    results_mgm = results
-                    results_ppx = None
-                    visualize_prem(program, sample_id, dataset, res, target, "km/s",
-                                   ["low", "mid", "high"], results_mgm, results_ppx,
-                                   title="Depth Profile", fig_dir=fig_dir, filename=filename)
-                    visualize_prem(program, sample_id, dataset, res, target, "km/s",
-                                   ["mid"], results_mgm, results_ppx, title="Depth Profile",
-                                   fig_dir=fig_dir, filename=filename2)
-
-                elif program == "perplex":
-                    results_mgm = None
-                    results_ppx = results
-                    visualize_prem(program, sample_id, dataset, res, target, "km/s",
-                                   ["low", "mid", "high"], results_mgm, results_ppx,
-                                   title="Depth Profile", fig_dir=fig_dir, filename=filename)
-                    visualize_prem(program, sample_id, dataset, res, target, "km/s",
-                                   ["mid"], results_mgm, results_ppx, title="Depth Profile",
-                                   fig_dir=fig_dir, filename=filename2)
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# visualize gfem diff !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def visualize_gfem_diff(gfem_models, palette="bone", verbose=1):
-    """
-    """
-    # Parse models
-    magemin_models = [m if m.program == "magemin" and m.dataset == "valid" else
-                      None for m in gfem_models]
-    magemin_models = sorted(magemin_models, key=lambda m: (m.sample_id if m else ""))
-
-    perplex_models = [m if m.program == "perplex" and m.dataset == "valid" else
-                      None for m in gfem_models]
-    perplex_models = sorted(perplex_models, key=lambda m: (m.sample_id if m else ""))
-
-    # Iterate through models
-    for magemin_model, perplex_model in zip(magemin_models, perplex_models):
-        # Check for model
-        if magemin_model is None or perplex_model is None:
-            continue
-
-        # Get model data
-        if magemin_model.sample_id == perplex_model.sample_id:
-            sample_id = magemin_model.sample_id
-        else:
-            raise ValueError("Model samples are not the same!")
-        if magemin_model.res == perplex_model.res:
-            res = magemin_model.res
-        else:
-            raise ValueError("Model resolutions are not the same!")
-        if magemin_model.dataset == perplex_model.dataset:
-            dataset = magemin_model.dataset
-        else:
-            raise ValueError("Model datasets are not the same!")
-        if magemin_model.targets == perplex_model.targets:
-            targets = magemin_model.targets
-        else:
-            raise ValueError("Model datasets are not the same!")
-        if magemin_model.mask_geotherm == perplex_model.mask_geotherm:
-            mask_geotherm = magemin_model.mask_geotherm
-        else:
-            raise ValueError("Model geotherm masks are not the same!")
-        if magemin_model.verbose == perplex_model.verbose:
-            verbose = magemin_model.verbose
-        else:
-            verbose = 1
-
-        fig_dir = f"figs/gfem/diff_{sample_id}_{res}"
-
-        results_mgm, results_ppx = magemin_model.results, perplex_model.results
-        P_mgm, T_mgm = results_mgm["P"], results_mgm["T"]
-        P_ppx, T_ppx = results_ppx["P"], results_ppx["T"]
-        target_array_mgm = magemin_model.target_array
-        target_array_ppx = perplex_model.target_array
-
-        for i, target in enumerate(targets):
-            # Check for existing figures
-            fig_1 = f"{fig_dir}/image3-{sample_id}-{dataset}-{target}.png"
-            fig_2 = f"{fig_dir}/image4-{sample_id}-{dataset}-{target}.png"
-            fig_3 = f"{fig_dir}/image9-{sample_id}-{dataset}.png"
-
-            if os.path.exists(fig_1) and os.path.exists(fig_2) and os.path.exists(fig_3):
-                print(f"Found composed plots at {fig_1}!")
-                print(f"Found composed plots at {fig_2}!")
-                print(f"Found composed plots at {fig_3}!")
-
-            else:
-                # Reshape targets into square array
-                square_array_mgm = target_array_mgm[:, i].reshape(res + 1, res + 1)
-                square_array_ppx = target_array_ppx[:, i].reshape(res + 1, res + 1)
-
-                # Use discrete colorscale
-                if target in ["assemblage", "variance"]:
-                    color_discrete = True
-                else:
-                    color_discrete = False
-
-                # Reverse color scale
-                if palette in ["grey"]:
-                    if target in ["variance"]:
-                        color_reverse = True
-                    else:
-                        color_reverse = False
-                else:
-                    if target in ["variance"]:
-                        color_reverse = False
-                    else:
-                        color_reverse = True
-
-                # Set colorbar limits for better comparisons
-                if not color_discrete:
-                    vmin_mgm=np.min(
-                        square_array_mgm[np.logical_not(np.isnan(square_array_mgm))])
-                    vmax_mgm=np.max(
-                        square_array_mgm[np.logical_not(np.isnan(square_array_mgm))])
-                    vmin_ppx=np.min(
-                        square_array_ppx[np.logical_not(np.isnan(square_array_ppx))])
-                    vmax_ppx=np.max(
-                        square_array_ppx[np.logical_not(np.isnan(square_array_ppx))])
-
-                    vmin = min(vmin_mgm, vmin_ppx)
-                    vmax = max(vmax_mgm, vmax_ppx)
-                else:
-                    num_colors_mgm = len(np.unique(square_array_mgm))
-                    num_colors_ppx = len(np.unique(square_array_ppx))
-
-                    vmin = 1
-                    vmax = max(num_colors_mgm, num_colors_ppx) + 1
-
-                if not color_discrete:
-                    # Define a filter to ignore the specific warning
-                    warnings.filterwarnings("ignore",
-                                            message="invalid value encountered in divide")
-
-                    # Create nan mask
-                    mask = ~np.isnan(square_array_mgm) & ~np.isnan(square_array_ppx)
-
-                    # Compute normalized diff
-                    diff = square_array_mgm - square_array_ppx
-
-                    # Calculate RMSE
-                    rmse = np.sqrt(mean_squared_error(square_array_mgm, square_array_ppx))
-
-                    # Calculate R2
-                    r2 = r2_score(square_array_mgm, square_array_ppx)
-
-                    # Add nans to match original target arrays
-                    diff[~mask] = np.nan
-
-                    # Rename target
-                    target_rename = target.replace("_", "-")
-
-                    # Print filepath
-                    filename = f"diff-{sample_id}-{dataset}-{target_rename}.png"
-                    if verbose >= 2:
-                        print(f"Saving figure: {filename}")
-
-                    # Plot target array normalized diff mgm-ppx
-                    visualize_target_array(P_ppx, T_ppx, diff, target, "Residuals",
-                                           "seismic", color_discrete, False, vmin, vmax,
-                                           rmse, r2, fig_dir, filename)
-
-                    filename = f"prem-{sample_id}-{dataset}-{target_rename}.png"
-
-                    # Plot PREM comparisons
-                    if target == "rho":
-                        # Print filepath
-                        if verbose >= 2:
-                            print(f"Saving figure: {filename}")
-
-                        visualize_prem("perplex", sample_id, dataset, res, target,
-                                       ["low", "mid", "high"], "g/cm$^3$", results_mgm,
-                                       results_ppx, title="Depth Profile", fig_dir=fig_dir,
-                                       filename=filename)
-
-                    if target in ["Vp", "Vs"]:
-                        # Print filepath
-                        if verbose >= 2:
-                            print(f"Saving figure: {filename}")
-
-                        visualize_prem("perplex", sample_id, dataset, res, target, "km/s",
-                                       ["low", "mid", "high"], results_mgm, results_ppx,
-                                       title="Depth Profile", fig_dir=fig_dir,
-                                       filename=filename)
+                visualize_prem(sid, res, target, "km/s", ["low", "mid", "high"], results,
+                               title="Depth Profile", fig_dir=fig_dir, filename=filename)
+                visualize_prem(sid, res, target, "km/s", ["mid"], results,
+                               title="Depth Profile", fig_dir=fig_dir, filename=filename2)
 
     return None
 
@@ -2693,15 +2249,10 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
     """
     """
     # Get ml model attributes
-    program = rocmlm.program
-    if program == "perplex":
-        program_label = "Perple_X"
-    elif program == "magemin":
-        program_label = "MAGEMin"
     model_label_full = rocmlm.ml_model_label_full
     model_label = rocmlm.ml_model_label
     model_prefix = rocmlm.model_prefix
-    sample_ids = rocmlm.sample_ids
+    sids = rocmlm.sids
     feature_arrays = rocmlm.feature_square
     target_arrays = rocmlm.target_square
     pred_arrays = rocmlm.prediction_square
@@ -2715,23 +2266,23 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
     verbose = rocmlm.verbose
 
     # Don't skip benchmark samples
-    if any(sample in sample_ids for sample in ["PUM", "DMM", "PYR"]):
+    if any(sample in sids for sample in ["PUM", "DMM", "PYR"]):
         skip = 1
     else:
         # Need to skip double for synthetic samples bc X_res training starts at 2 ...
         skip = skip * 2
 
     # Set plot style and settings
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
     plt.rcParams["legend.facecolor"] = "0.9"
     plt.rcParams["legend.loc"] = "upper left"
     plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
     plt.rcParams["figure.autolayout"] = "True"
     plt.rcParams["figure.constrained_layout.use"] = "True"
-    plt.rcParams["figure.dpi"] = 300
-    plt.rcParams["savefig.bbox"] = "tight"
 
     # Rename targets
     targets_rename = [target.replace("_", "-") for target in targets]
@@ -2739,7 +2290,7 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
     # Check for existing plots
     existing_figs = []
     for target in targets_rename:
-        for s in sample_ids[::skip]:
+        for s in sids[::skip]:
             fig_1 = f"{fig_dir}/prem-{s}-{model_label}-{target}.png"
             fig_2 = f"{fig_dir}/surf-{s}-{model_label}-{target}.png"
             fig_3 = f"{fig_dir}/image-{s}-{model_label}-{target}.png"
@@ -2753,9 +2304,9 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
     if existing_figs:
         return None
 
-    for s, sample_id in enumerate(sample_ids[::skip]):
+    for s, sid in enumerate(sids[::skip]):
         if verbose >= 1:
-            print(f"Visualizing {model_prefix}-{sample_id} [{program}] ...")
+            print(f"Visualizing {model_prefix}-{sid} ...")
 
         # Slice arrays
         feature_array = feature_arrays[s, :, :, :]
@@ -2824,7 +2375,7 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
                 color_reverse = True
 
             # Filename
-            filename = f"{model_prefix}-{sample_id}-{target_rename}"
+            filename = f"{model_prefix}-{sid}-{target_rename}"
 
             # Plot target array 2d
             P = feature_array[:, :, 0 + n_feats]
@@ -2832,11 +2383,11 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
             t = target_array[:, :, i]
             p = pred_array[:, :, i]
 
-            visualize_target_array(P.flatten(), T.flatten(), t, target, program_label,
+            visualize_target_array(P.flatten(), T.flatten(), t, target,
                                    palette, False, color_reverse, vmin[i], vmax[i], None,
                                    None, fig_dir, f"{filename}-targets.png")
             # Plot target array 3d
-            visualize_target_surf(P, T, t, target, program_label, palette, False,
+            visualize_target_surf(P, T, t, target, palette, False,
                                   color_reverse, vmin[i], vmax[i], fig_dir,
                                   f"{filename}-targets-surf.png")
 
@@ -2859,19 +2410,9 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
             visualize_target_surf(P, T, diff, target, "Residuals", "seismic", False, False,
                                   vmin[i], vmax[i], fig_dir, f"{filename}-diff-surf.png")
 
-            # Reshape results and transform units for MAGEMin
-            if program == "magemin":
-                results_mgm = {"P": P.flatten().tolist(), "T": T.flatten().tolist(),
-                               target: t.flatten().tolist()}
-
-                results_ppx = None
-
             # Reshape results and transform units for Perple_X
-            elif program == "perplex":
-                results_ppx = {"P": P.flatten().tolist(), "T": T.flatten().tolist(),
-                               target: t.flatten().tolist()}
-
-                results_mgm = None
+            results_gfem = {"P": P.flatten().tolist(), "T": T.flatten().tolist(),
+                           target: t.flatten().tolist()}
 
             # Reshape results and transform units for ML model
             results_rocmlm = {"P": P.flatten().tolist(), "T": T.flatten().tolist(),
@@ -2882,14 +2423,14 @@ def visualize_rocmlm(rocmlm, skip=1, figwidth=6.3, figheight=4.725, fontsize=22)
 
             # Plot PREM comparisons
             if target == "rho":
-                visualize_prem(program, sample_id, "train", res, target, "g/cm$^3$",
-                               ["low", "mid", "high"], results_mgm, results_ppx,
+                visualize_prem(sid, "train", res, target, "g/cm$^3$",
+                               ["low", "mid", "high"], results_gfem,
                                results_rocmlm, model_label, title="Depth Profile",
                                fig_dir=fig_dir, filename=f"{filename}-prem.png")
 
             if target in ["Vp", "Vs"]:
-                visualize_prem(program, sample_id, "train", res, target, "km/s",
-                               ["low", "mid", "high"], results_mgm, results_ppx,
+                visualize_prem(sid, "train", res, target, "km/s",
+                               ["low", "mid", "high"], results_gfem,
                                results_rocmlm, model_label, title="Depth Profile",
                                fig_dir=fig_dir, filename=f"{filename}-prem.png")
     return None
@@ -2944,15 +2485,15 @@ def visualize_mixing_array(mixing_array, fig_dir="figs/mixing_array", filename="
         os.makedirs(fig_dir, exist_ok=True)
 
     # Set plot style and settings
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
     plt.rcParams["legend.facecolor"] = "0.9"
     plt.rcParams["legend.loc"] = "upper left"
     plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
     plt.rcParams["figure.autolayout"] = "True"
-    plt.rcParams["figure.dpi"] = 300
-    plt.rcParams["savefig.bbox"] = "tight"
 
     loadings = pd.DataFrame((pca.components_.T * np.sqrt(pca.explained_variance_)).T,
                             columns=oxides)
@@ -3188,15 +2729,15 @@ def visualize_harker_diagrams(mixing_array, fig_dir="figs/mixing_array",
         os.makedirs(fig_dir, exist_ok=True)
 
     # Set plot style and settings
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
     plt.rcParams["legend.facecolor"] = "0.9"
     plt.rcParams["legend.loc"] = "upper left"
     plt.rcParams["legend.fontsize"] = "small"
-    plt.rcParams["legend.frameon"] = "False"
-    plt.rcParams["axes.facecolor"] = "0.9"
-    plt.rcParams["font.size"] = fontsize
     plt.rcParams["figure.autolayout"] = "True"
-    plt.rcParams["figure.dpi"] = 300
-    plt.rcParams["savefig.bbox"] = "tight"
 
     warnings.filterwarnings("ignore", category=FutureWarning, module="seaborn")
 

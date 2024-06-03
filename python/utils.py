@@ -169,44 +169,6 @@ def download_github_submodule(repository_url, submodule_dir, commit_hash):
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# compile magemin !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compile_magemin(commit_hash="7293cbc", verbose=1):
-    """
-    """
-    # Config directory
-    config_dir = "assets/config"
-
-    # Get source
-    download_github_submodule("https://github.com/ComputationalThermodynamics/MAGEMin.git",
-                              "tmp", commit_hash)
-
-    try:
-        # Configure
-        print(f"Compiling MAGEMin ...")
-
-        # Compile
-        if verbose >= 2:
-            subprocess.run("(cd tmp && make)", shell=True, text=True)
-
-        else:
-            with open(os.devnull, "w") as null:
-                subprocess.run("(cd tmp && make)", shell=True, stdout=null, stderr=null)
-
-        # Move magemin program into directory
-        os.makedirs("MAGEMin")
-        shutil.move("tmp/MAGEMin", "MAGEMin")
-        shutil.rmtree("tmp")
-
-        print("MAGEMin installation successful!")
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
-    except Exception as e:
-        print(f"Compilation error: !!! {e} !!!")
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # compile perplex !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def compile_perplex():
@@ -358,10 +320,6 @@ def check_arguments(args, script):
     debug = args.debug
     visualize = args.visualize
 
-    # MAGEMin oxide options
-    oxide_list_magemin = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O",
-                          "TIO2", "FE2O3", "CR2O3", "H2O" ]
-
     valid_args = {}
 
     # Check arguments and print
@@ -414,16 +372,7 @@ def check_arguments(args, script):
         valid_args["nbatches"] = nbatches
 
     if normox is not None:
-        if normox != "all":
-            if check_non_matching_strings(normox, oxide_list_magemin):
-                print("Warning: invalid --normox argument!")
-                print(f"    Can only normalize to oxides {oxide_list_magemin}")
-                print("Using normox = 'all'")
-
-                normox = "all"
-
-            else:
-                print(f"    Normalizing composition to: {oxide}")
+        print(f"    Normalizing composition to: {oxide}")
 
         valid_args["normox"] = normox
 
@@ -646,9 +595,8 @@ def check_arguments(args, script):
 def main():
     """
     """
-    download_and_unzip(("https://files.osf.io/v1/resources/k23tb/providers/osfstorage/"
-                       "649149796513ba03733a3536/?zip="), "all", "assets")
-    compile_magemin()
+    download_and_unzip(("https://files.osf.io/v1/resources/erdcz/providers/osfstorage/"
+                        "665d7b3dd835c427734cdd2d/?zip="), "all", "assets")
     compile_perplex()
     print_session_info("python/conda-environment.yaml")
     print("Initializing done!")

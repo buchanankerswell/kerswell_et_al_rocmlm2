@@ -39,6 +39,10 @@ write_md_tables: $(LOGFILE) $(PYTHON)
 	@$(CONDAPYTHON) -u python/write-md-tables.py $(LOG)
 	@echo "=============================================" $(LOG)
 
+test: $(LOGFILE) $(PYTHON) mixing_arrays
+	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/test.py $(LOG)
+	@echo "=============================================" $(LOG)
+
 rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
 	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/rocmlm.py $(LOG)
 	@echo "=============================================" $(LOG)
