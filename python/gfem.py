@@ -4,6 +4,7 @@
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # utilities !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+import io
 import os
 import re
 import time
@@ -13,13 +14,13 @@ import traceback
 import itertools
 import subprocess
 from datetime import datetime
+from contextlib import redirect_stdout
 from utils import parse_arguments, check_arguments
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # parallel computing !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import multiprocessing as mp
-mp.set_start_method("fork")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # dataframes and arrays !!
@@ -87,26 +88,42 @@ def get_sampleids(filepath, batch="all", n_batches=8):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # gfem_iteration !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def gfem_iteration(args):
+def gfem_iteration(args, queue):
     """
     """
     # Unpack arguments
     perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax = args
 
-    # Initiate GFEM model
-    iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
+    # Create a StringIO object to capture prints
+    stdout_buffer = io.StringIO()
 
-    if iteration.model_built:
-        return iteration
-    else:
-        iteration.build_model()
-        if not iteration.model_build_error:
-            iteration.get_results()
-            iteration.get_feature_array()
-            iteration.get_target_array()
+    # Redirect stdout to the StringIO object
+    with redirect_stdout(stdout_buffer):
+        iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
+
+        if iteration.model_built:
+            queue.put(stdout_buffer.getvalue())
+
             return iteration
+
         else:
-            return iteration
+            iteration.build_model()
+
+            if not iteration.model_build_error:
+                iteration.get_results()
+                iteration.get_feature_array()
+                iteration.get_target_array()
+                queue.put(stdout_buffer.getvalue())
+
+                return iteration
+
+            else:
+                queue.put(stdout_buffer.getvalue())
+
+                return iteration
+
+    # Capture any remaining output
+    queue.put(stdout_buffer.getvalue())
 
     return None
 
@@ -114,7 +131,7 @@ def gfem_iteration(args):
 # build gfem models !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1,
-                      Pmax=28, Tmin=773, Tmax=2273, nprocs=os.cpu_count(), verbose=1):
+                      Pmax=28, Tmin=773, Tmax=2273, nprocs=os.cpu_count() - 2, verbose=1):
     """
     """
     # Check sampleids
@@ -137,14 +154,30 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1
     if nprocs > len(sampleids): nprocs = len(sampleids)
 
     # Create list of args for mp pooling
-    args_list = (perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
-    run_args = [args_list for sampleid in sampleids]
+    run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax) for
+                sampleid in sampleids]
 
-    # Create a multiprocessing pool
-    with mp.Pool(processes=nprocs) as pool:
-        models = pool.map(gfem_iteration, run_args)
-        pool.close()
-        pool.join()
+    # Create a multiprocessing manager and queue
+    with mp.Manager() as manager:
+        queue = manager.Queue()
+
+        # Update the arguments to include the queue
+        run_args_with_queue = [(args, queue) for args in run_args]
+
+        # Chunk the arguments into batches of size nprocs
+        batches = [run_args_with_queue[i:i + nprocs] for
+                   i in range(0, len(run_args_with_queue), nprocs)]
+
+        # Create a multiprocessing pool for each batch
+        for batch in batches:
+            with mp.Pool(processes=len(batch)) as pool:
+                models = pool.starmap(gfem_iteration, batch)
+                pool.close()
+                pool.join()
+
+            # Collect and print the results in order
+            while not queue.empty():
+                print(queue.get())
 
     # Get successful models
     successful_models = [model for model in models if not model.model_build_error]
@@ -159,7 +192,7 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1
     if error_count > 0:
         print(f"Total models with errors: {error_count}")
     else:
-        print("All GFEM models built successfully!")
+        print("All GFEM models successfully built!")
 
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
@@ -172,7 +205,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, perplex_db, sid, source, res, P_min=1, P_max=28, T_min=773,
+    def __init__(self, perplex_db, sid, source, res=128, P_min=1, P_max=28, T_min=773,
                  T_max=2273, seed=42, verbose=1):
         """
         """
@@ -187,7 +220,7 @@ class GFEMModel:
         self.source = source
         self.verbose = verbose
 
-        # Set geotherm threshold for extracting depth profiles
+        # Set geotherm threshold for depth profiles
         if res <= 8:
             self.geothresh = 40
         elif res <= 16:
@@ -219,14 +252,13 @@ class GFEMModel:
             self.ox_gfem = [ox for ox in self.ox_gfem if ox != "CR2O3"]
 
         # Perplex dirs and filepaths
-        self.model_out_dir = (f"gfems/{self.perplex_db}_{self.sid}{self.res}")
+        self.model_out_dir = (f"gfems/{self.sid}_{self.perplex_db}")
         self.perplex_assemblages = f"{self.model_out_dir}/assemblages.txt"
         self.perplex_targets = f"{self.model_out_dir}/target-array.tab"
 
         # Output file paths
-        self.model_prefix = f"{self.sid}{self.res}"
-        self.fig_dir = f"figs/gfem/{self.sid}"
-        self.log_file = f"log/log-{self.model_prefix}"
+        self.log_file = f"log/log-{self.sid}"
+        self.fig_dir = f"figs/{self.model_out_dir}"
 
         # Results
         self.loi = None
@@ -267,7 +299,7 @@ class GFEMModel:
                     return None
 
                 if self.verbose >= 1:
-                    print(f"  Found GFEM model for sample {self.model_prefix}!")
+                    print(f"  Found GFEM model for sample {self.sid}!")
 
                 return None
 
@@ -286,6 +318,45 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .0.1.           Helper Functions              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # print gfem model info !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _print_gfem_model_info(self):
+        """
+        """
+        # Get self attributes
+        res = self.res
+        sid = self.sid
+        P_min = self.P_min
+        P_max = self.P_max
+        T_min = self.T_min
+        T_max = self.T_max
+        source = self.source
+        targets = self.targets
+        ox_gfem = self.ox_gfem
+        features = self.features
+        perplex_db = self.perplex_db
+        model_built = self.model_built
+        model_out_dir = self.model_out_dir
+
+        print("+++++++++++++++++++++++++++++++++++++++++++++")
+        print(f"Building GFEM model: {sid}")
+        print("---------------------------------------------")
+        print(f"  PT resolution:  {res}")
+        print(f"  P range:        {P_min:.1f} - {P_max:.1f} GPa")
+        print(f"  T range:        {T_min:.0f} - {T_max:.0f} K")
+        print(f"  Sampleid:       {sid}")
+        print(f"  Source:         {source}")
+        print(f"  GFEM sys.:      {ox_gfem}")
+        print(f"  Targets:        {targets}")
+        print(f"  Features:       {features}")
+        print(f"  Thermo. data:   {perplex_db}")
+        print(f"  Model out dir:  {model_out_dir}")
+        print(f"  Model built:    {model_built}")
+        print("  --------------------")
+
+        return None
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get sample composition !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -307,8 +378,8 @@ class GFEMModel:
             raise ValueError("Sample name not found in the dataset!")
 
         # Get Fertility Index and LOI
-        self.loi = float(subset_df["LOI"].values)
-        self.fertility_index = float(subset_df["XI_FRAC"].values)
+        self.loi = float(subset_df["LOI"].values[0])
+        self.fertility_index = float(subset_df["XI_FRAC"].values[0])
 
         # Get the oxide compositions for the selected sample
         composition = []
@@ -732,9 +803,9 @@ class GFEMModel:
         """
         # Get self attributes
         res = self.res
+        sid = self.sid
         digits = self.digits
         perplex_db = self.perplex_db
-        model_prefix = self.model_prefix
         model_out_dir = self.model_out_dir
 
         # Transform units to bar
@@ -772,21 +843,21 @@ class GFEMModel:
 
         # Modify the copied configuration files within the perplex directory
         self._replace_in_file(f"{model_out_dir}/{build}",
-                              {"{SAMPLEID}": f"{model_prefix}",
+                              {"{SAMPLEID}": f"{sid}",
                                "{TMIN}": str(T_min), "{TMAX}": str(T_max),
                                "{PMIN}": str(P_min), "{PMAX}": str(P_max),
                                "{SAMPLECOMP}": " ".join(map(str, norm_comp))})
         self._replace_in_file(f"{model_out_dir}/{minimize}",
-                              {"{SAMPLEID}": f"{model_prefix}"})
+                              {"{SAMPLEID}": f"{sid}"})
         self._replace_in_file(f"{model_out_dir}/{targets}",
-                              {"{SAMPLEID}": f"{model_prefix}"})
+                              {"{SAMPLEID}": f"{sid}"})
         self._replace_in_file(f"{model_out_dir}/{phase}",
-                              {"{SAMPLEID}": f"{model_prefix}"})
+                              {"{SAMPLEID}": f"{sid}"})
         self._replace_in_file(f"{model_out_dir}/{options}",
                               {"{XNODES}": f"{int(res / 4)} {res + 1}",
                                "{YNODES}": f"{int(res / 4)} {res + 1}"})
         self._replace_in_file(f"{model_out_dir}/{draw}",
-                              {"{SAMPLEID}": f"{model_prefix}"})
+                              {"{SAMPLEID}": f"{sid}"})
 
         return None
 
@@ -802,8 +873,8 @@ class GFEMModel:
         timeout = self.timeout
         verbose = self.verbose
         log_file = self.log_file
+        perplex_db = self.perplex_db
         ox_exclude = self.ox_exclude
-        model_prefix = self.model_prefix
         model_out_dir = self.model_out_dir
         norm_sample_comp = self.norm_sample_comp
         ox_sub = [oxide for oxide in ox_gfem if oxide not in ox_exclude]
@@ -813,12 +884,13 @@ class GFEMModel:
             raise Exception("No Perple_X input! Call _configure_perplex_model() first ...")
 
         if verbose >= 1:
-            print(f"Building Perple_X model: {sid} ...")
+            print(f"  Running Perple_X with {perplex_db} database and composition (wt.%):")
             max_oxide_width = max(len(oxide) for oxide in ox_sub)
             max_comp_width = max(len(str(comp)) for comp in norm_sample_comp)
             max_width = max(max_oxide_width, max_comp_width)
             print(" ".join([f"  {oxide:<{max_width}}" for oxide in ox_sub]))
             print(" ".join([f"  {comp:<{max_width}}" for comp in norm_sample_comp]))
+            print("  --------------------")
 
         # Run programs with corresponding configuration files
         for program in ["build", "vertex", "werami", "pssect"]:
@@ -879,40 +951,40 @@ class GFEMModel:
 
                     if program == "werami" and i == 0:
                         # Copy werami pseudosection output
-                        shutil.copy(f"{model_out_dir}/{model_prefix}_1.tab",
+                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
                                     f"{model_out_dir}/target-array.tab")
 
                         # Remove old output
-                        os.remove(f"{model_out_dir}/{model_prefix}_1.tab")
+                        os.remove(f"{model_out_dir}/{sid}_1.tab")
 
                     elif program == "werami" and i == 1:
                         # Copy werami mineral assemblage output
-                        shutil.copy(f"{model_out_dir}/{model_prefix}_1.tab",
+                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
                                     f"{model_out_dir}/phases.tab")
 
                         # Remove old output
-                        os.remove(f"{model_out_dir}/{model_prefix}_1.tab")
+                        os.remove(f"{model_out_dir}/{sid}_1.tab")
 
                     elif program == "pssect":
                         # Copy pssect assemblages output
                         shutil.copy(f"{model_out_dir}/"
-                                    f"{model_prefix}_assemblages.txt",
+                                    f"{sid}_assemblages.txt",
                                     f"{model_out_dir}/assemblages.txt")
 
                         # Copy pssect auto refine output
                         shutil.copy(f"{model_out_dir}/"
-                                    f"{model_prefix}_auto_refine.txt",
+                                    f"{sid}_auto_refine.txt",
                                     f"{model_out_dir}/auto_refine.txt")
 
                         # Copy pssect seismic data output
                         shutil.copy(f"{model_out_dir}/"
-                                    f"{model_prefix}_seismic_data.txt",
+                                    f"{sid}_seismic_data.txt",
                                     f"{model_out_dir}/seismic_data.txt")
 
                         # Remove old output
-                        os.remove(f"{model_out_dir}/{model_prefix}_assemblages.txt")
-                        os.remove(f"{model_out_dir}/{model_prefix}_auto_refine.txt")
-                        os.remove(f"{model_out_dir}/{model_prefix}_seismic_data.txt")
+                        os.remove(f"{model_out_dir}/{sid}_assemblages.txt")
+                        os.remove(f"{model_out_dir}/{sid}_auto_refine.txt")
+                        os.remove(f"{model_out_dir}/{sid}_seismic_data.txt")
 
                 except subprocess.CalledProcessError as e:
                     print(f"Error: {e}")
@@ -954,11 +1026,14 @@ class GFEMModel:
                         # Convert from bar to GPa
                         if i == 1: value /= 1e4
 
+                        # Convert from kg/m3 to g/cm3
+                        if i == 2: value /= 1e3
+
                         # Convert assemblage index to an integer
                         if i == 5: value = int(value) if not np.isnan(value) else np.nan
 
-                        # Convert from % to fraction
-                        if (i == 6) or (i == 7): value /= 100
+                        # Make H2O nan if close to 0 wt.%
+                        if i == 6 or i == 7: value = np.nan if value <= 1e-4 else value
 
                         # Append results
                         results[list(results.keys())[i]].append(value)
@@ -998,9 +1073,9 @@ class GFEMModel:
         """
         """
         # Get self attributes
+        sid = self.sid
         verbose = self.verbose
         perplex_db = self.perplex_db
-        model_prefix = self.model_prefix
         model_out_dir = self.model_out_dir
         perplex_targets = self.perplex_targets
         perplex_assemblages = self.perplex_assemblages
@@ -1055,17 +1130,13 @@ class GFEMModel:
         # Convert numeric point results into numpy arrays
         for key, value in results.items():
             if key in point_params:
-                if key == "rho":
-                    # Convert from kg/m3 to g/cm3
-                    results[key] = np.round(np.array(value) / 1e3, 3)
-                else:
-                    results[key] = np.array(value)
+                results[key] = np.array(value)
 
         # Save as pandas df
         df = pd.DataFrame.from_dict(results)
 
         if verbose >= 2:
-            print(f"Writing Perple_X results: {model_prefix} ...")
+            print(f"Writing Perple_X results: {sid} ...")
 
         # Write to csv file
         df.to_csv(f"{model_out_dir}/results.csv", index=False)
@@ -1106,9 +1177,9 @@ class GFEMModel:
         """
         """
         # Get self attributes
+        sid = self.sid
         verbose = self.verbose
         model_built = self.model_built
-        model_prefix = self.model_prefix
         model_out_dir = self.model_out_dir
 
         # Check for model
@@ -1135,14 +1206,14 @@ class GFEMModel:
         any_array_all_nans = False
 
         for key, array in self.results.items():
-            if key not in ["melt"]:
+            if key not in ["melt", "h2o"]:
                 if np.all(np.isnan(array)):
                     any_array_all_nans = True
 
         if any_array_all_nans:
             self.results = {}
             self.model_build_error = True
-            self.model_error = f"GFEM model {model_prefix} produced all nans!"
+            self.model_error = f"GFEM model {sid} produced all nans!"
 
             raise Exception(self.model_error)
 
@@ -1219,11 +1290,9 @@ class GFEMModel:
         # Impute missing values
         for key, value in results_rearranged.items():
             if key in targets:
-                if key == "melt":
-                    # Process array
+                if key in ["melt", "h2o"]:
                     target_array_list.append(
-                        self._process_array(value.reshape(res + 1, res + 1)).flatten()
-                    )
+                        self._process_array(value.reshape(res + 1, res + 1)).flatten())
 
                 else:
                     # Impute target array with KNN
@@ -1250,10 +1319,8 @@ class GFEMModel:
         P_min = self.P_min
         P_max = self.P_max
         results = self.results
-        geothresh = self.geothresh
         targets = ["rho", "Vp", "Vs"]
         model_built = self.model_built
-        model_prefix = self.model_prefix
 
         # Check for model
         if not model_built:
@@ -1298,16 +1365,6 @@ class GFEMModel:
             # Get model profile
             P_model, _, target_model = self._get_geotherm(target)
 
-            # Create cropping mask
-            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
-            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
-            mask_model = (P_model >= P_min) & (P_model <= P_max)
-
-            # Crop profiles
-            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
-            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
-            P_model, target_model = P_model[mask_model], target_model[mask_model]
-
             # Initialize interpolators
             interp_prem = interp1d(P_prem, target_prem, fill_value="extrapolate")
             interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
@@ -1319,12 +1376,22 @@ class GFEMModel:
             P_prem, target_prem = x_new, interp_prem(x_new)
             P_stw105, target_stw105 = x_new, interp_stw105(x_new)
 
+            # Create cropping mask
+            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
+            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
+            mask_model = (P_model >= P_min) & (P_model <= P_max)
+
+            # Crop profiles
+            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
+            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
+            P_model, target_model = P_model[mask_model], target_model[mask_model]
+
             # Create nan mask
             nan_mask_model = np.isnan(target_model)
             nan_mask_prem = np.isnan(target_prem)
             nan_mask_stw105 = np.isnan(target_stw105)
-            nan_mask = np.logical_or(nan_mask_model,
-                                     np.logical_or(nan_mask_prem, nan_mask_stw105))
+            nan_mask = np.logical_or(
+                nan_mask_model, np.logical_or(nan_mask_prem, nan_mask_stw105))
 
             # Remove nans
             P_model, target_model = P_model[~nan_mask], target_model[~nan_mask]
@@ -1356,18 +1423,14 @@ class GFEMModel:
         filename = "assets/data/gfem-accuracy-vs-prem.csv"
 
         if verbose >= 1:
-            print(f"Saving {model_prefix} accuracy vs. PREM to {filename} ...")
+            print(f"  Saving {sid} accuracy vs. PREM to {filename} ...")
 
         if os.path.exists(filename) and os.stat(filename).st_size > 0:
             try:
                 df_existing = pd.read_csv(filename)
 
                 if df_existing.empty:
-                    if verbose >= 1:
-                        print(f"Saving {model_prefix} accuracy vs. PREM to {filename}!")
-
                     df.to_csv(filename, index=False)
-
                 else:
                     # Check existing samples
                     new_samples = df["SAMPLEID"].values
@@ -1376,24 +1439,20 @@ class GFEMModel:
 
                     if overlap:
                         if verbose >= 1:
-                            print(f"  {model_prefix} accuracy already exists at {filename}!")
+                            print(f"  {sid} accuracy already exists at {filename}!")
                     else:
-                        if verbose >= 1:
-                            print(f"Saving {model_prefix} accuracy vs. PREM to {filename}!")
-
                         df_existing = pd.concat([df_existing, df], ignore_index=True)
                         df_existing = df_existing.sort_values(by=["SAMPLEID", "TARGET"],
                                                               ignore_index=True)
                         df_existing.to_csv(filename, index=False)
 
             except pd.errors.EmptyDataError:
-                if verbose >= 1:
-                    print(f"Saving {model_prefix} accuracy vs. PREM to {filename}!")
-
                 df.to_csv(filename, index=False)
 
         else:
             df.to_csv(filename, index=False)
+
+        print("  --------------------")
 
         return None
 
@@ -1406,6 +1465,9 @@ class GFEMModel:
     def build_model(self, visualize=True):
         """
         """
+        # Print info
+        self._print_gfem_model_info()
+
         # Set retries
         max_retries = 3
 
@@ -1454,6 +1516,7 @@ class GFEMModel:
             traceback.print_exc()
 
         return None
+
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .0.5.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1473,7 +1536,6 @@ class GFEMModel:
         verbose = self.verbose
         geothresh = self.geothresh
         model_built = self.model_built
-        model_prefix = self.model_prefix
         target_array = self.target_array
         P, T = results["P"], results["T"]
         extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
@@ -1495,12 +1557,12 @@ class GFEMModel:
             os.makedirs(fig_dir, exist_ok=True)
 
         if verbose >= 1:
-            print(f"Visualizing Perple_X model: {sid} ...")
+            print(f"  Visualizing Perple_X model ...")
 
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            path = f"{fig_dir}/{model_prefix}-{target}.png"
+            path = f"{fig_dir}/{sid}-{target}.png"
             check = os.path.exists(path)
 
             if check:
@@ -1525,6 +1587,11 @@ class GFEMModel:
             # Reshape targets into square array
             square_target = target_array[:, i].reshape(res + 1, res + 1)
 
+            # Check for all nans
+            if np.all(np.isnan(square_target)):
+                print(f"  {target.upper()} array is all nans. Skipping plot ...")
+                continue
+
             # Use discrete colorscale
             if target in ["assemblage", "variance"]:
                 color_discrete = True
@@ -1545,8 +1612,8 @@ class GFEMModel:
 
             # Set colorbar limits for better comparisons
             if not color_discrete:
-                vmin=np.min(square_target[np.logical_not(np.isnan(square_target))])
-                vmax=np.max(square_target[np.logical_not(np.isnan(square_target))])
+                vmin = np.min(square_target[np.logical_not(np.isnan(square_target))])
+                vmax = np.max(square_target[np.logical_not(np.isnan(square_target))])
 
             else:
                 vmin = int(np.nanmin(np.unique(square_target)))
@@ -1556,7 +1623,7 @@ class GFEMModel:
             target_rename = target.replace("_", "-")
 
             # Print filepath
-            filename = f"{model_prefix}-{target_rename}.png"
+            filename = f"{sid}-{target_rename}.png"
 
             # Make results df
             results = pd.DataFrame({"P": P, "T": T, target: square_target.flatten()})
@@ -1575,6 +1642,7 @@ class GFEMModel:
             if color_discrete:
                 # Discrete color palette
                 num_colors = vmax - vmin + 1
+                num_colors = max(num_colors, num_colors // 4)
 
                 if palette == "viridis":
                     if color_reverse:
@@ -1620,7 +1688,8 @@ class GFEMModel:
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
                 if plot_geotherms:
-                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white", linewidth=3)
+                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white",
+                            linewidth=3)
                     ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="white",
                             linewidth=3)
                     ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="white",
@@ -1636,8 +1705,7 @@ class GFEMModel:
                              rotation=67, color="white")
                 ax.set_xlabel("T (K)")
                 ax.set_ylabel("P (GPa)")
-                plt.colorbar(im, ax=ax, ticks=np.arange(vmin, vmax, num_colors // 4),
-                             label="")
+                plt.colorbar(im, ax=ax, label="", ticks=np.arange(vmin, vmax, num_colors))
 
             else:
                 # Continuous color palette
@@ -1674,20 +1742,21 @@ class GFEMModel:
 
                 # Adjust diverging colorscale to center on zero
                 if palette == "seismic":
-                    vmin=-np.max(
+                    vmin = -np.max(
                         np.abs(square_target[np.logical_not(np.isnan(square_target))]))
-                    vmax=np.max(
+                    vmax = np.max(
                         np.abs(square_target[np.logical_not(np.isnan(square_target))]))
                 else:
                     vmin, vmax = vmin, vmax
 
                     # Adjust vmin close to zero
-                    if vmin <= 1e-4:
-                        vmin = 0
+                    if vmin <= 1e-4: vmin = 0
 
-                    # Set melt fraction to 0–100 %
-                    if target == "melt":
-                        vmin, vmax = 0, 100
+                    # Set melt fraction to 0–100 vol.%
+                    if target == "melt": vmin, vmax = 0, 100
+
+                    # Set h2o fraction to 0–100 wt.%
+                    if target == "h2o": vmin, vmax = 0, 20
 
                 # Set nan color
                 cmap = plt.cm.get_cmap(cmap)
@@ -1699,7 +1768,8 @@ class GFEMModel:
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
                 if plot_geotherms:
-                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white", linewidth=3)
+                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white",
+                            linewidth=3)
                     ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="white",
                             linewidth=3)
                     ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="white",
@@ -1733,6 +1803,8 @@ class GFEMModel:
                 elif target == "Vs":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
                 elif target == "melt":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                elif target == "h2o":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                 elif target == "assemblage":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
@@ -1779,9 +1851,6 @@ class GFEMModel:
 def main():
     """
     """
-    from visualize import (visualize_gfem_pt_range, visualize_gfem, visualize_gfem_diff,
-                           visualize_prem_comps, compose_dataset_plots)
-
     # Parse and check arguments
     valid_args = check_arguments(parse_arguments(), "gfem.py")
     locals().update(valid_args)
@@ -1794,20 +1863,21 @@ def main():
     # Build GFEM models
     gfems = {}
     for name, source in sources.items():
-        sids = get_sampleids(source, "all")
+        sids = get_sampleids(source)
         gfems[name] = build_gfem_models(source, sids)
 
-    # Visualize GFEM models
-    visualize_gfem_pt_range(gfems["benchmark"][0])
-    visualize_prem_comps(gfems["middle"] + gfems["random"])
-
-    for name, models in gfems.items():
-        visualize_gfem(models)
-        compose_dataset_plots(models)
+#    # Visualize GFEM models
+#    visualize_gfem_pt_range(gfems["benchmark"][0])
+#    visualize_prem_comps(gfems["middle"] + gfems["random"])
+#
+#    for name, models in gfems.items():
+#        visualize_gfem(models)
+#        compose_dataset_plots(models)
 
     print("GFEM models built and visualized!")
 
     return None
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
     main()
