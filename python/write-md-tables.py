@@ -1,9 +1,21 @@
+#######################################################
+## .0.              Load Libraries               !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# utilities !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import os
 import re
 import shutil
 import numpy as np
 import pandas as pd
 
+#######################################################
+## .1.            Write Markdown Tables          !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# main !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
     """
@@ -11,6 +23,9 @@ def main():
     df_path = f"{data_dir}/benchmark-samples-pca.csv"
     df_synth_path = f"{data_dir}/synthetic-samples-benchmarks.csv"
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.0.          Benchmark Samples              !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     if (os.path.exists(df_path) and os.path.exists(df_synth_path)):
         print("Writing benchmark-samples.md")
 
@@ -54,6 +69,9 @@ def main():
     else:
         print(f"Warning: {df_path} does not exist!")
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.1.          Earthchem Counts               !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     if os.path.exists(f"{data_dir}/earthchem-counts.csv"):
         print("Writing earthchem-counts.md")
 
@@ -86,6 +104,9 @@ def main():
     else:
         print(f"Warning: {data_dir}/earthchem-counts.csv does not exist!")
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.2.            RocMLM Config                !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     if os.path.exists(f"{data_dir}/rocmlm-config.csv"):
         print("Writing rocmlm-config.md")
 
@@ -108,6 +129,9 @@ def main():
     else:
         print(f"Warning: {data_dir}/rocmlm-config.csv does not exist!")
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.3.          RocMLM Performance             !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     if os.path.exists(f"{data_dir}/rocmlm-performance.csv"):
         print("Writing rocmlm-performance.md")
 
@@ -189,6 +213,9 @@ def main():
     else:
         print(f"Warning: {data_dir}/rocmlm-performance.csv does not exist!")
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.4.            GFEM Efficiency              !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     if os.path.exists(f"{data_dir}/gfem-efficiency.csv"):
         print("Writing gfem-efficiency.md")
 
@@ -209,7 +236,8 @@ def main():
     else:
         print(f"Warning {data_dir}/gfem-efficiency.csv does not exist!")
 
-    print("write-markdown-tables.py done!")
+    print("Markdown tables written to draft dir !")
+    print("=============================================")
 
     return None
 

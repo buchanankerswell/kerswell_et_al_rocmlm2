@@ -3,7 +3,7 @@ DATE = $(shell date +"%d-%m-%Y")
 LOGFILE := log/log-$(DATE)
 LOG := 2>&1 | tee -a $(LOGFILE)
 # Conda config
-CONDAENVNAME = rocmlm
+CONDAENVNAME = rocmlm2
 HASCONDA := $(shell command -v conda > /dev/null && echo true || echo false)
 CONDASPECSFILE = python/conda-environment.yaml
 CONDAPYTHON = $$(conda run -n $(CONDAENVNAME) which python)
@@ -11,16 +11,14 @@ CONDAPYTHON = $$(conda run -n $(CONDAENVNAME) which python)
 # Directories with data and perplex configs
 DATADIR = assets/data
 # Python scripts
-PYTHON = \
-				 python/pca.py \
+PYTHON = python/pca.py \
 				 python/gfem.py \
 				 python/utils.py \
 				 python/rocmlm.py \
 				 python/visualize.py \
 				 python/write-md-tables.py
 # Cleanup directories
-DATAPURGE = \
-						log \
+DATAPURGE = log \
 						python/__pycache__ \
 						$(DATADIR)/synthetic*.csv \
 						$(DATADIR)/lut-efficiency.csv \
@@ -37,11 +35,6 @@ all: $(LOGFILE) $(PYTHON) gfems rocmlms
 
 write_md_tables: $(LOGFILE) $(PYTHON)
 	@$(CONDAPYTHON) -u python/write-md-tables.py $(LOG)
-	@echo "=============================================" $(LOG)
-
-test: $(LOGFILE) $(PYTHON) mixing_arrays
-	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/test.py $(LOG)
-	@echo "=============================================" $(LOG)
 
 rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
 	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/rocmlm.py $(LOG)
@@ -49,26 +42,16 @@ rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
 
 gfems: mixing_arrays
 	@$(CONDAPYTHON) -u python/gfem.py $(LOG)
-	@echo "=============================================" $(LOG)
 
 mixing_arrays: initialize
-	@if [ ! -e "$(DATADIR)/benchmark-samples-pca.csv" ]; then \
-		$(CONDAPYTHON) -u python/pca.py $(LOG); \
-	else \
-		echo "Mixing arrays found!" $(LOG); \
-	fi
-	@echo "=============================================" $(LOG)
+	@$(CONDAPYTHON) -u python/pca.py $(LOG)
 
 initialize: $(LOGFILE) $(PYTHON) create_conda_env get_assets
 
 get_assets: $(DATADIR)
 
 $(DATADIR): $(LOGFILE) $(PYTHON)
-	@if [ ! -d "$(DATADIR)" ]; then \
-		$(CONDAPYTHON) -u python/utils.py $(LOG); \
-	else \
-		echo "GFEM programs and data files found!" $(LOG); \
-	fi
+	@$(CONDAPYTHON) -u python/utils.py $(LOG)
 
 $(LOGFILE):
 	@if [ ! -e "$(LOGFILE)" ]; then \
@@ -83,7 +66,7 @@ remove_conda_env:
 create_conda_env: $(LOGFILE) $(CONDASPECSFILE) find_conda_env
 	@if [ "$(HASCONDA)" = "false" ]; then \
 		echo "Install conda first!" $(LOG); \
-		echo "See: https://github.com/buchanankerswell/kerswell_et_al_rocmlm" $(LOG); \
+		echo "See: https://github.com/buchanankerswell/kerswell_et_al_rocmlm_hydrated" $(LOG); \
 		exit 1; \
 	fi
 	@if [ -d "$(MYENVDIR)" ]; then \
@@ -93,7 +76,6 @@ create_conda_env: $(LOGFILE) $(CONDASPECSFILE) find_conda_env
 		conda env create --file $(CONDASPECSFILE) $(LOG) > /dev/null 2>&1; \
 		echo "Conda environment $(CONDAENVNAME) created!" $(LOG); \
 	fi
-	@echo "=============================================" $(LOG)
 
 find_conda_env: $(LOGFILE)
 	$(eval MYENVDIR := $(shell conda env list | grep $(CONDAENVNAME) | awk '{print $$2}'))

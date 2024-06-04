@@ -10,12 +10,12 @@ import re
 import time
 import random
 import shutil
+import warnings
 import traceback
 import itertools
 import subprocess
 from datetime import datetime
 from contextlib import redirect_stdout
-from utils import parse_arguments, check_arguments
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # parallel computing !!
@@ -38,165 +38,401 @@ from sklearn.metrics import r2_score, mean_squared_error
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#import seaborn as sns
-#from scipy import ndimage
-#import matplotlib.cm as cm
+import cv2
+import seaborn as sns
 import matplotlib.pyplot as plt
-#import matplotlib.lines as mlines
-#import matplotlib.ticker as ticker
-#import matplotlib.patches as mpatches
-#from PIL import Image, ImageDraw, ImageFont
-#from matplotlib.colorbar import ColorbarBase
-#from matplotlib.patches import FancyArrowPatch, ArrowStyle
-#from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import matplotlib.lines as mlines
+import matplotlib.ticker as ticker
+import matplotlib.patches as mpatches
+from PIL import Image, ImageDraw, ImageFont
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.colors import ListedColormap, Normalize, SymLogNorm
 
 #######################################################
-## .1.             Helper Functions              !!! ##
+## .1.                 Visualize                 !!! ##
 #######################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# get sampleids !!
+# combine plots horizontally !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_sampleids(filepath, batch="all", n_batches=8):
+def combine_plots_horizontally(image1_path, image2_path, output_path, caption1, caption2,
+                               font_size=150, caption_margin=25, dpi=300):
     """
     """
-    # Check for file
-    if not os.path.exists(filepath):
-        raise Exception("Sample data source does not exist!")
+    # Open the images
+    image1 = Image.open(image1_path)
+    image2 = Image.open(image2_path)
 
-    # Read data
-    df = pd.read_csv(filepath)
+    # Determine the maximum height between the two images
+    max_height = max(image1.height, image2.height)
 
-    if "benchmark" in filepath or batch == "all":
-        return df["SAMPLEID"].values
+    # Create a new image with twice the width and the maximum height
+    combined_width = image1.width + image2.width
+    combined_image = Image.new("RGB", (combined_width, max_height), (255, 255, 255))
 
-    # Calculate the batch size
-    total_samples = len(df)
-    batch_size = int(total_samples // n_batches)
+    # Set the DPI metadata
+    combined_image.info["dpi"] = (dpi, dpi)
 
-    # Check if batch number is within valid range
-    if batch < 0 or batch >= n_batches:
-        print("Invalid batch number! Sampling from the first 0th batch ...")
-        batch = 0
+    # Paste the first image on the left
+    combined_image.paste(image1, (0, 0))
 
-    # Calculate the start and end index for the specified batch
-    start = batch * batch_size
-    end = min((batch + 1) * batch_size, total_samples)
+    # Paste the second image on the right
+    combined_image.paste(image2, (image1.width, 0))
 
-    return df[start:end]["SAMPLEID"].values
+    # Add captions
+    draw = ImageDraw.Draw(combined_image)
+    font = ImageFont.truetype("Arial", font_size)
+    caption_margin = caption_margin
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# gfem_iteration !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def gfem_iteration(args, queue):
-    """
-    """
-    # Unpack arguments
-    perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax = args
+    # Add caption
+    draw.text((caption_margin, caption_margin), caption1, font=font, fill="black")
 
-    # Create a StringIO object to capture prints
-    stdout_buffer = io.StringIO()
+    # Add caption "b"
+    draw.text((image1.width + caption_margin, caption_margin), caption2, font=font,
+              fill="black")
 
-    # Redirect stdout to the StringIO object
-    with redirect_stdout(stdout_buffer):
-        iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
-
-        if iteration.model_built:
-            queue.put(stdout_buffer.getvalue())
-
-            return iteration
-
-        else:
-            iteration.build_model()
-
-            if not iteration.model_build_error:
-                iteration.get_results()
-                iteration.get_feature_array()
-                iteration.get_target_array()
-                queue.put(stdout_buffer.getvalue())
-
-                return iteration
-
-            else:
-                queue.put(stdout_buffer.getvalue())
-
-                return iteration
-
-    # Capture any remaining output
-    queue.put(stdout_buffer.getvalue())
+    # Save the combined image with captions
+    combined_image.save(output_path, dpi=(dpi, dpi))
 
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# build gfem models !!
+# combine plots vertically !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1,
-                      Pmax=28, Tmin=773, Tmax=2273, nprocs=os.cpu_count() - 2, verbose=1):
+def combine_plots_vertically(image1_path, image2_path, output_path, caption1, caption2,
+                             font_size=150, caption_margin=25, dpi=300):
     """
     """
-    # Check sampleids
-    if os.path.exists(source) and sampleids is None:
-        sampleids = sorted(get_sampleids(source))
-    elif os.path.exists(source) and sampleids is not None:
-        sids = get_sampleids(source)
-        if not set(sampleids).issubset(sids):
-            raise Exception(f"Sampleids {sampleids} not in source: {source}!")
-    else:
-        raise Exception(f"Source {source} does not exist!")
+    # Open the images
+    image1 = Image.open(image1_path)
+    image2 = Image.open(image2_path)
 
-    print("Building GFEM models for samples:")
-    print(sampleids)
+    # Determine the maximum width between the two images
+    max_width = max(image1.width, image2.width)
 
-    # Define number of processors
-    if nprocs is None or nprocs > os.cpu_count(): nprocs = os.cpu_count()
+    # Create a new image with the maximum width and the sum of the heights
+    combined_height = image1.height + image2.height
+    combined_image = Image.new("RGB", (max_width, combined_height), (255, 255, 255))
 
-    # Make sure nprocs is not greater than sampleids
-    if nprocs > len(sampleids): nprocs = len(sampleids)
+    # Paste the first image on the top
+    combined_image.paste(image1, (0, 0))
 
-    # Create list of args for mp pooling
-    run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax) for
-                sampleid in sampleids]
+    # Paste the second image below the first
+    combined_image.paste(image2, (0, image1.height))
 
-    # Create a multiprocessing manager and queue
-    with mp.Manager() as manager:
-        queue = manager.Queue()
+    # Add captions
+    draw = ImageDraw.Draw(combined_image)
+    font = ImageFont.truetype("Arial", font_size)
+    caption_margin = caption_margin
 
-        # Update the arguments to include the queue
-        run_args_with_queue = [(args, queue) for args in run_args]
+    # Add caption
+    draw.text((caption_margin, caption_margin), caption1, font=font, fill="black")
 
-        # Chunk the arguments into batches of size nprocs
-        batches = [run_args_with_queue[i:i + nprocs] for
-                   i in range(0, len(run_args_with_queue), nprocs)]
+    # Add caption "b"
+    draw.text((caption_margin, image1.height + caption_margin), caption2, font=font,
+              fill="black")
 
-        # Create a multiprocessing pool for each batch
-        for batch in batches:
-            with mp.Pool(processes=len(batch)) as pool:
-                models = pool.starmap(gfem_iteration, batch)
-                pool.close()
-                pool.join()
+    # Save the combined image with captions
+    combined_image.save(output_path, dpi=(dpi, dpi))
 
-            # Collect and print the results in order
-            while not queue.empty():
-                print(queue.get())
+    return None
 
-    # Get successful models
-    successful_models = [model for model in models if not model.model_build_error]
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compose gfem plots !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compose_gfem_plots(gfem_models, clean=False):
+    """
+    """
+    # Iterate through all models
+    for gfem_model in gfem_models:
+        # Get model data
+        sid = gfem_model.sid
+        res = gfem_model.res
+        targets = gfem_model.targets
+        fig_dir = gfem_model.fig_dir
+        verbose = gfem_model.verbose
 
-    # Check for errors in the models
-    error_count = 0
+        # Check for existing plots
+        existing_comps = []
+        for target in targets:
+            fig_1 = f"{fig_dir}/image2-{sid}-{target}.png"
+            fig_2 = f"{fig_dir}/image3-{sid}-{target}.png"
+            fig_3 = f"{fig_dir}/image4-{sid}-{target}.png"
+            fig_4 = f"{fig_dir}/image9-{sid}.png"
 
-    for model in models:
-        if model.model_build_error:
-            error_count += 1
+            check_comps = ((os.path.exists(fig_3) and os.path.exists(fig_4)) |
+                           (os.path.exists(fig_1) and os.path.exists(fig_2)) |
+                           (os.path.exists(fig_1) and os.path.exists(fig_2) and
+                            os.path.exists(fig_4)))
 
-    if error_count > 0:
-        print(f"Total models with errors: {error_count}")
-    else:
-        print("All GFEM models successfully built!")
+            if check_comps:
+                existing_comps.append(check_comps)
 
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        if existing_comps:
+            return None
 
-    return successful_models
+        for target in targets:
+            # Check for existing plots
+            fig = f"{fig_dir}/{sid}-{target}.png"
+            check_fig = os.path.exists(fig)
+
+            if not check_fig:
+                print(f"  {target.upper()} array is all nans. Skipping plot ...")
+                continue
+
+            if target not in ["assemblage", "variance"]:
+                combine_plots_horizontally(
+                    f"{fig_dir}/{sid}-{target}.png",
+                    f"{fig_dir}/{sid}-{target}-grad.png",
+                    f"{fig_dir}/image2-{sid}-{target}.png",
+                    caption1="a)",
+                    caption2="b)"
+                )
+
+                print(f"  Figure saved to: {fig_dir}/image2-{sid}-{target}.png ...")
+
+                if target in ["rho", "Vp", "Vs"]:
+                    combine_plots_horizontally(
+                        f"{fig_dir}/{sid}-{target}.png",
+                        f"{fig_dir}/{sid}-{target}-grad.png",
+                        f"{fig_dir}/temp1.png",
+                        caption1="a)",
+                        caption2="b)"
+                    )
+
+                    combine_plots_horizontally(
+                        f"{fig_dir}/temp1.png",
+                        f"{fig_dir}/{sid}-{target}-prem.png",
+                        f"{fig_dir}/image3-{sid}-{target}.png",
+                        caption1="",
+                        caption2="c)"
+                    )
+
+                    print(f"  Figure saved to: {fig_dir}/image3-{sid}-{target}.png ...")
+
+        if all(item in targets for item in ["rho", "Vp", "Vs"]):
+            captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
+            targets = ["rho", "Vp", "Vs"]
+
+            for i, target in enumerate(targets):
+                combine_plots_horizontally(
+                    f"{fig_dir}/{sid}-{target}.png",
+                    f"{fig_dir}/{sid}-{target}-grad.png",
+                    f"{fig_dir}/temp1.png",
+                    caption1=captions[i][0],
+                    caption2=captions[i][1]
+                )
+
+                combine_plots_horizontally(
+                    f"{fig_dir}/temp1.png",
+                    f"{fig_dir}/{sid}-{target}-prem.png",
+                    f"{fig_dir}/temp-{target}.png",
+                    caption1="",
+                    caption2=captions[i][2]
+                )
+
+            combine_plots_vertically(
+                f"{fig_dir}/temp-rho.png",
+                f"{fig_dir}/temp-Vp.png",
+                f"{fig_dir}/temp1.png",
+                caption1="",
+                caption2=""
+            )
+
+            combine_plots_vertically(
+                f"{fig_dir}/temp1.png",
+                f"{fig_dir}/temp-Vs.png",
+                f"{fig_dir}/image9-{sid}.png",
+                caption1="",
+                caption2=""
+            )
+
+            print(f"  Figure saved to: {fig_dir}/image9-{sid}.png ...")
+
+        if clean:
+            # Clean up directory
+            tmp_files = glob.glob(f"{fig_dir}/temp*.png")
+            prem_files = glob.glob(f"{fig_dir}/*prem.png")
+            grad_files = glob.glob(f"{fig_dir}/*grad.png")
+
+            for file in tmp_files + prem_files + grad_files + ppx_files:
+                os.remove(file)
+
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize prem comps !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps.png",
+                         figwidth=6.3, figheight=5.8, fontsize=28):
+    """
+    """
+    warnings.simplefilter("ignore", category=UserWarning)
+
+    # Data asset dir
+    data_dir = "assets/data"
+
+    # Check for data dir
+    if not os.path.exists(data_dir):
+        raise Exception(f"Data not found at {data_dir} !")
+
+    # Check for figs directory
+    if not os.path.exists(fig_dir):
+        os.makedirs(fig_dir, exist_ok=True)
+
+    # Get correct Depletion column
+    XI_col = "XI_FRAC"
+
+    # Check for benchmark samples
+    df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
+
+    # Read benchmark samples
+    if os.path.exists(df_synth_bench_path):
+        df_synth_bench = pd.read_csv(df_synth_bench_path)
+
+    # Set plot style and settings
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = fontsize
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
+    plt.rcParams["legend.facecolor"] = "0.9"
+    plt.rcParams["legend.loc"] = "upper left"
+    plt.rcParams["legend.fontsize"] = "small"
+    plt.rcParams["figure.autolayout"] = "True"
+
+    # Colormap
+    colormap = plt.colormaps["tab10"]
+
+    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(figwidth * 3, figheight))
+
+    for j, model in enumerate(gfem_models):
+        # Get gfem model data
+        sid = model.sid
+        res = model.res
+        targets = model.targets
+        results = model.results
+        xi = model.fertility_index
+        geothresh = model.geothresh
+        target_units = model.target_units
+
+        # Filter targets for gradient images
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
+        target_units = [target_units[i] for i in t_ind]
+        targets = [targets[i] for i in t_ind]
+
+        # Get 1D reference models
+        ref_models = model._get_1d_reference_models()
+
+        # Change endmember sampleids
+        if sid == "sm000":
+            sid = "DSUM"
+        elif sid == "sm129":
+            sid = "PSUM"
+
+        for i, target in enumerate(targets):
+            # Get 1D refernce model profiles
+            P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
+            P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
+
+            # Extract target values along a geotherm
+            P2, _, target2 = model._get_geotherm(
+                target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                mantle_potential=1573)
+
+            # Get min and max P
+            P_min = np.nanmin(P2)
+            P_max = np.nanmax(P2)
+
+            # Initialize interpolators
+            interp_prem = interp1d(P_prem, target_prem, fill_value="extrapolate")
+            interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
+
+            # New x values for interpolation
+            x_new = np.linspace(P_min, P_max, len(P2))
+
+            # Interpolate profiles
+            P_prem, target_prem = x_new, interp_prem(x_new)
+            P_stw105, target_stw105 = x_new, interp_stw105(x_new)
+
+            # Crop profiles
+            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
+            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
+            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
+            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
+
+            # Crop results
+            mask2 = (P2 >= P_min) & (P2 <= P_max)
+            P2, target2 = P2[mask2], target2[mask2]
+
+            # Create colorbar
+            pal = sns.color_palette("magma", as_cmap=True).reversed()
+            norm = plt.Normalize(df_synth_bench[XI_col].min(), df_synth_bench[XI_col].max())
+            sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
+            sm.set_array([])
+
+            ax = axes[i]
+
+            if j == 0:
+                # Plot reference models
+                ax.plot(target_prem, P_prem, "-", linewidth=4.5, color="forestgreen",
+                        label="PREM", zorder=7)
+                ax.plot(target_stw105, P_stw105, ":", linewidth=4.5, color="forestgreen",
+                        label="STW105", zorder=7)
+
+            if sid == "PSUM":
+                ax.plot(target2, P2, "-", linewidth=6.5, color=sm.to_rgba(xi),
+                        label="PSUM", zorder=6)
+            if sid == "DSUM":
+                ax.plot(target2, P2, "-", linewidth=6.5, color=sm.to_rgba(xi),
+                        label="DSUM", zorder=6)
+
+            # Plot GFEM and RocMLM profiles
+            ax.plot(target2, P2, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.1)
+
+            if target == "rho":
+                target_label = "Density"
+            else:
+                target_label = target
+
+            if i != 0:
+                ax.set_ylabel("")
+            else:
+                ax.set_ylabel("P (GPa)")
+
+            ax.set_xlabel(f"{target_label} ({target_units[i]})")
+
+            if target in ["Vp", "Vs", "rho"]:
+                ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+
+            # Convert the primary y-axis data (pressure) to depth
+            depth_conversion = lambda P: P * 30
+            depth_values = depth_conversion(P_prem)
+
+            if i == 2:
+                # Create the secondary y-axis and plot depth on it
+                ax2 = ax.secondary_yaxis(
+                    "right", functions=(depth_conversion, depth_conversion))
+                ax2.set_yticks([410, 670])
+                ax2.set_ylabel("Depth (km)")
+                cbaxes = inset_axes(ax, width="40%", height="3%", loc=2)
+                colorbar = plt.colorbar(sm, ax=ax, cax=cbaxes, label="$\\xi$",
+                                        orientation="horizontal")
+
+                ax.legend(loc="lower right", columnspacing=0, handletextpad=0.2,
+                           fontsize=fontsize * 0.833)
+
+    fig.text(0.00, 0.98, "a)", fontsize=fontsize * 1.4)
+    fig.text(0.33, 0.98, "b)", fontsize=fontsize * 1.4)
+    fig.text(0.65, 0.98, "c)", fontsize=fontsize * 1.4)
+
+    # Save the plot to a file
+    plt.savefig(f"{fig_dir}/{filename}")
+
+    # Close device
+    plt.close()
+
+    return None
 
 #######################################################
 ## .2.              GFEMModel class              !!! ##
@@ -237,6 +473,7 @@ class GFEMModel:
         self.digits = 3
         self.features = ["XI_FRAC", "LOI"]
         self.targets = ["rho", "Vp", "Vs", "melt", "h2o", "assemblage", "variance"]
+        self.target_units = ["g/cm$^3$", "km/s", "km/s", "vol.%", "wt.%", "", ""]
 
         # Check perplex db
         if perplex_db not in ["hp02", "hp633"]:
@@ -257,6 +494,7 @@ class GFEMModel:
         self.perplex_targets = f"{self.model_out_dir}/target-array.tab"
 
         # Output file paths
+        self.data_dir = "assets/data"
         self.log_file = f"log/log-{self.sid}"
         self.fig_dir = f"figs/{self.model_out_dir}"
 
@@ -291,7 +529,7 @@ class GFEMModel:
                     self.get_target_array()
 
                 except Exception as e:
-                    print(f"!!! ERROR !!!")
+                    print(f"!!! ERROR in GFEMModel() !!!")
                     print(f"{e}")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     traceback.print_exc()
@@ -299,7 +537,7 @@ class GFEMModel:
                     return None
 
                 if self.verbose >= 1:
-                    print(f"  Found GFEM model for sample {self.sid}!")
+                    print(f"  Found GFEM model for sample {self.sid} !")
 
                 return None
 
@@ -316,7 +554,7 @@ class GFEMModel:
         return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .0.1.           Helper Functions              !!! ++
+    #+ .2.0.           Helper Functions              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # print gfem model info !!
@@ -375,7 +613,7 @@ class GFEMModel:
         subset_df = df[df["SAMPLEID"] == sid]
 
         if subset_df.empty:
-            raise ValueError("Sample name not found in the dataset!")
+            raise ValueError("Sample name not found in the dataset !")
 
         # Get Fertility Index and LOI
         self.loi = float(subset_df["LOI"].values[0])
@@ -467,7 +705,7 @@ class GFEMModel:
         subset_df = df[df["SAMPLEID"] == sid]
 
         if subset_df.empty:
-            raise ValueError("Sample name not found in the dataset!")
+            raise ValueError("Sample name not found in the dataset !")
 
         # Get features for selected sample
         feature_values = subset_df[features].values.flatten().tolist()
@@ -503,7 +741,9 @@ class GFEMModel:
         # Get self attributes
         sid = self.sid
         res = self.res
+        ox_gfem = self.ox_gfem
         log_file = self.log_file
+        perplex_db = self.perplex_db
 
         if os.path.exists(log_file) and os.path.exists("assets/data"):
             # Define a list to store the time values
@@ -525,14 +765,14 @@ class GFEMModel:
             last_value = time_values[-1]
 
             # Create the line to append to the CSV file
-            line_to_append = (f"{sid},{res**2},{last_value:.1f}")
+            line_to_append = (f"{sid},{perplex_db},{len(ox_gfem)}{res**2},{last_value:.1f}")
 
             date_formatted = datetime.now().strftime("%d-%m-%Y")
             csv_filepath = f"assets/data/gfem-efficiency-{date_formatted}.csv"
 
             # Check if the CSV file already exists
             if not os.path.exists(csv_filepath):
-                header_line = "sample,size,time"
+                header_line = "sample,database,n_ox,size,time"
 
                 # If the file does not exist, write the header line first
                 with open(csv_filepath, "w") as csv_file:
@@ -648,12 +888,12 @@ class GFEMModel:
     def _get_1d_reference_models(self):
         """
         """
-        # Data asset dir
-        data_dir = "assets/data"
+        # Get self attributes
+        data_dir = self.data_dir
 
         # Check for data dir
         if not os.path.exists(data_dir):
-            raise Exception(f"Data not found at {data_dir}!")
+            raise Exception(f"Data not found at {data_dir} !")
 
         # Reference model paths
         ref_paths = {"prem": f"{data_dir}/PREM_1s.csv", "stw105": f"{data_dir}/STW105.csv"}
@@ -672,7 +912,7 @@ class GFEMModel:
         # Load reference models
         for name, path in ref_paths.items():
             if not os.path.exists(path):
-                raise Exception(f"Refernce model {name} not found at {path}!")
+                raise Exception(f"Refernce model {name} not found at {path} !")
 
             # Read reference model
             model = pd.read_csv(path, header=None, names=ref_cols[name])
@@ -793,7 +1033,7 @@ class GFEMModel:
         return P_values, T_values, targets
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .0.2.          Perple_X Functions             !!! ++
+    #+ .2.1.          Perple_X Functions             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # configure perplex model !!
@@ -1168,7 +1408,7 @@ class GFEMModel:
         return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .0.3.        Post Process GFEM Models         !!! ++
+    #+ .2.2.        Post Process GFEM Models         !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get results !!
@@ -1319,6 +1559,7 @@ class GFEMModel:
         P_min = self.P_min
         P_max = self.P_max
         results = self.results
+        data_dir = self.data_dir
         targets = ["rho", "Vp", "Vs"]
         model_built = self.model_built
 
@@ -1333,7 +1574,7 @@ class GFEMModel:
             self.get_target_array()
 
         except Exception as e:
-            print(f"!!! ERROR in measure_gfem_model_accuracy_vs_prem !!!")
+            print(f"!!! ERROR in measure_gfem_model_accuracy_vs_prem() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
@@ -1342,12 +1583,9 @@ class GFEMModel:
         if not results:
             raise Exception("No GFEM model results! Call get_results() first ...")
 
-        # Data asset dir
-        data_dir = "assets/data"
-
         # Check for data dir
         if not os.path.exists(data_dir):
-            raise Exception(f"Data not found at {data_dir}!")
+            raise Exception(f"Data not found at {data_dir} !")
 
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
@@ -1387,15 +1625,14 @@ class GFEMModel:
             P_model, target_model = P_model[mask_model], target_model[mask_model]
 
             # Create nan mask
-            nan_mask_model = np.isnan(target_model)
             nan_mask_prem = np.isnan(target_prem)
+            nan_mask_model = np.isnan(target_model)
             nan_mask_stw105 = np.isnan(target_stw105)
-            nan_mask = np.logical_or(
-                nan_mask_model, np.logical_or(nan_mask_prem, nan_mask_stw105))
+            nan_mask = nan_mask_model | nan_mask_prem | nan_mask_stw105
 
             # Remove nans
-            P_model, target_model = P_model[~nan_mask], target_model[~nan_mask]
             P_prem, target_prem = P_prem[~nan_mask], target_prem[~nan_mask]
+            P_model, target_model = P_model[~nan_mask], target_model[~nan_mask]
             P_stw105, target_stw105 = P_stw105[~nan_mask], target_stw105[~nan_mask]
 
             # Calculate rmse and r2 along profiles
@@ -1457,7 +1694,7 @@ class GFEMModel:
         return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .0.4.           Build GFEM Models             !!! ++
+    #+ .2.3.           Build GFEM Models             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # build model !!
@@ -1488,7 +1725,7 @@ class GFEMModel:
                 break
 
             except Exception as e:
-                print(f"!!! ERROR in build_model !!!")
+                print(f"!!! ERROR in build_model() !!!")
                 print(f"{e}")
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 traceback.print_exc()
@@ -1507,10 +1744,14 @@ class GFEMModel:
             # Post-processing
             self.measure_gfem_model_accuracy_vs_prem()
             if visualize:
-                self.visualize_targets()
+                if not os.path.exists(f"figs/other/training-dataset-design.png"):
+                    self.visualize_gfem_pt_range()
+                self.visualize_target_array()
+                self.visualize_target_array(gradient=True)
+                self.visualize_prem()
 
         except Exception as e:
-            print(f"!!! ERROR in build_model !!!")
+            print(f"!!! ERROR in build_model() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
@@ -1518,13 +1759,264 @@ class GFEMModel:
         return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .0.5.              Visualize                  !!! ++
+    #+ .2.4.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # visualize gfem pt range !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def visualize_gfem_pt_range(self, fontsize=12, figwidth=6.3, figheight=3.3):
+        """
+        """
+        # Get model data
+        sid = self.sid
+        res = self.res
+        targets = self.targets
+        results = self.results
+        fig_dir = "figs/other"
+        geothresh = self.geothresh
+        model_built = self.model_built
+        target_array = self.target_array
+
+        # Check for model
+        if not model_built:
+            raise Exception("No GFEM model! Call build_model() first ...")
+
+        # Check for results
+        if not results:
+            raise Exception("No GFEM model results! Call get_results() first ...")
+
+        # Check for targets
+        if target_array is None or target_array.size == 0:
+            raise Exception("No GFEM model target array! Call get_target_array() first ...")
+
+        # Check for figs directory
+        if not os.path.exists(fig_dir):
+            os.makedirs(fig_dir, exist_ok=True)
+
+        # Get min max PT
+        P_gt, T_gt, rho_gt = results["P"], results["T"], results["rho"]
+        P_min, P_max, T_min, T_max = np.min(P_gt), np.max(P_gt), np.min(T_gt), np.max(T_gt)
+        T = np.arange(0, T_max + 728)
+
+        # Olivine --> Ringwoodite Clapeyron slopes
+        references_410 = {"ol$\\rightarrow$wad (Akaogi89)": [0.001, 0.002],
+                          "ol$\\rightarrow$wad (Katsura89)": [0.0025],
+                          "ol$\\rightarrow$wad (Morishima94)": [0.0034, 0.0038]}
+
+        # Ringwoodite --> Bridgmanite + Ferropericlase Clapeyron slopes
+        references_670 = {"ring$\\rightarrow$brg (Ito82)": [-0.002],
+                          "ring$\\rightarrow$brg (Ito89 & Hirose02)": [-0.0028],
+                          "ring$\\rightarrow$brg (Ito90)": [-0.002, -0.006],
+                          "ring$\\rightarrow$brg (Katsura03)": [-0.0004, -0.002],
+                          "ring$\\rightarrow$brg (Akaogi07)": [-0.0024, -0.0028]}
+
+        # Set plot style and settings
+        plt.rcParams["figure.dpi"] = 300
+        plt.rcParams["font.size"] = fontsize
+        plt.rcParams["savefig.bbox"] = "tight"
+        plt.rcParams["axes.facecolor"] = "0.9"
+        plt.rcParams["legend.frameon"] = "False"
+        plt.rcParams["legend.facecolor"] = "0.9"
+        plt.rcParams["legend.loc"] = "upper left"
+        plt.rcParams["legend.fontsize"] = "small"
+        plt.rcParams["figure.autolayout"] = "True"
+
+        # Legend colors
+        colormap = plt.colormaps["tab10"]
+        colors = [colormap(i) for i in range(9)]
+
+        # Calculate phase boundaries:
+        # Olivine --> Ringwoodite
+        lines_410 = []
+        labels_410 = set()
+
+        for i, (ref, c_values) in enumerate(references_410.items()):
+            ref_lines = []
+
+            for j, c in enumerate(c_values):
+                P = (T - 1758) * c + 13.4
+                ref_lines.append(P)
+                label = f"{ref}"
+                labels_410.add(label)
+
+            lines_410.append(ref_lines)
+
+        # Ringwoodite --> Bridgmanite + Ferropericlase
+        lines_670 = []
+        labels_670 = set()
+
+        for i, (ref, c_values) in enumerate(references_670.items()):
+            ref_lines = []
+
+            for j, c in enumerate(c_values):
+                P = (T - 1883) * c + 23.0
+                ref_lines.append(P)
+                label = f"{ref}"
+                labels_670.add(label)
+
+            lines_670.append(ref_lines)
+
+        # Plotting
+        plt.figure()
+
+        # Map labels to colors
+        label_color_mapping = {}
+
+        # Olivine --> Ringwoodite
+        for i, (ref, ref_lines) in enumerate(zip(references_410.keys(), lines_410)):
+            color = colors[i % len(colors)]
+
+            for j, line in enumerate(ref_lines):
+                label = f"{ref}" if j == 0 else None
+                plt.plot(T[(T >= 1200) & (T <= 2000)], line[(T >= 1200) & (T <= 2000)],
+                         color=color, label=label)
+
+                if label not in label_color_mapping:
+                    label_color_mapping[label] = color
+
+        # Ringwoodite --> Bridgmanite + Ferropericlase
+        for j, (ref, ref_lines) in enumerate(zip(references_670.keys(), lines_670)):
+            color = colors[j + i + 1 % len(colors)]
+
+            for j, line in enumerate(ref_lines):
+                label = f"{ref}" if j == 0 else None
+                plt.plot(T[(T >= 1250) & (T <= 2100)], line[(T >= 1250) & (T <= 2100)],
+                         color=color, label=label)
+
+                if label not in label_color_mapping:
+                    label_color_mapping[label] = color
+
+        # Plot shaded rectangle for PT range of training dataset
+        fill = plt.fill_between(T, P_min, P_max, where=(T >= T_min) & (T <= T_max),
+                                hatch="++", facecolor="none", alpha=0.1)
+
+        # Mantle adiabats
+        T_mantle1, T_mantle2, grad_mantle1, grad_mantle2 = 673, 1773, 0.5, 0.5
+
+        # Calculate mantle geotherms
+        geotherm1 = (T - T_mantle1) / (grad_mantle1 * 35)
+        geotherm2 = (T - T_mantle2) / (grad_mantle2 * 35)
+
+        # Find boundaries
+        T1_Pmax = (P_max * grad_mantle1 * 35) + T_mantle1
+        T2_Pmin = (P_min * grad_mantle2 * 35) + T_mantle2
+        T2_Pmax = (P_max * grad_mantle2 * 35) + T_mantle2
+        P1_Tmin = (T_min - T_mantle1) / (grad_mantle1 * 35)
+
+        # Crop geotherms
+        geotherm2_cropped = geotherm2[geotherm2 >= P_min]
+        geotherm1_cropped = geotherm1[geotherm1 >= P1_Tmin]
+        geotherm2_cropped = geotherm2_cropped[geotherm2_cropped <= P_max]
+        geotherm1_cropped = geotherm1_cropped[geotherm1_cropped <= P_max]
+
+        # Crop T vectors
+        T_cropped_geotherm1= T[T >= T_min]
+        T_cropped_geotherm2= T[T >= T2_Pmin]
+        T_cropped_geotherm1 = T_cropped_geotherm1[T_cropped_geotherm1 <= T1_Pmax]
+        T_cropped_geotherm2 = T_cropped_geotherm2[T_cropped_geotherm2 <= T2_Pmax]
+
+        # Get geotherm (non-adiabatic)
+        results = pd.DataFrame({"P": P_gt, "T": T_gt, "rho": rho_gt})
+        P_geotherm, T_geotherm, _ = self._get_geotherm(
+            "rho", Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1, mantle_potential=1573)
+
+        # Plot mantle geotherms
+        plt.plot(T_cropped_geotherm1, geotherm1_cropped, ":", color="black")
+        plt.plot(T_cropped_geotherm2, geotherm2_cropped, ":", color="black")
+        plt.plot(T_geotherm, P_geotherm, linestyle="--", color="black")
+
+        # Interpolate the geotherms to have the same length as temperature vectors
+        geotherm1_interp = np.interp(T_cropped_geotherm1, T, geotherm1)
+        geotherm2_interp = np.interp(T_cropped_geotherm2, T, geotherm2)
+
+        # Define the vertices for the polygon
+        vertices = np.vstack(
+            (
+                np.vstack((T_cropped_geotherm1, geotherm1_interp)).T,
+                (T_cropped_geotherm2[-1], geotherm2_interp[-1]),
+                np.vstack((T_cropped_geotherm2[::-1], geotherm2_interp[::-1])).T,
+                np.array([T_min, P_min]),
+                (T_cropped_geotherm1[0], geotherm1_interp[0])
+            )
+        )
+
+        # Fill the area within the polygon
+        plt.fill(vertices[:, 0], vertices[:, 1], facecolor="white", edgecolor=None)
+        plt.fill(vertices[:, 0], vertices[:, 1], facecolor="none", edgecolor="whitesmoke",
+                 hatch="++")
+        plt.fill(vertices[:, 0], vertices[:, 1], facecolor="white", edgecolor=None,
+                 alpha=0.2)
+        plt.fill_between(T, P_min, P_max, where=(T >= T_min) & (T <= T_max),
+                         facecolor="none", edgecolor="black", linewidth=1.5)
+
+        # Geotherm legend handles
+        geotherm_handle = mlines.Line2D(
+            [], [], linestyle="--", color="black", label="Avg. Mid-Ocean Ridge")
+
+        # Phase boundaries legend handles
+        ref_line_handles = [
+            mlines.Line2D([], [], color=color, label=label)
+            for label, color in label_color_mapping.items() if label]
+
+        # Add geotherms to legend handles
+        ref_line_handles.extend([geotherm_handle])
+
+        db_data_handle = mpatches.Patch(facecolor="white", edgecolor="black", alpha=0.8,
+                                        hatch="++", label="RocMLM Training Data")
+
+        labels_670.add("RocMLM Training Data")
+        label_color_mapping["RocMLM Training Data"] = "black"
+
+        training_data_handle = mpatches.Patch(
+            facecolor="white", edgecolor="black", linestyle=":",
+            label="Hypothetical Mantle PTs")
+
+        labels_670.add("Hypothetical Mantle PTs")
+        label_color_mapping["Hypothetical Mantle PTs"] = "gray"
+
+        # Define the desired order of the legend items
+        desired_order = ["RocMLM Training Data",
+                         "Hypothetical Mantle PTs",
+                         "Avg. Mid-Ocean Ridge",
+                         "ol$\\rightarrow$wad (Akaogi89)",
+                         "ol$\\rightarrow$wad (Katsura89)",
+                         "ol$\\rightarrow$wad (Morishima94)",
+                         "ring$\\rightarrow$brg (Ito82)",
+                         "ring$\\rightarrow$brg (Ito89 & Hirose02)",
+                         "ring$\\rightarrow$brg (Ito90)",
+                         "ring$\\rightarrow$brg (Katsura03)",
+                         "ring$\\rightarrow$brg (Akaogi07)"]
+
+        # Sort the legend handles based on the desired order
+        legend_handles = sorted(ref_line_handles + [db_data_handle, training_data_handle],
+                                key=lambda x: desired_order.index(x.get_label()))
+
+        plt.xlabel("Temperature (K)")
+        plt.ylabel("Pressure (GPa)")
+        plt.xlim(T_min - 100, T_max + 100)
+        plt.ylim(P_min - 1, P_max + 1)
+
+        # Move the legend outside the plot to the right
+        plt.legend(title="", handles=legend_handles, loc="center left", handleheight=1.2,
+                   bbox_to_anchor=(1.02, 0.5))
+
+        # Adjust the figure size
+        fig = plt.gcf()
+        fig.set_size_inches(figwidth, figheight)
+
+        # Save the plot to a file
+        plt.savefig(f"{fig_dir}/training-dataset-design.png")
+
+        # Close device
+        plt.close()
+
+        return None
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize targets  !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize_targets(self, rmse=None, r2=None, title="GFEM", palette="bone",
-                          plot_geotherms=True, figwidth=6.3, figheight=4.725, fontsize=22):
+    def visualize_target_array(self, rmse=None, r2=None, palette="bone", geotherms=True,
+                               gradient=False, figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
         # Get model data
@@ -1533,7 +2025,6 @@ class GFEMModel:
         targets = self.targets
         results = self.results
         fig_dir = self.fig_dir
-        verbose = self.verbose
         geothresh = self.geothresh
         model_built = self.model_built
         target_array = self.target_array
@@ -1556,13 +2047,17 @@ class GFEMModel:
         if not os.path.exists(fig_dir):
             os.makedirs(fig_dir, exist_ok=True)
 
-        if verbose >= 1:
-            print(f"  Visualizing Perple_X model ...")
+        # Filter targets for gradient images
+        if gradient: targets = ["rho", "Vp", "Vs", "melt", "h2o"]
 
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            path = f"{fig_dir}/{sid}-{target}.png"
+            if not gradient:
+                path = f"{fig_dir}/{sid}-{target}.png"
+            else:
+                path = f"{fig_dir}/{sid}-{target}-grad.png"
+
             check = os.path.exists(path)
 
             if check:
@@ -1584,6 +2079,9 @@ class GFEMModel:
         plt.rcParams["figure.autolayout"] = "True"
 
         for i, target in enumerate(targets):
+            # Set filename
+            filename = f"{sid}-{target}.png"
+
             # Reshape targets into square array
             square_target = target_array[:, i].reshape(res + 1, res + 1)
 
@@ -1591,6 +2089,19 @@ class GFEMModel:
             if np.all(np.isnan(square_target)):
                 print(f"  {target.upper()} array is all nans. Skipping plot ...")
                 continue
+
+            # Sobel filter for gradient images
+            if gradient:
+                original_image = square_target.copy()
+
+                # Apply Sobel edge detection
+                edges_x = cv2.Sobel(original_image, cv2.CV_64F, 1, 0, ksize=3)
+                edges_y = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=3)
+
+                # Calculate the magnitude of the gradient
+                square_target = np.sqrt(edges_x**2 + edges_y**2) / np.nanmax(original_image)
+
+                filename = f"{sid}-{target}-grad.png"
 
             # Use discrete colorscale
             if target in ["assemblage", "variance"]:
@@ -1618,12 +2129,6 @@ class GFEMModel:
             else:
                 vmin = int(np.nanmin(np.unique(square_target)))
                 vmax = int(np.nanmax(np.unique(square_target)))
-
-            # Rename target
-            target_rename = target.replace("_", "-")
-
-            # Print filepath
-            filename = f"{sid}-{target_rename}.png"
 
             # Make results df
             results = pd.DataFrame({"P": P, "T": T, target: square_target.flatten()})
@@ -1687,7 +2192,7 @@ class GFEMModel:
 
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if plot_geotherms:
+                if geotherms:
                     ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white",
                             linewidth=3)
                     ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="white",
@@ -1767,7 +2272,7 @@ class GFEMModel:
 
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if plot_geotherms:
+                if geotherms:
                     ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white",
                             linewidth=3)
                     ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="white",
@@ -1811,9 +2316,7 @@ class GFEMModel:
                 elif target == "variance":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
 
-            # Add title
-            if title:
-                plt.title(title)
+            plt.title("GFEM")
 
             # Vertical text spacing
             text_margin_x = 0.04
@@ -1842,39 +2345,457 @@ class GFEMModel:
 
         return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # visualize prem !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def visualize_prem(self, geotherms=["low", "mid", "high"], figwidth=6.3,
+                       figheight=4.725, fontsize=22):
+        """
+        """
+        # Get model data
+        sid = self.sid
+        res = self.res
+        P_min = self.P_min
+        P_max = self.P_max
+        T_min = self.T_min
+        T_max = self.T_max
+        targets = self.targets
+        results = self.results
+        fig_dir = self.fig_dir
+        data_dir = self.data_dir
+        geothresh = self.geothresh
+        perplex_db = self.perplex_db
+        model_built = self.model_built
+        target_units = self.target_units
+
+        # Check for model
+        if not model_built:
+            raise Exception("No GFEM model! Call build_model() first ...")
+
+        # Check for results
+        if not results:
+            raise Exception("No GFEM model results! Call get_results() first ...")
+
+        # Check for data dir
+        if not os.path.exists(data_dir):
+            raise Exception(f"Data not found at {data_dir} !")
+
+        # Check for figs directory
+        if not os.path.exists(fig_dir):
+            os.makedirs(fig_dir, exist_ok=True)
+
+        # Check for average geotherm
+        if "mid" not in geotherms:
+            geotherms = geotherms + ["mid"]
+
+        # Filter targets for gradient images
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
+        target_units = [target_units[i] for i in t_ind]
+        targets = [targets[i] for i in t_ind]
+
+        # Check for existing plots
+        existing_figs = []
+        for i, target in enumerate(targets):
+            path = f"{fig_dir}/{sid}-{target}-prem.png"
+            check = os.path.exists(path)
+
+            if check:
+                print(f"  Figure already exists at: {path}!")
+                existing_figs.append(check)
+
+        if len(existing_figs) == len(targets):
+            return None
+
+        # Get 1D reference models
+        ref_models = self._get_1d_reference_models()
+
+        # Get benchmark models
+        source = f"{data_dir}/benchmark-samples-pca.csv"
+
+        if os.path.exists(source) and sid != "PYR":
+            pyr_path = f"gfems/PYR_{perplex_db}/results.csv"
+            pyr_model = GFEMModel(
+                perplex_db, "PYR", source, res, P_min, P_max, T_min, T_max, verbose=0)
+
+            if pyr_model.model_built:
+                results_pyr = pyr_model.results
+            else:
+                pyr_model.build_model()
+                pyr_model.get_results()
+                results_pyr = pyr_model.results
+
+        for i, target in enumerate(targets):
+            # Set filename
+            filename = f"{sid}-{target}-prem.png"
+
+            # Get 1D reference model profiles
+            P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
+            P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
+
+            # Initialize gfem model profiles
+            P_gfem, P_pyr = None, None
+            P_gfem2, P_pyr2 = None, None
+            P_gfem3, P_pyr3 = None, None
+            target_gfem, target_pyr = None, None
+            target_gfem2, target_pyr2 = None, None
+            target_gfem3, target_pyr3 = None, None
+
+            # Extract target values along a geotherm
+            if "low" in geotherms:
+                P_gfem, _, target_gfem = self._get_geotherm(
+                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                    mantle_potential=1173)
+                P_pyr, _, target_pyr = self._get_geotherm(
+                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                    mantle_potential=1173)
+            if "mid" in geotherms:
+                P_gfem2, _, target_gfem2 = self._get_geotherm(
+                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                    mantle_potential=1573)
+                P_pyr2, _, target_pyr2 = self._get_geotherm(
+                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                    mantle_potential=1573)
+            if "high" in geotherms:
+                P_gfem3, _, target_gfem3 = self._get_geotherm(
+                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                    mantle_potential=1773)
+                P_pyr3, _, target_pyr3 = self._get_geotherm(
+                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
+                    mantle_potential=1773)
+
+            # Get min and max P
+            P_list = [P_gfem, P_gfem2, P_gfem3, P_pyr, P_pyr2, P_pyr3]
+            P_min = min(np.nanmin(P) for P in P_list if P is not None)
+            P_max = max(np.nanmax(P) for P in P_list if P is not None)
+
+            # Initialize interpolators
+            interp_prem = interp1d(P_prem, target_prem, fill_value="extrapolate")
+            interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
+
+            # New x values for interpolation
+            x_new = np.linspace(P_min, P_max, len(P_gfem2))
+
+            # Interpolate profiles
+            P_prem, target_prem = x_new, interp_prem(x_new)
+            P_stw105, target_stw105 = x_new, interp_stw105(x_new)
+
+            # Crop profiles
+            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
+            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
+            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
+            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
+
+            # Crop results
+            if "low" in geotherms:
+                mask_pyr = (P_pyr >= P_min) & (P_pyr <= P_max)
+                mask_gfem = (P_gfem >= P_min) & (P_gfem <= P_max)
+                P_pyr, target_pyr = P_pyr[mask_pyr], target_pyr[mask_pyr]
+                P_gfem, target_gfem = P_gfem[mask_gfem], target_gfem[mask_gfem]
+            if "mid" in geotherms:
+                mask_pyr2 = (P_pyr2 >= P_min) & (P_pyr2 <= P_max)
+                mask_gfem2 = (P_gfem2 >= P_min) & (P_gfem2 <= P_max)
+                P_pyr2, target_pyr2 = P_pyr2[mask_pyr2], target_pyr2[mask_pyr2]
+                P_gfem2, target_gfem2 = P_gfem2[mask_gfem2], target_gfem2[mask_gfem2]
+            if "high" in geotherms:
+                mask_pyr3 = (P_pyr3 >= P_min) & (P_pyr3 <= P_max)
+                mask_gfem3 = (P_gfem3 >= P_min) & (P_gfem3 <= P_max)
+                P_pyr3, target_pyr3 = P_pyr3[mask_pyr3], target_pyr3[mask_pyr3]
+                P_gfem3, target_gfem3 = P_gfem3[mask_gfem3], target_gfem3[mask_gfem3]
+
+            # Change endmember sampleids
+            if sid == "sm000":
+                sid = "DSUM"
+            elif sid == "sm129":
+                sid = "PSUM"
+
+            # Set plot style and settings
+            plt.rcParams["figure.dpi"] = 300
+            plt.rcParams["font.size"] = fontsize
+            plt.rcParams["savefig.bbox"] = "tight"
+            plt.rcParams["axes.facecolor"] = "0.9"
+            plt.rcParams["legend.frameon"] = "False"
+            plt.rcParams["legend.facecolor"] = "0.9"
+            plt.rcParams["legend.loc"] = "upper left"
+            plt.rcParams["legend.fontsize"] = "small"
+            plt.rcParams["figure.autolayout"] = "True"
+
+            # Colormap
+            colormap = plt.colormaps["tab10"]
+
+            # Plotting
+            fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
+
+            # Plot GFEM and RocMLM profiles
+            if results:
+                if "low" in geotherms:
+                    ax1.plot(
+                        target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
+                        label=f"{sid}-1173")
+                    ax1.fill_betweenx(
+                        P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
+                        color=colormap(0), alpha=0.2)
+                if "mid" in geotherms:
+                    ax1.plot(
+                        target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
+                        label=f"{sid}-1573")
+                    ax1.fill_betweenx(
+                        P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
+                        color=colormap(2), alpha=0.2)
+                if "high" in geotherms:
+                    ax1.plot(
+                        target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
+                        label=f"{sid}-1773")
+                    ax1.fill_betweenx(
+                        P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
+                        color=colormap(1), alpha=0.3)
+
+            # Plot reference models
+            ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
+            ax1.plot(target_stw105, P_stw105, ":", linewidth=2, color="black")
+
+            if target == "rho":
+                target_label = "Density"
+            else:
+                target_label = target
+
+            ax1.set_xlabel(f"{target_label} ({target_units[i]})")
+            ax1.set_ylabel("P (GPa)")
+
+            if target in ["Vp", "Vs", "rho"]:
+                ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+
+            # Vertical text spacing
+            text_margin_x = 0.04
+            text_margin_y = 0.15
+            text_spacing_y = 0.1
+
+            # Create nan and inf masks for interpolated profiles
+            nan_mask_prem = np.isnan(target_prem)
+            inf_mask_prem = np.isinf(target_prem)
+
+            # Compute metrics
+            nan_mask_gfem2 = np.isnan(target_gfem2)
+            nan_mask = nan_mask_gfem2 | nan_mask_prem | inf_mask_prem
+            P_gfem2, target_gfem2 = P_gfem2[~nan_mask], target_gfem2[~nan_mask]
+            P_prem, target_prem = P_prem[~nan_mask], target_prem[~nan_mask]
+            rmse = np.sqrt(mean_squared_error(target_prem, target_gfem2))
+            r2 = r2_score(target_prem, target_gfem2)
+
+            # Add R-squared and RMSE values as text annotations in the plot
+            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
+                     f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
+                     fontsize=fontsize * 0.833, horizontalalignment="left",
+                     verticalalignment="top")
+            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 1)),
+                     f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
+                     fontsize=fontsize * 0.833, horizontalalignment="left",
+                     verticalalignment="top")
+
+            # Convert the primary y-axis data (pressure) to depth
+            depth_conversion = lambda P: P * 30
+            depth_values = depth_conversion(P_prem)
+
+            # Create the secondary y-axis and plot depth on it
+            ax2 = ax1.secondary_yaxis(
+                "right", functions=(depth_conversion, depth_conversion))
+            ax2.set_yticks([410, 670])
+            ax2.set_ylabel("Depth (km)")
+
+            plt.legend(loc="lower right", columnspacing=0, handletextpad=0.2,
+                       fontsize=fontsize * 0.833)
+
+            plt.title("Depth Profile")
+
+            # Save the plot to a file
+            plt.savefig(f"{fig_dir}/{filename}")
+
+            # Close device
+            plt.close()
+            print(f"  Figure saved to: {fig_dir}/{filename} ...")
+
+        return None
+
+
 #######################################################
 ## .3.   Build GFEM for RocMLM training data     !!! ##
 #######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get sampleids !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def get_sampleids(filepath, batch="all", n_batches=8):
+    """
+    """
+    # Check for file
+    if not os.path.exists(filepath):
+        raise Exception("Sample data source does not exist!")
+
+    # Read data
+    df = pd.read_csv(filepath)
+
+    if "benchmark" in filepath or batch == "all":
+        return df["SAMPLEID"].values
+
+    # Calculate the batch size
+    total_samples = len(df)
+    batch_size = int(total_samples // n_batches)
+
+    # Check if batch number is within valid range
+    if batch < 0 or batch >= n_batches:
+        print("Invalid batch number! Sampling from the first 0th batch ...")
+        batch = 0
+
+    # Calculate the start and end index for the specified batch
+    start = batch * batch_size
+    end = min((batch + 1) * batch_size, total_samples)
+
+    return df[start:end]["SAMPLEID"].values
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# gfem_iteration !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def gfem_iteration(args, queue):
+    """
+    """
+    # Unpack arguments
+    perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax = args
+
+    # Create a StringIO object to capture prints
+    stdout_buffer = io.StringIO()
+
+    # Redirect stdout to the StringIO object
+    with redirect_stdout(stdout_buffer):
+        iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
+
+        if iteration.model_built:
+            queue.put(stdout_buffer.getvalue())
+
+            return iteration
+
+        else:
+            iteration.build_model()
+
+            if not iteration.model_build_error:
+                iteration.get_results()
+                iteration.get_feature_array()
+                iteration.get_target_array()
+                queue.put(stdout_buffer.getvalue())
+
+                return iteration
+
+            else:
+                queue.put(stdout_buffer.getvalue())
+
+                return iteration
+
+    # Capture any remaining output
+    queue.put(stdout_buffer.getvalue())
+
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# build gfem models !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1,
+                      Pmax=28, Tmin=773, Tmax=2273, nprocs=os.cpu_count() - 2, verbose=1):
+    """
+    """
+    # Check sampleids
+    if os.path.exists(source) and sampleids is None:
+        sampleids = sorted(get_sampleids(source))
+    elif os.path.exists(source) and sampleids is not None:
+        sids = get_sampleids(source)
+        if not set(sampleids).issubset(sids):
+            raise Exception(f"Sampleids {sampleids} not in source: {source}!")
+    else:
+        raise Exception(f"Source {source} does not exist!")
+
+    print("Building GFEM models for samples:")
+    print(sampleids)
+
+    # Define number of processors
+    if nprocs is None or nprocs > os.cpu_count(): nprocs = os.cpu_count()
+
+    # Make sure nprocs is not greater than sampleids
+    if nprocs > len(sampleids): nprocs = len(sampleids)
+
+    # Create list of args for mp pooling
+    run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax) for
+                sampleid in sampleids]
+
+    # Create a multiprocessing manager and queue
+    with mp.Manager() as manager:
+        queue = manager.Queue()
+
+        # Update the arguments to include the queue
+        run_args_with_queue = [(args, queue) for args in run_args]
+
+        # Chunk the arguments into batches of size nprocs
+        batches = [run_args_with_queue[i:i + nprocs] for
+                   i in range(0, len(run_args_with_queue), nprocs)]
+
+        # Create a multiprocessing pool for each batch
+        for batch in batches:
+            with mp.Pool(processes=len(batch)) as pool:
+                models = pool.starmap(gfem_iteration, batch)
+                pool.close()
+                pool.join()
+
+            # Collect and print the results in order
+            while not queue.empty():
+                print(queue.get())
+
+    # Get successful models
+    successful_models = [model for model in models if not model.model_build_error]
+
+    # Check for errors in the models
+    error_count = 0
+
+    for model in models:
+        if model.model_build_error:
+            error_count += 1
+
+    if error_count > 0:
+        print(f"Total models with errors: {error_count}")
+    else:
+        print("All GFEM models successfully built!")
+
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
+    return successful_models
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # main !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
     """
-    # Parse and check arguments
-    valid_args = check_arguments(parse_arguments(), "gfem.py")
-    locals().update(valid_args)
+    try:
+        gfems = {}
+        sources = {"benchmark": "assets/data/benchmark-samples-pca.csv",
+                   "middle": "assets/data/synthetic-samples-mixing-middle.csv",
+                   "random": "assets/data/synthetic-samples-mixing-random.csv"}
 
-    # Sample sources
-    sources = {"benchmark": "assets/data/benchmark-samples-pca.csv",
-               "middle": "assets/data/synthetic-samples-mixing-middle.csv",
-               "random": "assets/data/synthetic-samples-mixing-random.csv"}
+        # Build GFEM models
+        for name, source in sources.items():
+            sids = get_sampleids(source, 0, 16)
+            gfems[name] = build_gfem_models(source, sids, "hp02", 16)
 
-    # Build GFEM models
-    gfems = {}
-    for name, source in sources.items():
-        sids = get_sampleids(source)
-        gfems[name] = build_gfem_models(source, sids)
+        # Compose plots
+        for name, models in gfems.items():
+            compose_gfem_plots(models)
 
-#    # Visualize GFEM models
-#    visualize_gfem_pt_range(gfems["benchmark"][0])
-#    visualize_prem_comps(gfems["middle"] + gfems["random"])
-#
-#    for name, models in gfems.items():
-#        visualize_gfem(models)
-#        compose_dataset_plots(models)
+        # Visualize profile compositions vs. PREM
+        visualize_prem_comps(gfems["middle"] + gfems["random"])
 
-    print("GFEM models built and visualized!")
+    except Exception as e:
+        print(f"!!! ERROR in main() !!!")
+        print(f"{e}")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        traceback.print_exc()
+
+    print("GFEM models built and visualized !")
+    print("=============================================")
 
     return None
 
