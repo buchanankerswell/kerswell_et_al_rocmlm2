@@ -1237,7 +1237,6 @@ class GFEMModel:
         # Initialize metrics lists
         smpid, db, ox, sz, trgt, tm = [], [], [], [], [], []
         rmse_prem_profile, r2_prem_profile = [], []
-        rmse_stw105_profile, r2_stw105_profile = [], []
 
         for target in targets:
             # Get 1D reference model profile
@@ -1274,10 +1273,6 @@ class GFEMModel:
                     df.to_csv(filename, index=False)
                 else:
                     df_combined = pd.concat([df_existing, df], ignore_index=True)
-                    df_combined = df_combined.drop_duplicates(
-                        subset=["SAMPLEID", "DATABASE", "SIZE"], keep="first")
-                    df_combined = df_combined.sort_values(
-                        by=["SAMPLEID", "TARGET"], ignore_index=True)
                     df_combined.to_csv(filename, index=False)
             except pd.errors.EmptyDataError:
                 df.to_csv(filename, index=False)
@@ -1998,6 +1993,10 @@ class GFEMModel:
                 P_gfem3, _, target_gfem3 = self._get_1d_profile(target, 1773)
                 P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
                     P_gfem3, target_gfem3, P_prem, target_prem)
+            _, _, P_prem, target_prem, _, _ = self._crop_1d_profile(
+                P_gfem2, target_gfem2, P_prem, target_prem)
+            _, _, P_stw105, target_stw105, _, _ = self._crop_1d_profile(
+                P_gfem2, target_gfem2, P_stw105, target_stw105)
 
             # Change endmember sampleids
             if sid == "sm000":
@@ -2255,39 +2254,146 @@ def combine_plots_vertically(image1_path, image2_path, output_path, caption1, ca
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # compose gfem plots !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compose_gfem_plots(gfem_models, clean=False):
+def compose_gfem_plots(gfem_models, clean=False, nprocs=os.cpu_count() - 2):
     """
     """
     # Iterate through all models
     print("Composing GFEM plots ...")
-    for gfem_model in gfem_models:
-        # Get model data
-        sid = gfem_model.sid
-        res = gfem_model.res
-        targets = gfem_model.targets
-        fig_dir = gfem_model.fig_dir
-        verbose = gfem_model.verbose
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    with mp.Pool(processes=nprocs) as pool:
+        results = [pool.apply_async(compose_itr, args=(m, clean)) for m in gfem_models]
+        for result in results:
+            try:
+                result.get()
+            except Exception as e:
+                print(f"!!! ERROR in compose_gfem_plots() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
 
+    return None
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compose itr !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compose_itr(gfem_model, clean=False):
+    """
+    """
+    # Get model data
+    sid = gfem_model.sid
+    res = gfem_model.res
+    targets = gfem_model.targets
+    fig_dir = gfem_model.fig_dir
+    verbose = gfem_model.verbose
+
+    # Check for existing plots
+    existing_comps = []
+    for target in targets:
+        fig_1 = f"{fig_dir}/image2-{sid}-{target}.png"
+        fig_2 = f"{fig_dir}/image3-{sid}-{target}.png"
+        fig_3 = f"{fig_dir}/image4-{sid}-{target}.png"
+        fig_4 = f"{fig_dir}/image9-{sid}.png"
+        fig_5 = f"{fig_dir}/image12-{sid}.png"
+        fig_6 = f"{fig_dir}/image15-{sid}.png"
+
+        check_comps = ((os.path.exists(fig_3) and os.path.exists(fig_4)) |
+                       (os.path.exists(fig_1) and os.path.exists(fig_2)) |
+                       (os.path.exists(fig_1) and os.path.exists(fig_2) and
+                        os.path.exists(fig_4) and os.path.exists(fig_5)) |
+                       (os.path.exists(fig_1) and os.path.exists(fig_2) and
+                        os.path.exists(fig_4) and os.path.exists(fig_6)))
+
+        if check_comps:
+            existing_comps.append(check_comps)
+
+    if existing_comps:
+        return None
+
+    for target in targets:
         # Check for existing plots
-        existing_comps = []
-        for target in targets:
-            fig_1 = f"{fig_dir}/image2-{sid}-{target}.png"
-            fig_2 = f"{fig_dir}/image3-{sid}-{target}.png"
-            fig_3 = f"{fig_dir}/image4-{sid}-{target}.png"
-            fig_4 = f"{fig_dir}/image9-{sid}.png"
+        fig = f"{fig_dir}/{sid}-{target}.png"
+        check_fig = os.path.exists(fig)
 
-            check_comps = ((os.path.exists(fig_3) and os.path.exists(fig_4)) |
-                           (os.path.exists(fig_1) and os.path.exists(fig_2)) |
-                           (os.path.exists(fig_1) and os.path.exists(fig_2) and
-                            os.path.exists(fig_4)))
+        if not check_fig:
+            print(f"  No {target} plot found. Skipping composition ...")
+            continue
 
-            if check_comps:
-                existing_comps.append(check_comps)
+        if target not in ["assemblage", "variance"]:
+            combine_plots_horizontally(
+                f"{fig_dir}/{sid}-{target}.png",
+                f"{fig_dir}/{sid}-{target}-grad.png",
+                f"{fig_dir}/image2-{sid}-{target}.png",
+                caption1="a)",
+                caption2="b)"
+            )
 
-        if existing_comps:
-            return None
+            print(f"  Figure saved to: {fig_dir}/image2-{sid}-{target}.png ...")
 
-        for target in targets:
+            if target in ["rho", "Vp", "Vs"]:
+                combine_plots_horizontally(
+                    f"{fig_dir}/{sid}-{target}.png",
+                    f"{fig_dir}/{sid}-{target}-grad.png",
+                    f"{fig_dir}/temp1.png",
+                    caption1="a)",
+                    caption2="b)"
+                )
+
+                combine_plots_horizontally(
+                    f"{fig_dir}/temp1.png",
+                    f"{fig_dir}/{sid}-{target}-prem.png",
+                    f"{fig_dir}/image3-{sid}-{target}.png",
+                    caption1="",
+                    caption2="c)"
+                )
+
+                print(f"  Figure saved to: {fig_dir}/image3-{sid}-{target}.png ...")
+
+    if all(item in targets for item in ["rho", "Vp", "Vs"]):
+        captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
+        trgts = ["rho", "Vp", "Vs"]
+
+        for i, target in enumerate(trgts):
+            combine_plots_horizontally(
+                f"{fig_dir}/{sid}-{target}.png",
+                f"{fig_dir}/{sid}-{target}-grad.png",
+                f"{fig_dir}/temp1.png",
+                caption1=captions[i][0],
+                caption2=captions[i][1]
+            )
+
+            combine_plots_horizontally(
+                f"{fig_dir}/temp1.png",
+                f"{fig_dir}/{sid}-{target}-prem.png",
+                f"{fig_dir}/temp-{target}.png",
+                caption1="",
+                caption2=captions[i][2]
+            )
+
+        combine_plots_vertically(
+            f"{fig_dir}/temp-rho.png",
+            f"{fig_dir}/temp-Vp.png",
+            f"{fig_dir}/temp1.png",
+            caption1="",
+            caption2=""
+        )
+
+        combine_plots_vertically(
+            f"{fig_dir}/temp1.png",
+            f"{fig_dir}/temp-Vs.png",
+            f"{fig_dir}/image9-{sid}.png",
+            caption1="",
+            caption2=""
+        )
+
+        print(f"  Figure saved to: {fig_dir}/image9-{sid}.png ...")
+
+    if all(item in targets for item in ["rho", "Vp", "Vs", "melt", "h2o"]):
+        captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)"),
+                    ("j)", "k)", "l)"), ("m)", "n)", "o)")]
+        trgts = ["rho", "Vp", "Vs", "melt", "h2o"]
+
+        for i, target in enumerate(trgts):
             # Check for existing plots
             fig = f"{fig_dir}/{sid}-{target}.png"
             check_fig = os.path.exists(fig)
@@ -2296,49 +2402,23 @@ def compose_gfem_plots(gfem_models, clean=False):
                 print(f"  No {target} plot found. Skipping composition ...")
                 continue
 
-            if target not in ["assemblage", "variance"]:
+            combine_plots_horizontally(
+                f"{fig_dir}/{sid}-{target}.png",
+                f"{fig_dir}/{sid}-{target}-grad.png",
+                f"{fig_dir}/temp1.png",
+                caption1=captions[i][0],
+                caption2=captions[i][1]
+            )
+
+            if target in ["melt", "h2o"]:
                 combine_plots_horizontally(
-                    f"{fig_dir}/{sid}-{target}.png",
-                    f"{fig_dir}/{sid}-{target}-grad.png",
-                    f"{fig_dir}/image2-{sid}-{target}.png",
-                    caption1="a)",
-                    caption2="b)"
-                )
-
-                print(f"  Figure saved to: {fig_dir}/image2-{sid}-{target}.png ...")
-
-                if target in ["rho", "Vp", "Vs"]:
-                    combine_plots_horizontally(
-                        f"{fig_dir}/{sid}-{target}.png",
-                        f"{fig_dir}/{sid}-{target}-grad.png",
-                        f"{fig_dir}/temp1.png",
-                        caption1="a)",
-                        caption2="b)"
-                    )
-
-                    combine_plots_horizontally(
-                        f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{sid}-{target}-prem.png",
-                        f"{fig_dir}/image3-{sid}-{target}.png",
-                        caption1="",
-                        caption2="c)"
-                    )
-
-                    print(f"  Figure saved to: {fig_dir}/image3-{sid}-{target}.png ...")
-
-        if all(item in targets for item in ["rho", "Vp", "Vs"]):
-            captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-            targets = ["rho", "Vp", "Vs"]
-
-            for i, target in enumerate(targets):
-                combine_plots_horizontally(
-                    f"{fig_dir}/{sid}-{target}.png",
-                    f"{fig_dir}/{sid}-{target}-grad.png",
                     f"{fig_dir}/temp1.png",
-                    caption1=captions[i][0],
-                    caption2=captions[i][1]
+                    f"{fig_dir}/{sid}-assemblage.png",
+                    f"{fig_dir}/temp-{target}.png",
+                    caption1="",
+                    caption2=captions[i][2]
                 )
-
+            else:
                 combine_plots_horizontally(
                     f"{fig_dir}/temp1.png",
                     f"{fig_dir}/{sid}-{target}-prem.png",
@@ -2347,35 +2427,66 @@ def compose_gfem_plots(gfem_models, clean=False):
                     caption2=captions[i][2]
                 )
 
+        combine_plots_vertically(
+            f"{fig_dir}/temp-rho.png",
+            f"{fig_dir}/temp-Vp.png",
+            f"{fig_dir}/temp1.png",
+            caption1="",
+            caption2=""
+        )
+
+        combine_plots_vertically(
+            f"{fig_dir}/temp1.png",
+            f"{fig_dir}/temp-Vs.png",
+            f"{fig_dir}/temp2.png",
+            caption1="",
+            caption2=""
+        )
+
+        # Check for existing plots
+        fig = f"{fig_dir}/{sid}-h2o.png"
+        check_fig = os.path.exists(fig)
+
+        if not check_fig:
             combine_plots_vertically(
-                f"{fig_dir}/temp-rho.png",
-                f"{fig_dir}/temp-Vp.png",
-                f"{fig_dir}/temp1.png",
+                f"{fig_dir}/temp2.png",
+                f"{fig_dir}/temp-melt.png",
+                f"{fig_dir}/image12-{sid}.png",
+                caption1="",
+                caption2=""
+            )
+
+            print(f"  Figure saved to: {fig_dir}/image12-{sid}.png ...")
+        else:
+            combine_plots_vertically(
+                f"{fig_dir}/temp2.png",
+                f"{fig_dir}/temp-melt.png",
+                f"{fig_dir}/temp3.png",
                 caption1="",
                 caption2=""
             )
 
             combine_plots_vertically(
-                f"{fig_dir}/temp1.png",
-                f"{fig_dir}/temp-Vs.png",
-                f"{fig_dir}/image9-{sid}.png",
+                f"{fig_dir}/temp3.png",
+                f"{fig_dir}/temp-h2o.png",
+                f"{fig_dir}/image15-{sid}.png",
                 caption1="",
                 caption2=""
             )
 
-            print(f"  Figure saved to: {fig_dir}/image9-{sid}.png ...")
+            print(f"  Figure saved to: {fig_dir}/image15-{sid}.png ...")
 
-        tmp_files = glob.glob(f"{fig_dir}/temp*.png")
-        for file in tmp_files:
+    tmp_files = glob.glob(f"{fig_dir}/temp*.png")
+    for file in tmp_files:
+        os.remove(file)
+
+    if clean:
+        # Clean up directory
+        prem_files = glob.glob(f"{fig_dir}/*prem.png")
+        grad_files = glob.glob(f"{fig_dir}/*grad.png")
+
+        for file in prem_files + grad_files:
             os.remove(file)
-
-        if clean:
-            # Clean up directory
-            prem_files = glob.glob(f"{fig_dir}/*prem.png")
-            grad_files = glob.glob(f"{fig_dir}/*grad.png")
-
-            for file in prem_files + grad_files:
-                os.remove(file)
 
     return None
 
@@ -2449,12 +2560,14 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
             P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
 
             # Get GFEM model profile
-            P_gfem, _, target_gfem = gfem._get_1d_profile(
+            P_gfem, _, target_gfem = model._get_1d_profile(
                 target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
 
             # Crop GFEM profile and compare with PREM
             P_gfem, target_gfem, P_prem, target_prem, _, _ = (
-                self._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
+                model._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
+            _, _, P_stw105, target_stw105, _, _ = (
+                model._crop_1d_profile(P_gfem, target_gfem, P_stw105, target_stw105))
 
             # Create colorbar
             pal = sns.color_palette("magma", as_cmap=True).reversed()
@@ -2571,6 +2684,7 @@ def gfem_iteration(args, queue):
 
     with redirect_stdout(stdout_buffer):
         iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
+        queue.put(stdout_buffer.getvalue())
 
         if not iteration.model_built:
             iteration.build_model()
@@ -2682,7 +2796,6 @@ def main():
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         traceback.print_exc()
 
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("GFEM models built and visualized !")
     print("=============================================")
 
