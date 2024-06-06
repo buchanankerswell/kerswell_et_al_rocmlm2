@@ -23,9 +23,9 @@ DATAPURGE = log \
 						$(DATADIR)/synthetic*.csv \
 						$(DATADIR)/lut-efficiency.csv \
 						$(DATADIR)/earthchem-counts.csv \
-						$(DATADIR)/gfem-accuracy-vs-prem.csv \
 						$(DATADIR)/earthchem-samples-pca.csv \
 						$(DATADIR)/benchmark-samples-pca.csv \
+						$(DATADIR)/gfem-model-results-summary.csv \
 						$(DATADIR)/synthetic-samples-benchmark.csv
 DATACLEAN = assets MAGEMin Perple_X gfems rocmlms
 FIGSPURGE =

@@ -104,14 +104,14 @@ class GFEMModel:
             self.ox_gfem = [ox for ox in self.ox_gfem if ox != "CR2O3"]
 
         # Perplex dirs and filepaths
-        self.model_out_dir = (f"gfems/{self.sid}_{self.perplex_db}")
+        self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}"
         self.perplex_assemblages = f"{self.model_out_dir}/assemblages.txt"
         self.perplex_targets = f"{self.model_out_dir}/target-array.tab"
 
         # Output file paths
         self.data_dir = "assets/data"
-        self.log_file = f"log/log-{self.sid}"
         self.fig_dir = f"figs/{self.model_out_dir}"
+        self.log_file = f"{self.model_out_dir}/log-{self.sid}"
 
         # Results
         self.loi = None
@@ -140,28 +140,23 @@ class GFEMModel:
         if os.path.exists(self.model_out_dir):
             if (os.path.exists(f"{self.model_out_dir}/results.csv") and
                 os.path.exists(f"{self.model_out_dir}/assemblages.csv")):
+                if verbose >= 1:
+                    print(f"  Found GFEM model for sample {self.sid} !")
+
                 try:
                     self.model_built = True
                     self._get_sample_comp()
-                    self._get_results()
-                    self._get_target_array()
+                    self._measure_gfem_model_accuracy_vs_prem()
                 except Exception as e:
                     print(f"!!! ERROR in GFEMModel() !!!")
                     print(f"{e}")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     traceback.print_exc()
-
                     return None
 
-                if verbose >= 1:
-                    print(f"  Found GFEM model for sample {self.sid} !")
-
                 self.visualize_model()
-
                 return None
-
             else:
-                # Make new model if results not found
                 shutil.rmtree(self.model_out_dir)
                 os.makedirs(self.model_out_dir, exist_ok=True)
         else:
@@ -363,11 +358,7 @@ class GFEMModel:
         log_file = self.log_file
         perplex_db = self.perplex_db
 
-        if os.path.exists(log_file) and os.path.exists("assets/data"):
-            # Define a list to store the time values
-            time_values = []
-
-            # Open the log file and read its lines
+        if os.path.exists(log_file):
             with open(log_file, "r") as log:
                 lines = log.readlines()
 
@@ -377,34 +368,11 @@ class GFEMModel:
                     if match:
                         time_m = float(match.group(1))
                         time_s = time_m * 60
-                        time_values.append(time_s)
                     break
 
-            last_value = time_values[-1]
+            self.comp_time = round(time_s, 3)
 
-            # Create the line to append to the CSV file
-            line_to_append = (f"{sid},{perplex_db},{len(ox_gfem)}{res**2},{last_value:.1f}")
-
-            date_formatted = datetime.now().strftime("%d-%m-%Y")
-            csv_filepath = f"assets/data/gfem-efficiency-{date_formatted}.csv"
-
-            # Check if the CSV file already exists
-            if not os.path.exists(csv_filepath):
-                header_line = "sample,database,n_ox,size,time"
-
-                # If the file does not exist, write the header line first
-                with open(csv_filepath, "w") as csv_file:
-                    csv_file.write(header_line + "\n")
-
-            # Append the line to the CSV file
-            with open(csv_filepath, "a") as csv_file:
-                csv_file.write(line_to_append + "\n")
-
-            self.comp_time = round(last_value, 3)
-
-            return round(last_value, 3)
-
-        return None
+        return round(time_s, 3)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # encode assemblages !!
@@ -566,10 +534,10 @@ class GFEMModel:
         return ref_models
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get geotherm !!
+    # get 1d profile !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_geotherm(self, target, Qs=55e-3, Ts=273, A1=1e-6, A2=2.2e-8, k1=2.3, k2=3.0,
-                      crust_thickness=35, litho_thickness=150, mantle_potential=1573):
+    def _get_1d_profile(self, target, mantle_potential=1573, Qs=250e-3, Ts=273, A1=2.2e-8,
+                        A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35, litho_thickness=1):
         """
         """
         # Get model attributes
@@ -650,6 +618,55 @@ class GFEMModel:
 
         return P_values, T_values, targets
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # crop 1d profile !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _crop_1d_profile(self, P_gfem, target_gfem, P_ref, target_ref):
+        """
+        """
+        try:
+            # Initialize interpolators
+            interp_ref = interp1d(P_ref, target_ref, fill_value="extrapolate")
+
+            # Get min and max P
+            P_min, P_max = np.nanmin(P_gfem), np.nanmax(P_gfem)
+
+            # New x values for interpolation
+            x_new = np.linspace(P_min, P_max, len(P_gfem))
+
+            # Interpolate profile
+            P_ref, target_ref = x_new, interp_ref(x_new)
+
+            # Create cropping masks
+            mask_ref = (P_ref >= P_min) & (P_ref <= P_max)
+            mask_gfem = (P_gfem >= P_min) & (P_gfem <= P_max)
+
+            # Crop profiles
+            P_ref, target_ref = P_ref[mask_ref], target_ref[mask_ref]
+            P_gfem, target_gfem = P_gfem[mask_gfem], target_gfem[mask_gfem]
+
+            # Create nan and inf masks
+            mask = (np.isnan(target_gfem) | np.isnan(target_ref) |
+                    np.isinf(target_gfem) | np.isinf(target_ref))
+
+            # Remove nans and inf
+            P_ref, target_ref = P_ref[~mask], target_ref[~mask]
+            P_gfem, target_gfem = P_gfem[~mask], target_gfem[~mask]
+
+            # Calculate rmse and r2 along profiles
+            r2 = np.round(r2_score(target_ref, target_gfem), 3)
+            rmse = np.round(np.sqrt(mean_squared_error(target_ref, target_gfem)), 3)
+
+            return P_gfem, target_gfem, P_ref, target_ref, rmse, r2
+
+        except Exception as e:
+            print(f"!!! ERROR in crop_1d_profile() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+
+            return None
+
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.1.          Perple_X Functions             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -665,6 +682,13 @@ class GFEMModel:
         digits = self.digits
         perplex_db = self.perplex_db
         model_out_dir = self.model_out_dir
+
+        # Check for existing incomplete model
+        if (os.path.exists(f"{model_out_dir}/results.csv") and
+            os.path.exists(f"{model_out_dir}/assemblages.csv")):
+            # Make new model if completed results not found
+            shutil.rmtree(model_out_dir)
+            os.makedirs(model_out_dir, exist_ok=True)
 
         # Transform units to bar
         T_min, T_max = self.T_min, self.T_max
@@ -783,11 +807,10 @@ class GFEMModel:
 
                     # Open the subprocess and redirect input from the input file
                     with open(config, "rb") as input_stream:
-                        process = subprocess.Popen([relative_program_path],
-                                                   stdin=input_stream,
-                                                   stdout=subprocess.PIPE,
-                                                   stderr=subprocess.PIPE,
-                                                   shell=True, cwd=model_out_dir)
+                        process = subprocess.Popen(
+                            [relative_program_path], stdin=input_stream,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            shell=True, cwd=model_out_dir)
 
                     # Wait for the process to complete and capture its output
                     stdout, stderr = process.communicate(timeout=timeout)
@@ -1000,7 +1023,7 @@ class GFEMModel:
         df.to_csv(f"{model_out_dir}/results.csv", index=False)
 
         # Clean up output directory
-        files_to_keep = ["assemblages.csv", "results.csv"]
+        files_to_keep = ["assemblages.csv", "results.csv", f"log-{sid}"]
 
         # Create dir to store model files
         model_out_files_dir = f"{model_out_dir}/model"
@@ -1168,7 +1191,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # measure gfem model accuracy vs prem !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _measure_gfem_model_accuracy_vs_prem(self, verbose=1):
+    def _measure_gfem_model_accuracy_vs_prem(self):
         """
         """
         # Get model attributes
@@ -1176,8 +1199,11 @@ class GFEMModel:
         res = self.res
         P_min = self.P_min
         P_max = self.P_max
+        ox_gfem = self.ox_gfem
         results = self.results
+        verbose = self.verbose
         data_dir = self.data_dir
+        perplex_db = self.perplex_db
         targets = ["rho", "Vp", "Vs"]
         model_built = self.model_built
 
@@ -1188,9 +1214,9 @@ class GFEMModel:
         # Post-process results
         try:
             self._get_results()
-            self._get_feature_array()
             self._get_target_array()
-
+            self._get_feature_array()
+            comp_time = self._get_comp_time()
         except Exception as e:
             print(f"!!! ERROR in _measure_gfem_model_accuracy_vs_prem() !!!")
             print(f"{e}")
@@ -1209,105 +1235,54 @@ class GFEMModel:
         ref_models = self._get_1d_reference_models()
 
         # Initialize metrics lists
-        smpid, pgrm, trgt = [], [], []
+        smpid, db, ox, sz, trgt, tm = [], [], [], [], [], []
         rmse_prem_profile, r2_prem_profile = [], []
         rmse_stw105_profile, r2_stw105_profile = [], []
 
         for target in targets:
-            # Get 1D refernce model profiles
+            # Get 1D reference model profile
             P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
-            P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
 
-            # Get model profile
-            P_model, _, target_model = self._get_geotherm(target)
+            # Get GFEM model profile
+            P_gfem, _, target_gfem = self._get_1d_profile(
+                target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
 
-            # Initialize interpolators
-            interp_prem = interp1d(P_prem, target_prem, fill_value="extrapolate")
-            interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
+            # Crop GFEM profile and compare with PREM
+            _, _, _, _, rmse_prem, r2_prem = (
+                self._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
 
-            # New x values for interpolation
-            x_new = np.linspace(P_min, P_max, len(P_model))
-
-            # Interpolate profiles
-            P_prem, target_prem = x_new, interp_prem(x_new)
-            P_stw105, target_stw105 = x_new, interp_stw105(x_new)
-
-            # Create cropping mask
-            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
-            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
-            mask_model = (P_model >= P_min) & (P_model <= P_max)
-
-            # Crop profiles
-            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
-            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
-            P_model, target_model = P_model[mask_model], target_model[mask_model]
-
-            # Create nan mask
-            nan_mask_prem = np.isnan(target_prem)
-            nan_mask_model = np.isnan(target_model)
-            nan_mask_stw105 = np.isnan(target_stw105)
-            nan_mask = nan_mask_model | nan_mask_prem | nan_mask_stw105
-
-            # Remove nans
-            P_prem, target_prem = P_prem[~nan_mask], target_prem[~nan_mask]
-            P_model, target_model = P_model[~nan_mask], target_model[~nan_mask]
-            P_stw105, target_stw105 = P_stw105[~nan_mask], target_stw105[~nan_mask]
-
-            # Calculate rmse and r2 along profiles
-            rmse_prem = np.sqrt(mean_squared_error(target_prem, target_model))
-            rmse_prem_profile.append(np.round(rmse_prem, 3))
-            r2_prem_profile.append(np.round(r2_score(target_prem, target_model), 3))
-
-            rmse_stw105 = np.sqrt(mean_squared_error(target_stw105, target_model))
-            rmse_stw105_profile.append(np.round(rmse_stw105, 3))
-            r2_stw105_profile.append(np.round(r2_score(target_stw105, target_model), 3))
-
-            # Save info
+            # Save other info
             smpid.append(sid)
+            sz.append(res**2)
+            ox.append(len(ox_gfem))
             trgt.append(target)
-
-        # Save info
-        info = {"SAMPLEID": smpid, "TARGET": trgt, "RMSE_PREM": rmse_prem_profile,
-                "R2_PREM": r2_prem_profile, "RMSE_STW105": rmse_stw105_profile,
-                "R2_STW105": r2_stw105_profile}
+            tm.append(comp_time)
+            db.append(perplex_db)
 
         # Create dataframe
-        df = pd.DataFrame(info)
+        df = pd.DataFrame(
+            {"SAMPLEID": smpid, "DATABASE": db, "N_OX_SYS": ox, "SIZE": sz,
+             "COMP_TIME": tm, "TARGET": trgt, "RMSE_PREM": rmse_prem, "R2_PREM": r2_prem})
 
         # Write csv
-        filename = "assets/data/gfem-accuracy-vs-prem.csv"
-
-        if verbose >= 1:
-            print(f"  Saving {sid} accuracy vs. PREM to {filename} ...")
+        filename = "assets/data/gfem-model-results-summary.csv"
 
         if os.path.exists(filename) and os.stat(filename).st_size > 0:
             try:
                 df_existing = pd.read_csv(filename)
-
                 if df_existing.empty:
                     df.to_csv(filename, index=False)
                 else:
-                    # Check existing samples
-                    new_samples = df["SAMPLEID"].values
-                    existing_samples = df_existing["SAMPLEID"].values
-                    overlap = set(existing_samples).intersection(new_samples)
-
-                    if overlap:
-                        if verbose >= 1:
-                            print(f"  {sid} accuracy already exists at {filename} !")
-                    else:
-                        df_existing = pd.concat([df_existing, df], ignore_index=True)
-                        df_existing = df_existing.sort_values(by=["SAMPLEID", "TARGET"],
-                                                              ignore_index=True)
-                        df_existing.to_csv(filename, index=False)
-
+                    df_combined = pd.concat([df_existing, df], ignore_index=True)
+                    df_combined = df_combined.drop_duplicates(
+                        subset=["SAMPLEID", "DATABASE", "SIZE"], keep="first")
+                    df_combined = df_combined.sort_values(
+                        by=["SAMPLEID", "TARGET"], ignore_index=True)
+                    df_combined.to_csv(filename, index=False)
             except pd.errors.EmptyDataError:
                 df.to_csv(filename, index=False)
-
         else:
             df.to_csv(filename, index=False)
-
-        print("  --------------------")
 
         return None
 
@@ -1549,8 +1524,7 @@ class GFEMModel:
 
         # Get geotherm (non-adiabatic)
         results = pd.DataFrame({"P": P_gt, "T": T_gt, "rho": rho_gt})
-        P_geotherm, T_geotherm, _ = self._get_geotherm(
-            "rho", Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1, mantle_potential=1573)
+        P_geotherm, T_geotherm, _ = self._get_1d_profile("rho")
 
         # Plot mantle geotherms
         plt.plot(T_cropped_geotherm1, geotherm1_cropped, ":", color="black")
@@ -1750,15 +1724,9 @@ class GFEMModel:
             results = pd.DataFrame({"P": P, "T": T, target: square_target.flatten()})
 
             # Get geotherm
-            P_geotherm, T_geotherm, _ = self._get_geotherm(
-                target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                mantle_potential=1173)
-            P_geotherm2, T_geotherm2, _ = self._get_geotherm(
-                target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                mantle_potential=1573)
-            P_geotherm3, T_geotherm3, _ = self._get_geotherm(
-                target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                mantle_potential=1773)
+            P_geotherm, T_geotherm, _ = self._get_1d_profile(target, 1173)
+            P_geotherm2, T_geotherm2, _ = self._get_1d_profile(target, 1573)
+            P_geotherm3, T_geotherm3, _ = self._get_1d_profile(target, 1773)
 
             if color_discrete:
                 # Discrete color palette
@@ -1767,34 +1735,34 @@ class GFEMModel:
 
                 if palette == "viridis":
                     if color_reverse:
-                        pal = plt.cm.get_cmap("viridis_r", num_colors)
+                        pal = plt.colormaps["viridis_r"]
                     else:
-                        pal = plt.cm.get_cmap("viridis", num_colors)
+                        pal = plt.colormaps["viridis"]
                 elif palette == "bone":
                     if color_reverse:
-                        pal = plt.cm.get_cmap("bone_r", num_colors)
+                        pal = plt.colormaps["bone_r"]
                     else:
-                        pal = plt.cm.get_cmap("bone", num_colors)
+                        pal = plt.colormaps["bone"]
                 elif palette == "pink":
                     if color_reverse:
-                        pal = plt.cm.get_cmap("pink_r", num_colors)
+                        pal = plt.colormaps["pink_r"]
                     else:
-                        pal = plt.cm.get_cmap("pink", num_colors)
+                        pal = plt.colormaps["pink"]
                 elif palette == "seismic":
                     if color_reverse:
-                        pal = plt.cm.get_cmap("seismic_r", num_colors)
+                        pal = plt.colormaps["seismic_r"]
                     else:
-                        pal = plt.cm.get_cmap("seismic", num_colors)
+                        pal = plt.colormaps["seismic"]
                 elif palette == "grey":
                     if color_reverse:
-                        pal = plt.cm.get_cmap("Greys_r", num_colors)
+                        pal = plt.colormaps["Greys_r"]
                     else:
-                        pal = plt.cm.get_cmap("Greys", num_colors)
+                        pal = plt.colormaps["Greys"]
                 elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
                     if color_reverse:
-                        pal = plt.cm.get_cmap("Blues_r", num_colors)
+                        pal = plt.colormaps["Blues_r"]
                     else:
-                        pal = plt.cm.get_cmap("Blues", num_colors)
+                        pal = plt.colormaps["Blues"]
 
                 # Descritize
                 color_palette = pal(np.linspace(0, 1, num_colors))
@@ -1880,7 +1848,7 @@ class GFEMModel:
                     if target == "h2o": vmin, vmax = 0, 20
 
                 # Set nan color
-                cmap = plt.cm.get_cmap(cmap)
+                cmap = plt.colormaps[cmap]
                 cmap.set_bad(color="white")
 
                 # Plot as a raster using imshow
@@ -2012,102 +1980,24 @@ class GFEMModel:
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
 
-        # Get benchmark models
-        source = f"{data_dir}/benchmark-samples-pca.csv"
-
-        if os.path.exists(source) and sid != "PYR":
-            pyr_model = GFEMModel(
-                perplex_db, "PYR", source, res, P_min, P_max, T_min, T_max, verbose=0)
-
-            if not pyr_model.model_built:
-                pyr_model.build_model()
-
-        else:
-            pyr_model = None
-
         for i, target in enumerate(targets):
-            # Set filename
-            filename = f"{sid}-{target}-prem.png"
-
             # Get 1D reference model profiles
             P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
             P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
 
-            # Initialize gfem model profiles
-            P_gfem, P_pyr = None, None
-            P_gfem2, P_pyr2 = None, None
-            P_gfem3, P_pyr3 = None, None
-            target_gfem, target_pyr = None, None
-            target_gfem2, target_pyr2 = None, None
-            target_gfem3, target_pyr3 = None, None
-
-            # Extract target values along a geotherm
+            # Process GFEM model profiles
             if "low" in geotherms:
-                P_gfem, _, target_gfem = self._get_geotherm(
-                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                    mantle_potential=1173)
-                if pyr_model:
-                    P_pyr, _, target_pyr = pyr_model._get_geotherm(
-                        target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                        mantle_potential=1173)
+                P_gfem, _, target_gfem = self._get_1d_profile(target, 1173)
+                P_gfem, target_gfem, _, _, _, _ = self._crop_1d_profile(
+                    P_gfem, target_gfem, P_prem, target_prem)
             if "mid" in geotherms:
-                P_gfem2, _, target_gfem2 = self._get_geotherm(
-                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                    mantle_potential=1573)
-                if pyr_model:
-                    P_pyr2, _, target_pyr2 = pyr_model._get_geotherm(
-                        target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                        mantle_potential=1573)
+                P_gfem2, _, target_gfem2 = self._get_1d_profile(target, 1573)
+                P_gfem2, target_gfem2, _, _, rmse, r2 = self._crop_1d_profile(
+                    P_gfem2, target_gfem2, P_prem, target_prem)
             if "high" in geotherms:
-                P_gfem3, _, target_gfem3 = self._get_geotherm(
-                    target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                    mantle_potential=1773)
-                if pyr_model:
-                    P_pyr3, _, target_pyr3 = pyr_model._get_geotherm(
-                        target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                        mantle_potential=1773)
-
-            # Get min and max P
-            P_list = [P_gfem, P_gfem2, P_gfem3, P_pyr, P_pyr2, P_pyr3]
-            P_min = min(np.nanmin(P) for P in P_list if P is not None)
-            P_max = max(np.nanmax(P) for P in P_list if P is not None)
-
-            # Initialize interpolators
-            interp_prem = interp1d(P_prem, target_prem, fill_value="extrapolate")
-            interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
-
-            # New x values for interpolation
-            x_new = np.linspace(P_min, P_max, len(P_gfem2))
-
-            # Interpolate profiles
-            P_prem, target_prem = x_new, interp_prem(x_new)
-            P_stw105, target_stw105 = x_new, interp_stw105(x_new)
-
-            # Crop profiles
-            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
-            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
-            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
-            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
-
-            # Crop results
-            if "low" in geotherms:
-                mask_gfem = (P_gfem >= P_min) & (P_gfem <= P_max)
-                P_gfem, target_gfem = P_gfem[mask_gfem], target_gfem[mask_gfem]
-                if pyr_model:
-                    mask_pyr = (P_pyr >= P_min) & (P_pyr <= P_max)
-                    P_pyr, target_pyr = P_pyr[mask_pyr], target_pyr[mask_pyr]
-            if "mid" in geotherms:
-                mask_gfem2 = (P_gfem2 >= P_min) & (P_gfem2 <= P_max)
-                P_gfem2, target_gfem2 = P_gfem2[mask_gfem2], target_gfem2[mask_gfem2]
-                if pyr_model:
-                    mask_pyr2 = (P_pyr2 >= P_min) & (P_pyr2 <= P_max)
-                    P_pyr2, target_pyr2 = P_pyr2[mask_pyr2], target_pyr2[mask_pyr2]
-            if "high" in geotherms:
-                mask_gfem3 = (P_gfem3 >= P_min) & (P_gfem3 <= P_max)
-                P_gfem3, target_gfem3 = P_gfem3[mask_gfem3], target_gfem3[mask_gfem3]
-                if pyr_model:
-                    mask_pyr3 = (P_pyr3 >= P_min) & (P_pyr3 <= P_max)
-                    P_pyr3, target_pyr3 = P_pyr3[mask_pyr3], target_pyr3[mask_pyr3]
+                P_gfem3, _, target_gfem3 = self._get_1d_profile(target, 1773)
+                P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
+                    P_gfem3, target_gfem3, P_prem, target_prem)
 
             # Change endmember sampleids
             if sid == "sm000":
@@ -2134,29 +2024,22 @@ class GFEMModel:
             # Plotting
             fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
 
-            # Plot GFEM and RocMLM profiles
-            if results:
-                if "low" in geotherms:
-                    ax1.plot(
-                        target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
-                        label=f"{sid_lab}-1173")
-                    ax1.fill_betweenx(
-                        P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
-                        color=colormap(0), alpha=0.2)
-                if "mid" in geotherms:
-                    ax1.plot(
-                        target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
-                        label=f"{sid_lab}-1573")
-                    ax1.fill_betweenx(
-                        P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
-                        color=colormap(2), alpha=0.2)
-                if "high" in geotherms:
-                    ax1.plot(
-                        target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
-                        label=f"{sid_lab}-1773")
-                    ax1.fill_betweenx(
-                        P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
-                        color=colormap(1), alpha=0.3)
+            # Plot GFEM model profiles
+            if "low" in geotherms:
+                ax1.plot(target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
+                         label=f"{sid_lab}-1173")
+                ax1.fill_betweenx(P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
+                                  color=colormap(0), alpha=0.2)
+            if "mid" in geotherms:
+                ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
+                         label=f"{sid_lab}-1573")
+                ax1.fill_betweenx(P_gfem2, target_gfem2 * (1 - 0.05),
+                                  target_gfem2 * (1 + 0.05), color=colormap(2), alpha=0.2)
+            if "high" in geotherms:
+                ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
+                         label=f"{sid_lab}-1773")
+                ax1.fill_betweenx(P_gfem3, target_gfem3 * (1 - 0.05),
+                                  target_gfem3 * (1 + 0.05), color=colormap(1), alpha=0.3)
 
             # Plot reference models
             ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
@@ -2178,18 +2061,6 @@ class GFEMModel:
             text_margin_x = 0.04
             text_margin_y = 0.15
             text_spacing_y = 0.1
-
-            # Create nan and inf masks for interpolated profiles
-            nan_mask_prem = np.isnan(target_prem)
-            inf_mask_prem = np.isinf(target_prem)
-
-            # Compute metrics
-            nan_mask_gfem2 = np.isnan(target_gfem2)
-            nan_mask = nan_mask_gfem2 | nan_mask_prem | inf_mask_prem
-            P_gfem2, target_gfem2 = P_gfem2[~nan_mask], target_gfem2[~nan_mask]
-            P_prem, target_prem = P_prem[~nan_mask], target_prem[~nan_mask]
-            rmse = np.sqrt(mean_squared_error(target_prem, target_gfem2))
-            r2 = r2_score(target_prem, target_gfem2)
 
             # Add R-squared and RMSE values as text annotations in the plot
             plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
@@ -2217,6 +2088,7 @@ class GFEMModel:
             plt.title("Depth Profile")
 
             # Save the plot to a file
+            filename = f"{sid}-{target}-prem.png"
             plt.savefig(f"{fig_dir}/{filename}")
 
             # Close device
@@ -2257,51 +2129,33 @@ class GFEMModel:
     def build_model(self):
         """
         """
-        # Print info
         self._print_gfem_model_info()
-
-        # Set retries
         max_retries = 3
-
         for retry in range(max_retries):
             # Check for built model
             if self.model_built:
                 break
-
             try:
-                # Build model
                 self._configure_perplex_model()
                 self._run_perplex()
-
-                # Write results to csv
                 self._get_comp_time()
                 self._process_perplex_results()
-
                 break
-
             except Exception as e:
                 print(f"!!! ERROR in build_model() !!!")
                 print(f"{e}")
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 traceback.print_exc()
-
                 if retry < max_retries - 1:
                     print(f"Retrying in 5 seconds ...")
                     time.sleep(5)
-
                 else:
                     self.model_build_error = True
                     self.model_error = e
-
                     return None
-
         try:
-            # Post-processing
             self._measure_gfem_model_accuracy_vs_prem()
-
-            # Visualize model
             self.visualize_model()
-
         except Exception as e:
             print(f"!!! ERROR in build_model() !!!")
             print(f"{e}")
@@ -2405,6 +2259,7 @@ def compose_gfem_plots(gfem_models, clean=False):
     """
     """
     # Iterate through all models
+    print("Composing GFEM plots ...")
     for gfem_model in gfem_models:
         # Get model data
         sid = gfem_model.sid
@@ -2589,39 +2444,17 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
         ref_models = model._get_1d_reference_models()
 
         for i, target in enumerate(targets):
-            # Get 1D refernce model profiles
+            # Get 1D reference model profiles
             P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
             P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
 
-            # Extract target values along a geotherm
-            P2, _, target2 = model._get_geotherm(
-                target, Qs=250e-3, A1=2.2e-8, k1=3.0, litho_thickness=1,
-                mantle_potential=1573)
+            # Get GFEM model profile
+            P_gfem, _, target_gfem = gfem._get_1d_profile(
+                target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
 
-            # Get min and max P
-            P_min = np.nanmin(P2)
-            P_max = np.nanmax(P2)
-
-            # Initialize interpolators
-            interp_prem = interp1d(P_prem, target_prem, fill_value="extrapolate")
-            interp_stw105 = interp1d(P_stw105, target_stw105, fill_value="extrapolate")
-
-            # New x values for interpolation
-            x_new = np.linspace(P_min, P_max, len(P2))
-
-            # Interpolate profiles
-            P_prem, target_prem = x_new, interp_prem(x_new)
-            P_stw105, target_stw105 = x_new, interp_stw105(x_new)
-
-            # Crop profiles
-            mask_prem = (P_prem >= P_min) & (P_prem <= P_max)
-            mask_stw105 = (P_stw105 >= P_min) & (P_stw105 <= P_max)
-            P_prem, target_prem = P_prem[mask_prem], target_prem[mask_prem]
-            P_stw105, target_stw105 = P_stw105[mask_stw105], target_stw105[mask_stw105]
-
-            # Crop results
-            mask2 = (P2 >= P_min) & (P2 <= P_max)
-            P2, target2 = P2[mask2], target2[mask2]
+            # Crop GFEM profile and compare with PREM
+            P_gfem, target_gfem, P_prem, target_prem, _, _ = (
+                self._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
 
             # Create colorbar
             pal = sns.color_palette("magma", as_cmap=True).reversed()
@@ -2639,14 +2472,14 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
                         label="STW105", zorder=7)
 
             if sid == "sm129":
-                ax.plot(target2, P2, "-", linewidth=6.5, color=sm.to_rgba(xi),
+                ax.plot(target_gfem, P_gfem, "-", linewidth=6.5, color=sm.to_rgba(xi),
                         label="PSUM", zorder=6)
             if sid == "sm000":
-                ax.plot(target2, P2, "-", linewidth=6.5, color=sm.to_rgba(xi),
+                ax.plot(target_gfem, P_gfem, "-", linewidth=6.5, color=sm.to_rgba(xi),
                         label="DSUM", zorder=6)
 
             # Plot GFEM and RocMLM profiles
-            ax.plot(target2, P2, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.1)
+            ax.plot(target_gfem, P_gfem, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.1)
 
             if target == "rho":
                 target_label = "Density"
@@ -2733,41 +2566,17 @@ def get_sampleids(filepath, batch="all", n_batches=8):
 def gfem_iteration(args, queue):
     """
     """
-    # Unpack arguments
+    stdout_buffer = io.StringIO()
     perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax = args
 
-    # Create a StringIO object to capture prints
-    stdout_buffer = io.StringIO()
-
-    # Redirect stdout to the StringIO object
     with redirect_stdout(stdout_buffer):
         iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
 
-        if iteration.model_built:
+        if not iteration.model_built:
+            iteration.build_model()
             queue.put(stdout_buffer.getvalue())
 
-            return iteration
-
-        else:
-            iteration.build_model()
-
-            if not iteration.model_build_error:
-                iteration._get_results()
-                iteration._get_feature_array()
-                iteration._get_target_array()
-                queue.put(stdout_buffer.getvalue())
-
-                return iteration
-
-            else:
-                queue.put(stdout_buffer.getvalue())
-
-                return iteration
-
-    # Capture any remaining output
-    queue.put(stdout_buffer.getvalue())
-
-    return None
+    return iteration
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # build gfem models !!
@@ -2779,13 +2588,10 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1
     # Check sampleids
     if os.path.exists(source) and sampleids is None:
         sampleids = sorted(get_sampleids(source))
-
     elif os.path.exists(source) and sampleids is not None:
         sids = get_sampleids(source)
-
         if not set(sampleids).issubset(sids):
             raise Exception(f"Sampleids {sampleids} not in source: {source}!")
-
     else:
         raise Exception(f"Source {source} does not exist!")
 
@@ -2794,10 +2600,12 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1
     print(sampleids)
 
     # Define number of processors
-    if nprocs is None or nprocs > os.cpu_count(): nprocs = os.cpu_count()
+    if nprocs is None or nprocs > os.cpu_count():
+        nprocs = os.cpu_count()
 
     # Make sure nprocs is not greater than sampleids
-    if nprocs > len(sampleids): nprocs = len(sampleids)
+    if nprocs > len(sampleids):
+        nprocs = len(sampleids)
 
     # Create list of args for mp pooling
     run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax) for
@@ -2851,12 +2659,12 @@ def main():
     """
     """
     try:
+        # Build GFEM models
         gfems = {}
         sources = {"benchmark": "assets/data/benchmark-samples-pca.csv",
                    "middle": "assets/data/synthetic-samples-mixing-middle.csv",
                    "random": "assets/data/synthetic-samples-mixing-random.csv"}
 
-        # Build GFEM models
         for name, source in sources.items():
             sids = get_sampleids(source)
             gfems[name] = build_gfem_models(source, sids, "hp02", 64)
@@ -2874,6 +2682,7 @@ def main():
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         traceback.print_exc()
 
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("GFEM models built and visualized !")
     print("=============================================")
 
