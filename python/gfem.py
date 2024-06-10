@@ -122,14 +122,8 @@ class GFEMModel:
         self.sample_features = []
         self.norm_sample_comp = []
         self.fertility_index = None
-        self.model_visualized = False
         self.target_array = np.array([])
         self.feature_array = np.array([])
-
-        # Visualizations
-        self.pt_range_image = True
-        self.model_target_images = False
-        self.model_gradient_images = False
 
         # Errors
         self.model_error = None
@@ -146,8 +140,9 @@ class GFEMModel:
                 try:
                     self.model_built = True
                     self._get_sample_comp()
-                    self._measure_gfem_model_accuracy_vs_prem()
+                    self._summarize_gfem_model_results()
                 except Exception as e:
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     print(f"!!! ERROR in GFEMModel() !!!")
                     print(f"{e}")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -612,9 +607,9 @@ class GFEMModel:
         df = df[abs(df["T"] - df["geotherm_T"]) < geothresh]
 
         # Extract the three vectors
-        P_values = df["P"].values
-        T_values = df["T"].values
-        targets = df[target].values
+        P_values = np.nan_to_num(df["P"].values)
+        T_values = np.nan_to_num(df["T"].values)
+        targets = np.nan_to_num(df[target].values)
 
         return P_values, T_values, targets
 
@@ -660,6 +655,7 @@ class GFEMModel:
             return P_gfem, target_gfem, P_ref, target_ref, rmse, r2
 
         except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in crop_1d_profile() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -930,20 +926,28 @@ class GFEMModel:
     def _read_perplex_assemblages(self):
         """
         """
-        # Initialize dictionary to store assemblage info
-        assemblage_dict = {}
+        # Get self attributes
+        model_built = self.model_built
+        model_out_dir = self.model_out_dir
 
-        # Open assemblage file
-        with open(self.perplex_assemblages, "r") as file:
-            for i, line in enumerate(file, start=1):
-                assemblages = line.split("-")[1].strip().split()
+        if model_built:
+            df = pd.read_csv(f"{model_out_dir}/assemblages.csv")
+            assemblage_dict = df["assemblage"].to_list()
+        else:
+            # Initialize dictionary to store assemblage info
+            assemblage_dict = {}
 
-                # Make string formatting consistent
-                cleaned_assemblages = [assemblage.split("(")[0].lower()
-                                       for assemblage in assemblages]
+            # Open assemblage file
+            with open(self.perplex_assemblages, "r") as file:
+                for i, line in enumerate(file, start=1):
+                    assemblages = line.split("-")[1].strip().split()
 
-                # Add assemblage to dict
-                assemblage_dict[i] = cleaned_assemblages
+                    # Make string formatting consistent
+                    cleaned_assemblages = [assemblage.split("(")[0].lower()
+                                           for assemblage in assemblages]
+
+                    # Add assemblage to dict
+                    assemblage_dict[i] = cleaned_assemblages
 
         return assemblage_dict
 
@@ -1189,9 +1193,9 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # measure gfem model accuracy vs prem !!
+    # summarize gfem model results !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _measure_gfem_model_accuracy_vs_prem(self):
+    def _summarize_gfem_model_results(self):
         """
         """
         # Get model attributes
@@ -1218,7 +1222,8 @@ class GFEMModel:
             self._get_feature_array()
             comp_time = self._get_comp_time()
         except Exception as e:
-            print(f"!!! ERROR in _measure_gfem_model_accuracy_vs_prem() !!!")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _summarize_gfem_model_results() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
@@ -1264,18 +1269,23 @@ class GFEMModel:
              "COMP_TIME": tm, "TARGET": trgt, "RMSE_PREM": rmse_prem, "R2_PREM": r2_prem})
 
         # Write csv
-        filename = "assets/data/gfem-model-results-summary.csv"
+        out_dir = f"{data_dir}/gfem_summaries"
+        filename = f"{out_dir}/{sid}-results-summary.csv"
 
-        if os.path.exists(filename) and os.stat(filename).st_size > 0:
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir, exist_ok=True)
+
+        if os.path.exists(filename):
             try:
                 df_existing = pd.read_csv(filename)
                 if df_existing.empty:
                     df.to_csv(filename, index=False)
-                else:
-                    df_combined = pd.concat([df_existing, df], ignore_index=True)
-                    df_combined.to_csv(filename, index=False)
-            except pd.errors.EmptyDataError:
-                df.to_csv(filename, index=False)
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in visualize_model() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
         else:
             df.to_csv(filename, index=False)
 
@@ -1342,11 +1352,9 @@ class GFEMModel:
         sid = self.sid
         targets = self.targets
         fig_dir = self.fig_dir
-        target_units = self.target_units
 
         # Filter targets for PREM
         t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
-        target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
 
         # Check for existing plots
@@ -1629,6 +1637,7 @@ class GFEMModel:
         geothresh = self.geothresh
         model_built = self.model_built
         target_array = self.target_array
+        target_units = self.target_units
         P, T = results["P"], results["T"]
         extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
 
@@ -1664,8 +1673,22 @@ class GFEMModel:
         plt.rcParams["figure.autolayout"] = "True"
 
         for i, target in enumerate(targets):
+            # Target labels
+            if target == "rho":
+                target_label = "Density"
+            elif target == "h2o":
+                target_label = "H$_2$O"
+            elif target == "melt":
+                target_label = "Melt"
+            else:
+                target_label = target
+
             # Set filename
             filename = f"{sid}-{target}.png"
+            if target not in ["assemblage", "variance"]:
+                title = f"{target_label} ({target_units[i]})"
+            else:
+                title = f"{target_label}"
 
             # Reshape targets into square array
             square_target = target_array[:, i].reshape(res + 1, res + 1)
@@ -1684,9 +1707,17 @@ class GFEMModel:
                 edges_y = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=3)
 
                 # Calculate the magnitude of the gradient
-                square_target = np.sqrt(edges_x**2 + edges_y**2) / np.nanmax(original_image)
+                if np.any(~np.isnan(original_image)):
+                    max_val = np.nanmax(original_image)
+                    if max_val > 0:
+                        square_target = np.sqrt(edges_x**2 + edges_y**2) / max_val
+                    else:
+                        square_target = np.zeros_like(edges_x)
+                else:
+                    square_target = np.zeros_like(edges_x)
 
                 filename = f"{sid}-{target}-grad.png"
+                title = f"{target_label} Gradient"
 
             # Use discrete colorscale
             if target in ["assemblage", "variance"]:
@@ -1708,9 +1739,13 @@ class GFEMModel:
 
             # Set colorbar limits for better comparisons
             if not color_discrete:
-                vmin = np.min(square_target[np.logical_not(np.isnan(square_target))])
-                vmax = np.max(square_target[np.logical_not(np.isnan(square_target))])
-
+                non_nan_values = square_target[np.logical_not(np.isnan(square_target))]
+                if non_nan_values.size > 0:
+                    vmin = np.min(non_nan_values)
+                    vmax = np.max(non_nan_values)
+                else:
+                    vmin = 0
+                    vmax = 0
             else:
                 vmin = int(np.nanmin(np.unique(square_target)))
                 vmax = int(np.nanmax(np.unique(square_target)))
@@ -1895,7 +1930,7 @@ class GFEMModel:
                 elif target == "variance":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
 
-            plt.title("GFEM")
+            plt.title(title)
 
             # Vertical text spacing
             text_margin_x = 0.04
@@ -1936,10 +1971,7 @@ class GFEMModel:
         res = self.res
         P_min = self.P_min
         P_max = self.P_max
-        T_min = self.T_min
-        T_max = self.T_max
         targets = self.targets
-        results = self.results
         fig_dir = self.fig_dir
         data_dir = self.data_dir
         geothresh = self.geothresh
@@ -1950,10 +1982,6 @@ class GFEMModel:
         # Check for model
         if not model_built:
             raise Exception("No GFEM model! Call build_model() first ...")
-
-        # Check for results
-        if not results:
-            raise Exception("No GFEM model results! Call get_results() first ...")
 
         # Check for data dir
         if not os.path.exists(data_dir):
@@ -1968,7 +1996,7 @@ class GFEMModel:
             geotherms = geotherms + ["mid"]
 
         # Filter targets for PREM
-        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "melt", "h2o"]]
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
 
@@ -1976,27 +2004,34 @@ class GFEMModel:
         ref_models = self._get_1d_reference_models()
 
         for i, target in enumerate(targets):
-            # Get 1D reference model profiles
-            P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
-            P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
+            if target in ["rho", "Vp", "Vs"]:
+                # Get 1D reference model profiles
+                P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
+                P_stw105, target_stw105 = (ref_models["stw105"]["P"],
+                                           ref_models["stw105"][target])
 
             # Process GFEM model profiles
             if "low" in geotherms:
                 P_gfem, _, target_gfem = self._get_1d_profile(target, 1173)
-                P_gfem, target_gfem, _, _, _, _ = self._crop_1d_profile(
-                    P_gfem, target_gfem, P_prem, target_prem)
+                if target in ["rho", "Vp", "Vs"]:
+                    P_gfem, target_gfem, _, _, _, _ = self._crop_1d_profile(
+                        P_gfem, target_gfem, P_prem, target_prem)
             if "mid" in geotherms:
                 P_gfem2, _, target_gfem2 = self._get_1d_profile(target, 1573)
-                P_gfem2, target_gfem2, _, _, rmse, r2 = self._crop_1d_profile(
-                    P_gfem2, target_gfem2, P_prem, target_prem)
+                if target in ["rho", "Vp", "Vs"]:
+                    P_gfem2, target_gfem2, _, _, rmse, r2 = self._crop_1d_profile(
+                        P_gfem2, target_gfem2, P_prem, target_prem)
             if "high" in geotherms:
                 P_gfem3, _, target_gfem3 = self._get_1d_profile(target, 1773)
-                P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
-                    P_gfem3, target_gfem3, P_prem, target_prem)
-            _, _, P_prem, target_prem, _, _ = self._crop_1d_profile(
-                P_gfem2, target_gfem2, P_prem, target_prem)
-            _, _, P_stw105, target_stw105, _, _ = self._crop_1d_profile(
-                P_gfem2, target_gfem2, P_stw105, target_stw105)
+                if target in ["rho", "Vp", "Vs"]:
+                    P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
+                        P_gfem3, target_gfem3, P_prem, target_prem)
+
+            if target in ["rho", "Vp", "Vs"]:
+                _, _, P_prem, target_prem, _, _ = self._crop_1d_profile(
+                    P_gfem2, target_gfem2, P_prem, target_prem)
+                _, _, P_stw105, target_stw105, _, _ = self._crop_1d_profile(
+                    P_gfem2, target_gfem2, P_stw105, target_stw105)
 
             # Change endmember sampleids
             if sid == "sm000":
@@ -2027,34 +2062,43 @@ class GFEMModel:
             if "low" in geotherms:
                 ax1.plot(target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
                          label=f"{sid_lab}-1173")
-                ax1.fill_betweenx(P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
-                                  color=colormap(0), alpha=0.2)
+                ax1.fill_betweenx(
+                    P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
+                    color=colormap(0), alpha=0.2)
             if "mid" in geotherms:
                 ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
                          label=f"{sid_lab}-1573")
-                ax1.fill_betweenx(P_gfem2, target_gfem2 * (1 - 0.05),
-                                  target_gfem2 * (1 + 0.05), color=colormap(2), alpha=0.2)
+                ax1.fill_betweenx(
+                    P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
+                    color=colormap(2), alpha=0.2)
             if "high" in geotherms:
                 ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
                          label=f"{sid_lab}-1773")
-                ax1.fill_betweenx(P_gfem3, target_gfem3 * (1 - 0.05),
-                                  target_gfem3 * (1 + 0.05), color=colormap(1), alpha=0.3)
+                ax1.fill_betweenx(
+                    P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
+                    color=colormap(1), alpha=0.3)
 
             # Plot reference models
-            ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
-            ax1.plot(target_stw105, P_stw105, ":", linewidth=2, color="black")
+            if target in ["rho", "Vp", "Vs"]:
+                ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
+                ax1.plot(target_stw105, P_stw105, ":", linewidth=2, color="black")
 
             if target == "rho":
                 target_label = "Density"
+            elif target == "h2o":
+                target_label = "H$_2$O"
+            elif target == "melt":
+                target_label = "Melt"
             else:
                 target_label = target
 
-            ax1.set_xlabel(f"{target_label} ({target_units[i]})")
+            if target not in ["assemblage", "variance"]:
+                ax1.set_xlabel(f"{target_label} ({target_units[i]})")
+            else:
+                ax1.set_xlabel(f"{target_label}")
             ax1.set_ylabel("P (GPa)")
-
-            if target in ["Vp", "Vs", "rho"]:
-                ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-                ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+            ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+            ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
             # Vertical text spacing
             text_margin_x = 0.04
@@ -2062,18 +2106,19 @@ class GFEMModel:
             text_spacing_y = 0.1
 
             # Add R-squared and RMSE values as text annotations in the plot
-            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
-                     f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
-                     fontsize=fontsize * 0.833, horizontalalignment="left",
-                     verticalalignment="top")
-            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 1)),
-                     f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
-                     fontsize=fontsize * 0.833, horizontalalignment="left",
-                     verticalalignment="top")
+            if target in ["rho", "Vp", "Vs"]:
+                plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
+                         f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
+                         fontsize=fontsize * 0.833, horizontalalignment="left",
+                         verticalalignment="top")
+                plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 1)),
+                         f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
+                         fontsize=fontsize * 0.833, horizontalalignment="left",
+                         verticalalignment="top")
 
             # Convert the primary y-axis data (pressure) to depth
             depth_conversion = lambda P: P * 30
-            depth_values = depth_conversion(P_prem)
+            depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
 
             # Create the secondary y-axis and plot depth on it
             ax2 = ax1.secondary_yaxis(
@@ -2112,6 +2157,7 @@ class GFEMModel:
             if not self._check_model_prem_images():
                 self._visualize_prem()
         except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in visualize_model() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -2141,6 +2187,7 @@ class GFEMModel:
                 self._process_perplex_results()
                 break
             except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"!!! ERROR in build_model() !!!")
                 print(f"{e}")
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -2153,9 +2200,10 @@ class GFEMModel:
                     self.model_error = e
                     return None
         try:
-            self._measure_gfem_model_accuracy_vs_prem()
+            self._summarize_gfem_model_results()
             self.visualize_model()
         except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in build_model() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -2259,13 +2307,13 @@ def compose_gfem_plots(gfem_models, clean=False, nprocs=os.cpu_count() - 2):
     """
     # Iterate through all models
     print("Composing GFEM plots ...")
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     with mp.Pool(processes=nprocs) as pool:
         results = [pool.apply_async(compose_itr, args=(m, clean)) for m in gfem_models]
         for result in results:
             try:
                 result.get()
             except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"!!! ERROR in compose_gfem_plots() !!!")
                 print(f"{e}")
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -2330,7 +2378,7 @@ def compose_itr(gfem_model, clean=False):
 
             print(f"  Figure saved to: {fig_dir}/image2-{sid}-{target}.png ...")
 
-            if target in ["rho", "Vp", "Vs"]:
+            if target in ["rho", "Vp", "Vs", "melt", "h2o"]:
                 combine_plots_horizontally(
                     f"{fig_dir}/{sid}-{target}.png",
                     f"{fig_dir}/{sid}-{target}-grad.png",
@@ -2349,11 +2397,19 @@ def compose_itr(gfem_model, clean=False):
 
                 print(f"  Figure saved to: {fig_dir}/image3-{sid}-{target}.png ...")
 
-    if all(item in targets for item in ["rho", "Vp", "Vs"]):
+    if all(item in targets for item in ["rho", "melt", "h2o"]):
         captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-        trgts = ["rho", "Vp", "Vs"]
+        trgts = ["rho", "melt", "h2o"]
 
         for i, target in enumerate(trgts):
+            # Check for existing plots
+            fig = f"{fig_dir}/{sid}-{target}.png"
+            check_fig = os.path.exists(fig)
+
+            if not check_fig:
+                print(f"  No {target} plot found. Skipping composition ...")
+                continue
+
             combine_plots_horizontally(
                 f"{fig_dir}/{sid}-{target}.png",
                 f"{fig_dir}/{sid}-{target}-grad.png",
@@ -2370,23 +2426,30 @@ def compose_itr(gfem_model, clean=False):
                 caption2=captions[i][2]
             )
 
-        combine_plots_vertically(
-            f"{fig_dir}/temp-rho.png",
-            f"{fig_dir}/temp-Vp.png",
-            f"{fig_dir}/temp1.png",
-            caption1="",
-            caption2=""
-        )
+        # Check for existing plots
+        fig = f"{fig_dir}/{sid}-h2o.png"
+        check_fig = os.path.exists(fig)
 
-        combine_plots_vertically(
-            f"{fig_dir}/temp1.png",
-            f"{fig_dir}/temp-Vs.png",
-            f"{fig_dir}/image9-{sid}.png",
-            caption1="",
-            caption2=""
-        )
+        if not check_fig:
+            print(f"  No h2o plot found. Skipping composition ...")
+        else:
+            combine_plots_vertically(
+                f"{fig_dir}/temp-rho.png",
+                f"{fig_dir}/temp-melt.png",
+                f"{fig_dir}/temp1.png",
+                caption1="",
+                caption2=""
+            )
 
-        print(f"  Figure saved to: {fig_dir}/image9-{sid}.png ...")
+            combine_plots_vertically(
+                f"{fig_dir}/temp1.png",
+                f"{fig_dir}/temp-h2o.png",
+                f"{fig_dir}/image9-{sid}.png",
+                caption1="",
+                caption2=""
+            )
+
+            print(f"  Figure saved to: {fig_dir}/image9-{sid}.png ...")
 
     if all(item in targets for item in ["rho", "Vp", "Vs", "melt", "h2o"]):
         captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)"),
@@ -2410,22 +2473,13 @@ def compose_itr(gfem_model, clean=False):
                 caption2=captions[i][1]
             )
 
-            if target in ["melt", "h2o"]:
-                combine_plots_horizontally(
-                    f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/{sid}-assemblage.png",
-                    f"{fig_dir}/temp-{target}.png",
-                    caption1="",
-                    caption2=captions[i][2]
-                )
-            else:
-                combine_plots_horizontally(
-                    f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/{sid}-{target}-prem.png",
-                    f"{fig_dir}/temp-{target}.png",
-                    caption1="",
-                    caption2=captions[i][2]
-                )
+            combine_plots_horizontally(
+                f"{fig_dir}/temp1.png",
+                f"{fig_dir}/{sid}-{target}-prem.png",
+                f"{fig_dir}/temp-{target}.png",
+                caption1="",
+                caption2=captions[i][2]
+            )
 
         combine_plots_vertically(
             f"{fig_dir}/temp-rho.png",
@@ -2493,14 +2547,14 @@ def compose_itr(gfem_model, clean=False):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # visualize prem comps !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps.png",
-                         figwidth=6.3, figheight=5.8, fontsize=28):
+def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
     """
     """
     warnings.simplefilter("ignore", category=UserWarning)
 
     # Data asset dir
     data_dir = "assets/data"
+    fig_dir = "figs/other"
 
     # Check for data dir
     if not os.path.exists(data_dir):
@@ -2534,20 +2588,23 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
     # Colormap
     colormap = plt.colormaps["tab10"]
 
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(figwidth * 3, figheight))
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(figwidth * 2, figheight))
 
     for j, model in enumerate(gfem_models):
         # Get gfem model data
         sid = model.sid
         res = model.res
+        P_min = model.P_min
+        P_max = model.P_max
         targets = model.targets
         results = model.results
         xi = model.fertility_index
         geothresh = model.geothresh
+        perplex_db = model.perplex_db
         target_units = model.target_units
 
         # Filter targets for PREM
-        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "h2o"]]
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
 
@@ -2555,19 +2612,22 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
         ref_models = model._get_1d_reference_models()
 
         for i, target in enumerate(targets):
-            # Get 1D reference model profiles
-            P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
-            P_stw105, target_stw105 = ref_models["stw105"]["P"], ref_models["stw105"][target]
+            if target in ["rho", "Vp", "Vs"]:
+                # Get 1D reference model profiles
+                P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
+                P_stw105, target_stw105 = (ref_models["stw105"]["P"],
+                                           ref_models["stw105"][target])
 
             # Get GFEM model profile
             P_gfem, _, target_gfem = model._get_1d_profile(
                 target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
 
-            # Crop GFEM profile and compare with PREM
-            P_gfem, target_gfem, P_prem, target_prem, _, _ = (
-                model._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
-            _, _, P_stw105, target_stw105, _, _ = (
-                model._crop_1d_profile(P_gfem, target_gfem, P_stw105, target_stw105))
+            if target in ["rho", "Vp", "Vs"]:
+                # Crop GFEM profile and compare with PREM
+                P_gfem, target_gfem, P_prem, target_prem, _, _ = (
+                    model._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
+                _, _, P_stw105, target_stw105, _, _ = (
+                    model._crop_1d_profile(P_gfem, target_gfem, P_stw105, target_stw105))
 
             # Create colorbar
             pal = sns.color_palette("magma", as_cmap=True).reversed()
@@ -2578,11 +2638,12 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
             ax = axes[i]
 
             if j == 0:
-                # Plot reference models
-                ax.plot(target_prem, P_prem, "-", linewidth=4.5, color="forestgreen",
-                        label="PREM", zorder=7)
-                ax.plot(target_stw105, P_stw105, ":", linewidth=4.5, color="forestgreen",
-                        label="STW105", zorder=7)
+                if target in ["rho", "Vp", "Vs"]:
+                    # Plot reference models
+                    ax.plot(target_prem, P_prem, "-", linewidth=4.5, color="forestgreen",
+                            label="PREM", zorder=7)
+                    ax.plot(target_stw105, P_stw105, ":", linewidth=4.5, color="forestgreen",
+                            label="STW105", zorder=7)
 
             if sid == "sm129":
                 ax.plot(target_gfem, P_gfem, "-", linewidth=6.5, color=sm.to_rgba(xi),
@@ -2594,44 +2655,52 @@ def visualize_prem_comps(gfem_models, fig_dir="figs/other", filename="prem-comps
             # Plot GFEM and RocMLM profiles
             ax.plot(target_gfem, P_gfem, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.1)
 
+            # Target labels
             if target == "rho":
                 target_label = "Density"
+            elif target == "h2o":
+                target_label = "H$_2$O"
+            elif target == "melt":
+                target_label = "Melt"
             else:
                 target_label = target
 
-            if i != 0:
-                ax.set_ylabel("")
+            ax.set_ylabel("P (GPa)")
+
+            if target not in ["assemblage", "variance"]:
+                ax.set_xlabel(f"{target_label} ({target_units[i]})")
             else:
-                ax.set_ylabel("P (GPa)")
+                ax.set_xlabel(f"{target_label}")
 
-            ax.set_xlabel(f"{target_label} ({target_units[i]})")
-
-            if target in ["Vp", "Vs", "rho"]:
+            if target in ["rho", "melt", "h2o"]:
                 ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
                 ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
 
+            if i == 0:
+                ax.legend(loc=2, columnspacing=0, handletextpad=0.2,
+                          fontsize=fontsize * 0.833)
+
             # Convert the primary y-axis data (pressure) to depth
             depth_conversion = lambda P: P * 30
-            depth_values = depth_conversion(P_prem)
+            depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
 
-            if i == 2:
+            if i == 1:
                 # Create the secondary y-axis and plot depth on it
                 ax2 = ax.secondary_yaxis(
                     "right", functions=(depth_conversion, depth_conversion))
                 ax2.set_yticks([410, 670])
                 ax2.set_ylabel("Depth (km)")
-                cbaxes = inset_axes(ax, width="40%", height="3%", loc=2)
+                cbaxes = inset_axes(ax, width="40%", height="3%", loc=1)
                 colorbar = plt.colorbar(sm, ax=ax, cax=cbaxes, label="$\\xi$",
                                         orientation="horizontal")
+                colorbar.ax.set_xticks([sm.get_clim()[0], sm.get_clim()[1]])
+                colorbar.ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.2g"))
 
-                ax.legend(loc="lower right", columnspacing=0, handletextpad=0.2,
-                           fontsize=fontsize * 0.833)
-
-    fig.text(0.00, 0.98, "a)", fontsize=fontsize * 1.4)
-    fig.text(0.33, 0.98, "b)", fontsize=fontsize * 1.4)
-    fig.text(0.65, 0.98, "c)", fontsize=fontsize * 1.4)
+    fig.text(0.02, 0.96, "a)", fontsize=fontsize * 1.4)
+    fig.text(0.47, 0.96, "b)", fontsize=fontsize * 1.4)
 
     # Save the plot to a file
+    filename = f"prem-comps-{perplex_db}.png"
     plt.savefig(f"{fig_dir}/{filename}")
 
     # Close device
@@ -2695,7 +2764,7 @@ def gfem_iteration(args, queue):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # build gfem models !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1,
+def build_gfem_models(source, sampleids=None, perplex_db="hp633", res=128, Pmin=1,
                       Pmax=28, Tmin=773, Tmax=2273, nprocs=os.cpu_count() - 2, verbose=1):
     """
     """
@@ -2758,12 +2827,13 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp02", res=128, Pmin=1
             error_count += 1
 
     if error_count > 0:
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print(f"Total models with errors: {error_count}")
     else:
-        print("All GFEM models successfully built!")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        print("All GFEM models built successfully !")
 
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
+    print(":::::::::::::::::::::::::::::::::::::::::::::")
     return gfems
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2781,7 +2851,7 @@ def main():
 
         for name, source in sources.items():
             sids = get_sampleids(source)
-            gfems[name] = build_gfem_models(source, sids, "hp02", 64)
+            gfems[name] = build_gfem_models(source, sids)
 
         # Compose plots
         for name, models in gfems.items():
@@ -2791,11 +2861,13 @@ def main():
         visualize_prem_comps(gfems["middle"] + gfems["random"])
 
     except Exception as e:
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print(f"!!! ERROR in main() !!!")
         print(f"{e}")
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         traceback.print_exc()
 
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("GFEM models built and visualized !")
     print("=============================================")
 

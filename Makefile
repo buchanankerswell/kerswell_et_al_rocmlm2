@@ -21,6 +21,7 @@ PYTHON = python/pca.py \
 DATAPURGE = log \
 						python/__pycache__ \
 						$(DATADIR)/synthetic*.csv \
+						$(DATADIR)/gfem_summaries \
 						$(DATADIR)/lut-efficiency.csv \
 						$(DATADIR)/earthchem-counts.csv \
 						$(DATADIR)/earthchem-samples-pca.csv \
@@ -35,6 +36,10 @@ all: $(LOGFILE) $(PYTHON) gfems rocmlms
 
 write_md_tables: $(LOGFILE) $(PYTHON)
 	@$(CONDAPYTHON) -u python/write-md-tables.py $(LOG)
+
+test: $(LOGFILE) $(PYTHON) mixing_arrays
+	@$(CONDAPYTHON) -u python/test.py $(LOG)
+	@echo "=============================================" $(LOG)
 
 rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
 	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/rocmlm.py $(LOG)

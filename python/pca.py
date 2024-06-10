@@ -43,7 +43,7 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, res=128, verbose=1):
         # Input
-        self.res = res + 1
+        self.res = res
         self.verbose = verbose
 
         # Mixing array sampling
@@ -811,7 +811,7 @@ class MixingArray:
                 # Define adjustment factor
                 median_adjustment_q1x = 0
                 median_adjustment_q1y = 0
-                median_adjustment_q2x = -0.5
+                median_adjustment_q2x = -0.6
                 median_adjustment_q2y = 0
                 median_adjustment_q3x = 0.9
                 median_adjustment_q3y = 0.1
@@ -1109,6 +1109,7 @@ class MixingArray:
             return None
 
         except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in create_mixing_array() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -1125,7 +1126,7 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize mixing array !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize_mixing_array(self, figwidth=6.3, figheight=4.7, fontsize=24):
+    def visualize_mixing_array(self, figwidth=6.3, figheight=5.2, fontsize=24):
         """
         """
         # Get self attributes
@@ -1552,6 +1553,7 @@ def main():
             print("Mixing array visualized !")
 
         except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in main() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
