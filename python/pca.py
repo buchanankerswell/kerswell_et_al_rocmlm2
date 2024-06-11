@@ -43,7 +43,7 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, res=128, verbose=1):
         # Input
-        self.res = res
+        self.res = res + 1
         self.verbose = verbose
 
         # Mixing array sampling

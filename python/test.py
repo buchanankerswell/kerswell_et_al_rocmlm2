@@ -4,6 +4,12 @@ from gfem import GFEMModel
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
+sid = "sm128"
+source = "assets/data/synthetic-samples-mixing-middle.csv"
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# helper functions !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def find_assemblage_centers(assemblage_array, assemblage_list, top_n=13):
     # Convert assemblage_array to integers
     assemblage_array = assemblage_array.astype(int)
@@ -43,6 +49,9 @@ def convert_assemblage_centers_to_PT(center, extent, res):
 
     return T_val, P_val
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# plotting !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 plt.rcParams["figure.dpi"] = 300
 plt.rcParams["font.size"] = 22
 plt.rcParams["savefig.bbox"] = "tight"
@@ -53,12 +62,7 @@ plt.rcParams["legend.loc"] = "upper left"
 plt.rcParams["legend.fontsize"] = "small"
 plt.rcParams["figure.autolayout"] = "True"
 
-
-
-
-sid = "sm128"
-
-model = GFEMModel("hp02", sid, "assets/data/synthetic-samples-mixing-middle.csv")
+model = GFEMModel("hp02", sid, source)
 model._get_target_array()
 
 res = model.res
@@ -96,7 +100,7 @@ plt.legend(title="", handles=legend_handles, loc="upper center", handleheight=1.
 
 plt.savefig("test.png")
 
-model = GFEMModel("hp633", sid, "assets/data/synthetic-samples-mixing-middle.csv")
+model = GFEMModel("hp633", sid, source)
 model._get_target_array()
 
 res = model.res
