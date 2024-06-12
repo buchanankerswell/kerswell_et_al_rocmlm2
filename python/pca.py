@@ -41,9 +41,10 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, res=128, verbose=1):
+    def __init__(self, res=64, res_loi=8, verbose=1):
         # Input
         self.res = res + 1
+        self.res_loi = res_loi
         self.verbose = verbose
 
         # Mixing array sampling
@@ -70,6 +71,7 @@ class MixingArray:
 
         # PCA results
         self.scaler = None
+        self.max_loi = None
         self.pca_model = None
         self.n_pca_components = 2
         self.pca_results = np.array([])
@@ -80,7 +82,7 @@ class MixingArray:
         self.bottom_arrays = None
         self.synthetic_data_written = False
         self.mixing_array_tops = np.array([])
-        self.mixing_array_bottoms = np.array([])
+        self.mixing_array_bots = np.array([])
         self.mixing_array_endpoints = np.array([])
 
         # Errors
@@ -439,6 +441,7 @@ class MixingArray:
         data = self._convert_to_fe2o3t(data)
 
         # Normalize to volatile free basis
+        self.max_loi = data["LOI"].max()
         data = self._normalize_volatile_free(data)
 
         # Convert all Fe oxides to FEOT
@@ -580,7 +583,7 @@ class MixingArray:
         df = pd.read_csv(source)
 
         # Subset samples
-        samples = df[df["SAMPLEID"].isin(sampleids)]
+        samples = df[df["SAMPLEID"].isin(sampleids) & (df["LOI"] == 0)]
 
         # Write csv
         if os.path.exists(filename):
@@ -602,17 +605,22 @@ class MixingArray:
         res = self.res
         pca = self.pca_model
         scaler = self.scaler
+        digits = self.digits
         D_tio2 = self.D_tio2
         ox_gfem = self.ox_gfem
+        ox_exclude = self.ox_exclude
+        metadata = ["SAMPLEID"]
+        n_pca_components = self.n_pca_components
+        ox_sub = [oxide for oxide in ox_gfem if oxide not in ox_exclude]
+        other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
+                      "F_MELT_FRAC", "XI_FRAC"]
 
         df_bench_path = "assets/data/benchmark-samples.csv"
         df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
         df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
 
-        sources = ["assets/data/synthetic-samples-mixing-tops.csv",
-                   "assets/data/synthetic-samples-mixing-middle.csv",
-                   "assets/data/synthetic-samples-mixing-bottoms.csv"]
-        sampleids = [["st000", f"st{res}"], ["sm000", f"sm{res}"], ["sb000", f"sb{res}"]]
+        sources = ["assets/data/synthetic-samples-mixing-mids.csv"]
+        sampleids = [["sm000", f"sm{str(res).zfill(3)}"]]
 
         # Save synthetic benchmark models
         for source, sids in zip(sources, sampleids):
@@ -620,15 +628,36 @@ class MixingArray:
 
         # Read benchmark samples
         if os.path.exists(df_bench_path) and os.path.exists(df_synth_bench_path):
-            df_bench = pd.read_csv(df_bench_path)
+            # Get max TiO2 from mixing array endpoints
             df_synth_bench = pd.read_csv(df_synth_bench_path)
+            ti_init = df_synth_bench["TIO2"].max()
+
+            # Read benchmark samples
+            df_bench = pd.read_csv(df_bench_path)
+
+            # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
+            df_bench["R_MGSI"] = round(df_bench["MGO"] / df_bench["SIO2"], digits)
+            df_bench["R_ALSI"] = round(df_bench["AL2O3"] / df_bench["SIO2"], digits)
+
+            # Normalize compositions
+            normalized_values = df_bench.apply(self._normalize_sample_composition, axis=1)
+            df_bench[ox_sub] = normalized_values.apply(pd.Series)
+            df_bench[ox_exclude] = float(0)
+
+            # Standardize data
+            df_bench_scaled = scaler.transform(df_bench[ox_gfem])
 
             # Fit PCA to benchmark samples
-            df_bench[["PC1", "PC2"]] = pca.transform(scaler.transform(df_bench[ox_gfem]))
-            df_bench[["PC1", "PC2"]] = df_bench[["PC1", "PC2"]].round(3)
+            principal_components = pca.transform(df_bench_scaled)
+
+            # Update dataframe
+            pca_columns = [f"PC{i+1}" for i in range(n_pca_components)]
+            df_bench[pca_columns] = principal_components
+
+            # Round numerical data
+            df_bench[ox_gfem + pca_columns] = df_bench[ox_gfem + pca_columns].round(3)
 
             # Calculate F melt
-            ti_init = df_synth_bench["TIO2"].max()
             df_bench["R_TIO2"] = round(df_bench["TIO2"] / ti_init, 3)
             df_bench["F_MELT_BATCH"] = round(
                 ((D_tio2 / df_bench["R_TIO2"]) - D_tio2) / (1 - D_tio2), 3)
@@ -636,6 +665,9 @@ class MixingArray:
             df_bench["F_MELT_FRAC"] = round(
                 1 - df_bench["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), 3)
             df_bench["XI_FRAC"] = round(1 - df_bench["F_MELT_FRAC"], 3)
+
+            # Select columns
+            df_bench = df_bench[metadata + ox_gfem + ["LOI"] + pca_columns + other_cols]
 
             # Save to csv
             df_bench.to_csv(df_bench_pca_path, index=False)
@@ -747,6 +779,29 @@ class MixingArray:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # add loi !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _add_loi(self, df):
+        """
+        """
+        # Get self attributes
+        res = self.res
+        digits = self.digits
+        max_loi = self.max_loi
+        res_loi = self.res_loi
+
+        # Create linear array of ad hoc loi
+        loi = np.linspace(0.0, max_loi, res_loi + 1).round(digits)
+
+        # Duplicate each sampleid
+        df = df.reindex(df.index.repeat(res_loi + 1))
+
+        # Add loi to each sampleid
+        df["LOI"] = np.tile(loi, len(df) // len(loi))
+
+        return df
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # create mixing arrays !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def create_mixing_array(self):
@@ -771,11 +826,15 @@ class MixingArray:
         pca = self.pca_model
         verbose = self.verbose
         ox_gfem = self.ox_gfem
+        metadata = self.metadata
         mc_sample = self.mc_sample
         data = self.earthchem_pca.copy()
         weighted_random = self.weighted_random
         principal_components = self.pca_results
         n_pca_components = self.n_pca_components
+        pca_columns = [f"PC{i+1}" for i in range(n_pca_components)]
+        other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
+                      "F_MELT_FRAC", "XI_FRAC"]
 
         try:
             # Define sample centroids
@@ -784,7 +843,7 @@ class MixingArray:
             # Initialize endpoints
             mixing_array_endpoints = []
             mixing_array_tops = []
-            mixing_array_bottoms = []
+            mixing_array_bots = []
 
             for x, y, rockname in zip(centroids["PC1"].tolist(), centroids["PC2"].tolist(),
                                       centroids.index.tolist()):
@@ -858,14 +917,14 @@ class MixingArray:
             mixing_array_endpoints = np.array(endpoints_sorted)
 
             mixing_array_tops = mixing_array_endpoints.copy()
-            mixing_array_bottoms = mixing_array_endpoints.copy()
+            mixing_array_bots = mixing_array_endpoints.copy()
 
             mixing_array_tops[:,-1] += top_adjustment * iqr_pc2
-            mixing_array_bottoms[:,-1] -= bottom_adjustment * iqr_pc2
+            mixing_array_bots[:,-1] -= bottom_adjustment * iqr_pc2
 
             self.mixing_array_endpoints = mixing_array_endpoints
             self.mixing_array_tops = mixing_array_tops
-            self.mixing_array_bottoms = mixing_array_bottoms
+            self.mixing_array_bots = mixing_array_bots
 
             # Initialize mixing lines
             mixing_lines = {}
@@ -887,8 +946,8 @@ class MixingArray:
                                     np.linspace(mixing_array_tops[i, n],
                                                 mixing_array_tops[j, n], nsmps))
                                 bottom_lines[f"{i + 1}{j + 1}"] = (
-                                    np.linspace(mixing_array_bottoms[i, n],
-                                                mixing_array_bottoms[j, n], nsmps))
+                                    np.linspace(mixing_array_bots[i, n],
+                                                mixing_array_bots[j, n], nsmps))
 
                             else:
                                 if (((i == 0) & (j == 1)) | ((i == 1) & (j == 2)) |
@@ -904,8 +963,8 @@ class MixingArray:
                                                     mixing_array_tops[j, n], nsmps)))
                                     bottom_lines[f"{i + 1}{j + 1}"] = np.vstack((
                                         bottom_lines[f"{i + 1}{j + 1}"],
-                                        np.linspace(mixing_array_bottoms[i, n],
-                                                    mixing_array_bottoms[j, n], nsmps)))
+                                        np.linspace(mixing_array_bots[i, n],
+                                                    mixing_array_bots[j, n], nsmps)))
 
             # Update self attribute
             self.mixing_arrays = mixing_lines
@@ -936,7 +995,7 @@ class MixingArray:
                                 top_lines[f"{i + 1}{j + 1}"].T)),
                             columns=ox_gfem + [f"PC{n + 1}" for n in range(n_pca_components)]
                         ).round(3)
-                        bottoms_synthetic = pd.DataFrame(
+                        bots_synthetic = pd.DataFrame(
                             np.hstack((scaler.inverse_transform(pca.inverse_transform(
                                 bottom_lines[f"{i + 1}{j + 1}"].T)),
                                 bottom_lines[f"{i + 1}{j + 1}"].T)),
@@ -946,37 +1005,37 @@ class MixingArray:
                         # Append to list
                         mixing_list.append(mixing_synthetic)
                         top_list.append(tops_synthetic)
-                        bottom_list.append(bottoms_synthetic)
+                        bottom_list.append(bots_synthetic)
 
             # Combine mixing arrays
-            all_mixing = pd.concat(mixing_list, ignore_index=True)
+            all_mixs = pd.concat(mixing_list, ignore_index=True)
             all_tops = pd.concat(top_list, ignore_index=True)
-            all_bottoms = pd.concat(bottom_list, ignore_index=True)
+            all_bots = pd.concat(bottom_list, ignore_index=True)
 
             # Add sample id column
-            all_mixing.insert(0, "SAMPLEID", [f"sm{str(n).zfill(3)}" for
-                                              n in range(len(all_mixing))])
-            all_tops.insert(0, "SAMPLEID", [f"st{str(n).zfill(3)}" for
-                                            n in range(len(all_tops))])
-            all_bottoms.insert(0, "SAMPLEID", [f"sb{str(n).zfill(3)}" for
-                                               n in range(len(all_bottoms))])
+            all_mixs.insert(
+                0, "SAMPLEID", [f"sm{str(n).zfill(3)}" for n in range(len(all_mixs))])
+            all_tops.insert(
+                0, "SAMPLEID", [f"st{str(n).zfill(3)}" for n in range(len(all_tops))])
+            all_bots.insert(
+                0, "SAMPLEID", [f"sb{str(n).zfill(3)}" for n in range(len(all_bots))])
 
             # No negative oxides
             data[ox_gfem] = data[ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_mixing[ox_gfem] = all_mixing[
+            all_mixs[ox_gfem] = all_mixs[
                 ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
             all_tops[ox_gfem] = all_tops[
                 ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_bottoms[ox_gfem] = all_bottoms[
+            all_bots[ox_gfem] = all_bots[
                 ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
 
             # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
-            all_mixing["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.1)
-            all_tops["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.1)
-            all_bottoms["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.1)
+            all_mixs["TIO2"] = all_mixs["TIO2"] + (all_mixs["TIO2"] * 0.1)
+            all_tops["TIO2"] = all_mixs["TIO2"] + (all_mixs["TIO2"] * 0.1)
+            all_bots["TIO2"] = all_mixs["TIO2"] + (all_mixs["TIO2"] * 0.1)
 
             # Calculate F melt
-            ti_init = all_mixing["TIO2"].max()
+            ti_init = all_mixs["TIO2"].max()
             data["R_TIO2"] = round(data["TIO2"] / ti_init, digits)
             data["F_MELT_BATCH"] = round(
                 ((D_tio2 / data["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
@@ -984,18 +1043,22 @@ class MixingArray:
             data["F_MELT_FRAC"] = round(1 - data["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
             data["XI_FRAC"] = round(1 - data["F_MELT_FRAC"], digits)
 
+            # Select columns
+            data = data[metadata + ox_gfem + ["LOI"] + pca_columns + other_cols]
+
             self.earthchem_pca = data.copy()
 
             # Write csv file
             data.to_csv(f"assets/data/earthchem-samples-pca.csv", index=False)
 
-            all_mixing["R_TIO2"] = round(all_mixing["TIO2"] / ti_init, digits)
-            all_mixing["F_MELT_BATCH"] = round(
-                ((D_tio2 / all_mixing["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            all_mixing["XI_BATCH"] = round(1 - all_mixing["F_MELT_BATCH"], digits)
-            all_mixing["F_MELT_FRAC"] = round(
-                1 - all_mixing["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            all_mixing["XI_FRAC"] = round(1 - all_mixing["F_MELT_FRAC"], digits)
+            # Calculate F melt
+            all_mixs["R_TIO2"] = round(all_mixs["TIO2"] / ti_init, digits)
+            all_mixs["F_MELT_BATCH"] = round(
+                ((D_tio2 / all_mixs["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
+            all_mixs["XI_BATCH"] = round(1 - all_mixs["F_MELT_BATCH"], digits)
+            all_mixs["F_MELT_FRAC"] = round(
+                1 - all_mixs["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
+            all_mixs["XI_FRAC"] = round(1 - all_mixs["F_MELT_FRAC"], digits)
 
             all_tops["R_TIO2"] = round(all_tops["TIO2"] / ti_init, digits)
             all_tops["F_MELT_BATCH"] = round(
@@ -1005,23 +1068,40 @@ class MixingArray:
                 1 - all_tops["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
             all_tops["XI_FRAC"] = round(1 - all_tops["F_MELT_FRAC"], digits)
 
-            all_bottoms["R_TIO2"] = round(all_bottoms["TIO2"] / ti_init, digits)
-            all_bottoms["F_MELT_BATCH"] = round(
-                ((D_tio2 / all_bottoms["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            all_bottoms["XI_BATCH"] = round(1 - all_bottoms["F_MELT_BATCH"], digits)
-            all_bottoms["F_MELT_FRAC"] = round(
-                1 - all_bottoms["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            all_bottoms["XI_FRAC"] = round(1 - all_bottoms["F_MELT_FRAC"], digits)
+            all_bots["R_TIO2"] = round(all_bots["TIO2"] / ti_init, digits)
+            all_bots["F_MELT_BATCH"] = round(
+                ((D_tio2 / all_bots["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
+            all_bots["XI_BATCH"] = round(1 - all_bots["F_MELT_BATCH"], digits)
+            all_bots["F_MELT_FRAC"] = round(
+                1 - all_bots["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
+            all_bots["XI_FRAC"] = round(1 - all_bots["F_MELT_FRAC"], digits)
+
+            # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
+            all_mixs["R_MGSI"] = round(all_mixs["MGO"] / all_mixs["SIO2"], digits)
+            all_mixs["R_ALSI"] = round(all_mixs["AL2O3"] / all_mixs["SIO2"], digits)
+            all_tops["R_MGSI"] = round(all_tops["MGO"] / all_tops["SIO2"], digits)
+            all_tops["R_ALSI"] = round(all_tops["AL2O3"] / all_tops["SIO2"], digits)
+            all_bots["R_MGSI"] = round(all_bots["MGO"] / all_bots["SIO2"], digits)
+            all_bots["R_ALSI"] = round(all_bots["AL2O3"] / all_bots["SIO2"], digits)
+
+            # Add LOI ad hoc
+            all_tops = self._add_loi(all_tops)
+            all_mixs = self._add_loi(all_mixs)
+            all_bots = self._add_loi(all_bots)
+
+            # Select columns
+            all_mixs = all_mixs[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
+            all_tops = all_tops[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
+            all_bots = all_bots[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
 
             # Write to csv
-            all_mixing.to_csv("assets/data/synthetic-samples-mixing-middle.csv", index=False)
+            all_mixs.to_csv("assets/data/synthetic-samples-mixing-mids.csv", index=False)
             all_tops.to_csv("assets/data/synthetic-samples-mixing-tops.csv", index=False)
-            all_bottoms.to_csv("assets/data/synthetic-samples-mixing-bottoms.csv",
-                               index=False)
+            all_bots.to_csv("assets/data/synthetic-samples-mixing-bots.csv", index=False)
 
             # Define bounding box around top and bottom mixing arrays
-            min_x = min(mixing_array_tops[:, 0].min(), mixing_array_bottoms[:, 0].min())
-            max_x = max(mixing_array_tops[:, 0].max(), mixing_array_bottoms[:, 0].max())
+            min_x = min(mixing_array_tops[:, 0].min(), mixing_array_bots[:, 0].min())
+            max_x = max(mixing_array_tops[:, 0].max(), mixing_array_bots[:, 0].max())
 
             # Define the sampling interval
             interval_x = (max_x - min_x) / res
@@ -1042,8 +1122,7 @@ class MixingArray:
                 for x in np.linspace(min_x, max_x, res):
                     # Calculate the range of y values for the given x position
                     y_min = np.interp(x, mixing_array_tops[:, 0], mixing_array_tops[:, 1])
-                    y_max = np.interp(x, mixing_array_bottoms[:, 0],
-                                      mixing_array_bottoms[:, 1])
+                    y_max = np.interp(x, mixing_array_bots[:, 0], mixing_array_bots[:, 1])
                     y_mid = (y_max + y_min) / 2
 
                     # Create a grid of y values for the current x position
@@ -1070,8 +1149,8 @@ class MixingArray:
                     prob_dist = None
 
                 # Randomly select from sampled points
-                sample_idx = np.random.choice(len(sampled_points), res, replace=False,
-                                              p=prob_dist)
+                sample_idx = np.random.choice(
+                    len(sampled_points), res, replace=False, p=prob_dist)
                 randomly_sampled_points.append([sampled_points[i] for i in sample_idx])
 
                 # Save random points
@@ -1081,36 +1160,44 @@ class MixingArray:
             randomly_sampled_points = np.vstack(randomly_sampled_points)
 
             # Create dataframe
-            random_synthetic = pd.DataFrame(
+            all_rnds = pd.DataFrame(
                 np.hstack((scaler.inverse_transform(pca.inverse_transform(
                     randomly_sampled_points)), randomly_sampled_points)),
                 columns=ox_gfem + [f"PC{n + 1}" for n in range(n_pca_components)]
             ).round(3)
 
             # Add sample id column
-            random_synthetic.insert(0, "SAMPLEID", sample_ids)
+            all_rnds.insert(0, "SAMPLEID", sample_ids)
 
             # No negative oxides
-            random_synthetic[ox_gfem] = random_synthetic[ox_gfem].apply(
+            all_rnds[ox_gfem] = all_rnds[ox_gfem].apply(
                 lambda x: x.apply(lambda y: max(0.001, y)))
 
             # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
-            random_synthetic["TIO2"] = (random_synthetic["TIO2"] +
-                                        (random_synthetic["TIO2"] * 0.1))
+            all_rnds["TIO2"] = (all_rnds["TIO2"] + (all_rnds["TIO2"] * 0.1))
 
             # Calculate F melt
-            random_synthetic["R_TIO2"] = round(random_synthetic["TIO2"] / ti_init, digits)
-            random_synthetic["F_MELT_BATCH"] = round(
-                ((D_tio2 / random_synthetic["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            random_synthetic["XI_BATCH"] = round(
-                1 - random_synthetic["F_MELT_BATCH"], digits)
-            random_synthetic["F_MELT_FRAC"] = round(
-                1 - random_synthetic["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            random_synthetic["XI_FRAC"] = round(1 - random_synthetic["F_MELT_FRAC"], digits)
+            all_rnds["R_TIO2"] = round(all_rnds["TIO2"] / ti_init, digits)
+            all_rnds["F_MELT_BATCH"] = round(
+                ((D_tio2 / all_rnds["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
+            all_rnds["XI_BATCH"] = round(
+                1 - all_rnds["F_MELT_BATCH"], digits)
+            all_rnds["F_MELT_FRAC"] = round(
+                1 - all_rnds["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
+            all_rnds["XI_FRAC"] = round(1 - all_rnds["F_MELT_FRAC"], digits)
+
+            # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
+            all_rnds["R_MGSI"] = round(all_rnds["MGO"] / all_rnds["SIO2"], digits)
+            all_rnds["R_ALSI"] = round(all_rnds["AL2O3"] / all_rnds["SIO2"], digits)
+
+            # Add LOI ad hoc
+            all_rnds = self._add_loi(all_rnds)
+
+            # Select columns
+            all_rnds = all_rnds[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
 
             # Write to csv
-            random_synthetic.to_csv("assets/data/synthetic-samples-mixing-random.csv",
-                                    index=False)
+            all_rnds.to_csv("assets/data/synthetic-samples-mixing-rnds.csv", index=False)
 
             # Process benchmark samples
             self._process_benchmark_samples_pca()
@@ -1155,8 +1242,8 @@ class MixingArray:
         df_bench_path = "assets/data/benchmark-samples.csv"
         df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
         df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
-        df_synth_middle_path = "assets/data/synthetic-samples-mixing-middle.csv"
-        df_synth_random_path = "assets/data/synthetic-samples-mixing-random.csv"
+        df_synth_mids_path = "assets/data/synthetic-samples-mixing-mids.csv"
+        df_synth_random_path = "assets/data/synthetic-samples-mixing-rnds.csv"
 
         # Read benchmark samples
         if (os.path.exists(df_bench_path) and os.path.exists(df_synth_bench_path) and
@@ -1168,8 +1255,8 @@ class MixingArray:
                 df_synth_bench["R_MGSI"] = df_synth_bench["MGO"] / df_synth_bench["SIO2"]
                 df_synth_bench["R_ALSI"] = df_synth_bench["AL2O3"] / df_synth_bench["SIO2"]
 
-        if (os.path.exists(df_synth_middle_path) and os.path.exists(df_synth_random_path)):
-                df_synth_middle = pd.read_csv(df_synth_middle_path)
+        if (os.path.exists(df_synth_mids_path) and os.path.exists(df_synth_random_path)):
+                df_synth_mids = pd.read_csv(df_synth_mids_path)
                 df_synth_random = pd.read_csv(df_synth_random_path)
 
         # Filter Depletion < 1
@@ -1177,6 +1264,10 @@ class MixingArray:
 
         loadings = pd.DataFrame(
             (pca.components_.T * np.sqrt(pca.explained_variance_)).T, columns=oxides)
+
+        # Mixing array endmembers
+        bend = df_synth_bench["SAMPLEID"].iloc[0]
+        tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         # Check for figs directory
         if not os.path.exists(fig_dir):
@@ -1259,22 +1350,22 @@ class MixingArray:
                                  edgecolors="none", color=colormap(i), marker=".", s=55,
                                  label=legend_lab[i])
 
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == tend],
                         x="R_ALSI", y="R_MGSI", facecolor="white", edgecolor="black",
                         linewidth=2, s=150, legend=False, ax=ax2, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == bend],
                         x="R_ALSI", y="R_MGSI", facecolor="white", edgecolor="black",
                         marker="D", linewidth=2, s=150, legend=False, ax=ax2, zorder=6)
         ax2.annotate("DSUM", xy=(
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "R_ALSI"].iloc[0],
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "R_MGSI"].iloc[0]),
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == tend, "R_ALSI"].iloc[0],
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == tend, "R_MGSI"].iloc[0]),
                      xytext=(10, 10), textcoords="offset points",
                      bbox=dict(boxstyle="round,pad=0.1", facecolor="white",
                               edgecolor="black", linewidth=1.5, alpha=0.8),
                     fontsize=fontsize * 0.833, zorder=8)
         ax2.annotate("PSUM", xy=(
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm000", "R_ALSI"].iloc[0],
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm000", "R_MGSI"].iloc[0]),
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == bend, "R_ALSI"].iloc[0],
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == bend, "R_MGSI"].iloc[0]),
                     xytext=(5, -28), textcoords="offset points",
                     bbox=dict(boxstyle="round,pad=0.1", facecolor="white",
                               edgecolor="black", linewidth=1.5, alpha=0.8),
@@ -1316,14 +1407,14 @@ class MixingArray:
         sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
         sm.set_array([])
 
-        sns.scatterplot(data=df_synth_middle, x="PC1", y="PC2", hue=XI_col, palette=pal,
+        sns.scatterplot(data=df_synth_mids, x="PC1", y="PC2", hue=XI_col, palette=pal,
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax3, zorder=0)
         sns.scatterplot(data=df_synth_random, x="PC1", y="PC2", hue=XI_col, palette=pal,
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax3, zorder=0)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == tend],
                         x="PC1", y="PC2", facecolor="white", edgecolor="black",
                         linewidth=2, s=150, legend=False, ax=ax3, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == bend],
                         x="PC1", y="PC2", facecolor="white", edgecolor="black",
                         marker="D", linewidth=2, s=150, legend=False, ax=ax3, zorder=6)
 
@@ -1347,14 +1438,14 @@ class MixingArray:
         ax4 = fig.add_subplot(224)
         sns.scatterplot(data=data, x="PC1", y="XI_FRAC", facecolor="0.6", marker=".",
                         edgecolor="None", s=55, legend=False, ax=ax4, zorder=0)
-        sns.scatterplot(data=df_synth_middle, x="PC1", y=XI_col, hue=XI_col, palette=pal,
+        sns.scatterplot(data=df_synth_mids, x="PC1", y=XI_col, hue=XI_col, palette=pal,
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax4, zorder=0)
         sns.scatterplot(data=df_synth_random, x="PC1", y=XI_col, hue=XI_col, palette=pal,
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax4, zorder=0)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == tend],
                         x="PC1", y="XI_FRAC", facecolor="white", edgecolor="black",
                         linewidth=2, s=150, legend=False, ax=ax4, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == bend],
                         x="PC1", y="XI_FRAC", facecolor="white", edgecolor="black",
                         marker="D", linewidth=2, s=150, legend=False, ax=ax4, zorder=6)
 
@@ -1401,7 +1492,7 @@ class MixingArray:
         # Get self attributes
         fig_dir = self.fig_dir
         data = self.earthchem_filtered
-        oxides = [ox for ox in self.ox_gfem if ox not in ["SIO2", "FE2O3", "K2O"]]
+        oxides = [ox for ox in self.ox_gfem if ox not in ["SIO2", "FE2O3"]] + ["LOI"]
 
         # Check for benchmark samples
         df_bench_path = "assets/data/benchmark-samples.csv"
@@ -1417,7 +1508,11 @@ class MixingArray:
             raise Exception("No synthetic data found! Call create_mixing_arrays() first ...")
 
         # Initialize synthetic datasets
-        synthetic_samples = pd.read_csv(f"assets/data/synthetic-samples-mixing-random.csv")
+        synthetic_samples = pd.read_csv(f"assets/data/synthetic-samples-mixing-rnds.csv")
+
+        # Mixing array endmembers
+        bend = df_synth_bench["SAMPLEID"].iloc[0]
+        tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         # Check for figs directory
         if not os.path.exists(fig_dir):
@@ -1485,10 +1580,10 @@ class MixingArray:
                                 edgecolor="black", linewidth=2, s=150, legend=False, ax=ax,
                                 zorder=7)
 
-            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == tend],
                             x="SIO2", y=y, facecolor="white", edgecolor="black",
                             linewidth=2, s=75, legend=False, ax=ax, zorder=6)
-            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == bend],
                             x="SIO2", y=y, facecolor="white", edgecolor="black", marker="D",
                             linewidth=2, s=75, legend=False, ax=ax, zorder=6)
 
@@ -1530,9 +1625,10 @@ class MixingArray:
         legend_handles.append(marker)
 
         legend_ax = axes[-1]
-        legend_ax.legend(handles=legend_handles, loc="upper right", columnspacing=0.2,
-                         ncol=len(legend_handles) / 2, bbox_to_anchor=(0.5, -0.2),
-                         handletextpad=-0.1, fontsize=fontsize * 0.833)
+        legend_ax.axis("off")
+        legend_ax.legend(handles=legend_handles, loc="best", columnspacing=0.2, ncol=2,
+                         bbox_to_anchor=(1.0, 1.0), handletextpad=-0.1,
+                         fontsize=fontsize * 0.833)
 
         # Save the plot to a file
         plt.savefig(f"{fig_dir}/earthchem-harker-diagram.png")
