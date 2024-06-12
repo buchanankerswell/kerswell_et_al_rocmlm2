@@ -56,16 +56,16 @@ class MixingArray:
 
         # Earthchem data
         self.trace = ["CR", "NI"]
-        self.volatiles = ["H2O", "CO2"]
+        self.volatiles = ["H2O", "CO2", "LOI"]
         self.earthchem_raw = pd.DataFrame()
         self.earthchem_pca = pd.DataFrame()
         self.earthchem_imputed = pd.DataFrame()
         self.earthchem_filtered = pd.DataFrame()
         self.metadata = ["SAMPLEID", "SOURCE", "ROCKNAME"]
-        self.ox_exclude = ["CR2O3", "FE2O3", "P2O5", "NIO", "MNO"]
+        self.ox_exclude = ["CR2O3", "FE2O3", "P2O5", "NIO", "MNO", "K2O"] + self.volatiles
         self.ox_data = ["SIO2", "AL2O3", "CAO", "MGO", "FEOT", "K2O", "NA2O", "TIO2",
-                        "FE2O3", "CR2O3", "FE2O3T", "FEO", "NIO", "MNO", "P2O5", "LOI"]
-        self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2", "LOI"]
+                        "FE2O3", "CR2O3", "FE2O3T", "FEO", "NIO", "MNO", "P2O5"]
+        self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2"]
         self.earthchem_filename = "earthchem-combined-deschamps-2013.txt"
 
         # PCA results
@@ -397,17 +397,23 @@ class MixingArray:
                  "hydrated cumulate"]
 
         # Keep only samples with required oxides
-        condition = data[["SIO2", "MGO", "AL2O3", "CAO", "LOI"]].notna().all(axis=1)
+        condition = data[["SIO2", "MGO", "AL2O3", "CAO"]].notna().all(axis=1)
         data = data.loc[condition]
 
-        # Drop unknown rocks
-        data = data[~data["ROCKNAME"].isin(xenolith + metamorphic + other + pyroxenite +
-                                           ["wehrlite", "peridotite", "dunite"])]
+        # Drop certain rocks
+        data = data[~data["ROCKNAME"].isin(
+            xenolith + metamorphic + other + pyroxenite + serpentinite +
+            ["wehrlite", "wehlerite", "peridotite", "dunite"])]
 
         # Add new rock type column
         conditions = [data["ROCKNAME"].isin(peridotite),
-                      data["ROCKNAME"].isin(serpentinite)]
-        values = ["peridotite", "serpentinite"]
+                      data["ROCKNAME"].isin(pyroxenite),
+                      data["ROCKNAME"].isin(serpentinite),
+                      data["ROCKNAME"].isin(metamorphic),
+                      data["ROCKNAME"].isin(xenolith),
+                      data["ROCKNAME"].isin(other)]
+        values = ["peridotite", "pyroxenite", "serpentinite", "metamorphic", "xenolith",
+                  "other"]
         data["ROCKTYPE"] = np.select(conditions, values, default="other")
 
         # Function to remove outliers based on IQR
@@ -437,9 +443,6 @@ class MixingArray:
 
         # Convert all Fe oxides to FEOT
         data = self._convert_to_feot(data)
-
-        # Set FE2O3 to zero
-        data["FE2O3"] = 0
 
         # Drop totals
         data = data.drop(["total_ox", "total_loi"], axis=1)
@@ -600,7 +603,7 @@ class MixingArray:
         pca = self.pca_model
         scaler = self.scaler
         D_tio2 = self.D_tio2
-        oxides = self.ox_gfem
+        ox_gfem = self.ox_gfem
 
         df_bench_path = "assets/data/benchmark-samples.csv"
         df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
@@ -621,11 +624,11 @@ class MixingArray:
             df_synth_bench = pd.read_csv(df_synth_bench_path)
 
             # Fit PCA to benchmark samples
-            df_bench[["PC1", "PC2"]] = pca.transform(scaler.transform(df_bench[oxides]))
+            df_bench[["PC1", "PC2"]] = pca.transform(scaler.transform(df_bench[ox_gfem]))
             df_bench[["PC1", "PC2"]] = df_bench[["PC1", "PC2"]].round(3)
 
             # Calculate F melt
-            ti_init = df_synth_bench["TIO2"].iloc[-1]
+            ti_init = df_synth_bench["TIO2"].max()
             df_bench["R_TIO2"] = round(df_bench["TIO2"] / ti_init, 3)
             df_bench["F_MELT_BATCH"] = round(
                 ((D_tio2 / df_bench["R_TIO2"]) - D_tio2) / (1 - D_tio2), 3)
@@ -687,7 +690,7 @@ class MixingArray:
         # Normalize compositions
         normalized_values = data.apply(self._normalize_sample_composition, axis=1)
         data[ox_sub] = normalized_values.apply(pd.Series)
-        data[ox_exclude] = 0
+        data[ox_exclude] = float(0)
 
         # Initialize scaler
         scaler = StandardScaler()
@@ -811,12 +814,12 @@ class MixingArray:
                 # Define adjustment factor
                 median_adjustment_q1x = 0
                 median_adjustment_q1y = 0
-                median_adjustment_q2x = -0.6
+                median_adjustment_q2x = 0
                 median_adjustment_q2y = 0
-                median_adjustment_q3x = 0.9
-                median_adjustment_q3y = 0.1
-                median_adjustment_q4x = 1.9
-                median_adjustment_q4y = 1.2
+                median_adjustment_q3x = -1.4
+                median_adjustment_q3y = 0.6
+                median_adjustment_q4x = 1.0
+                median_adjustment_q4y = 0.05
                 top_adjustment = 1.5
                 bottom_adjustment = 1.5
 
@@ -967,6 +970,11 @@ class MixingArray:
             all_bottoms[ox_gfem] = all_bottoms[
                 ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
 
+            # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
+            all_mixing["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.1)
+            all_tops["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.1)
+            all_bottoms["TIO2"] = all_mixing["TIO2"] + (all_mixing["TIO2"] * 0.1)
+
             # Calculate F melt
             ti_init = all_mixing["TIO2"].max()
             data["R_TIO2"] = round(data["TIO2"] / ti_init, digits)
@@ -1086,6 +1094,10 @@ class MixingArray:
             random_synthetic[ox_gfem] = random_synthetic[ox_gfem].apply(
                 lambda x: x.apply(lambda y: max(0.001, y)))
 
+            # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
+            random_synthetic["TIO2"] = (random_synthetic["TIO2"] +
+                                        (random_synthetic["TIO2"] * 0.1))
+
             # Calculate F melt
             random_synthetic["R_TIO2"] = round(random_synthetic["TIO2"] / ti_init, digits)
             random_synthetic["F_MELT_BATCH"] = round(
@@ -1185,8 +1197,8 @@ class MixingArray:
         colormap = plt.colormaps["tab10"]
 
         # Legend order
-        legend_order = ["harzburgite", "lherzolite", "serpentinite"]
-        legend_lab = ["harz", "lherz", "serp"]
+        legend_order = ["lherzolite", "harzburgite"]
+        legend_lab = ["lherzolite", "harzburgite"]
 
         fig = plt.figure(figsize=(figwidth * 2, figheight * 2))
 
@@ -1202,21 +1214,24 @@ class MixingArray:
         sns.kdeplot(data=data, x="PC1", y="PC2", hue="ROCKNAME", zorder=1, legend=False,
                     hue_order=legend_order, ax=ax, levels=5, warn_singular=False)
 
-        oxs = ["SIO2", "MGO", "AL2O3", "LOI"]
-        x_offset_text = [0, 0, 2.5, 0]
-        y_offset_text = [0, 0, 0.8, 0]
-        text_fac, arrow_fac = 2.8, 1.3
-        x_offset_arrow, y_offset_arrow = 0, 0
+
+        oxs = ["SIO2", "MGO", "FEO", "AL2O3", "TIO2"]
+        x_offset_text = [-1.7, -1.2, -1.2, -2.5, -2.3]
+        y_offset_text = [5.8, 6.0, 6.0, 5.7, 6.7]
+        text_fac, arrow_fac = 3.5, 1.8
+        x_offset_arrow, y_offset_arrow= -1.2, 6.0
 
         for oxide, x_off, y_off in zip(oxs, x_offset_text, y_offset_text):
             if oxide == "AL2O3":
-                oxide_label = "Al$_2$O$_3$ TiO$_2$ FeO\nCaO Na$_2$O"
+                oxide_label = "Al$_2$O$_3$ CaO"
+            elif oxide == "TIO2":
+                oxide_label = "TiO$_2$ Na$_2$O"
             elif oxide == "SIO2":
                 oxide_label = "SiO$_2$"
             elif oxide == "MGO":
                 oxide_label = "MgO"
-            elif oxide == "LOI":
-                oxide_label = "LOI"
+            elif oxide == "FEO":
+                oxide_label = "FeOT"
 
             ax.arrow(x_offset_arrow, y_offset_arrow, loadings.at[0, oxide] * arrow_fac,
                      loadings.at[1, oxide] * arrow_fac, width=0.1, head_width=0.4,
@@ -1244,22 +1259,22 @@ class MixingArray:
                                  edgecolors="none", color=colormap(i), marker=".", s=55,
                                  label=legend_lab[i])
 
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
                         x="R_ALSI", y="R_MGSI", facecolor="white", edgecolor="black",
                         linewidth=2, s=150, legend=False, ax=ax2, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
                         x="R_ALSI", y="R_MGSI", facecolor="white", edgecolor="black",
                         marker="D", linewidth=2, s=150, legend=False, ax=ax2, zorder=6)
         ax2.annotate("DSUM", xy=(
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm000", "R_ALSI"].iloc[0],
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm000", "R_MGSI"].iloc[0]),
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "R_ALSI"].iloc[0],
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "R_MGSI"].iloc[0]),
                      xytext=(10, 10), textcoords="offset points",
                      bbox=dict(boxstyle="round,pad=0.1", facecolor="white",
                               edgecolor="black", linewidth=1.5, alpha=0.8),
                     fontsize=fontsize * 0.833, zorder=8)
         ax2.annotate("PSUM", xy=(
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "R_ALSI"].iloc[0],
-            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm129", "R_MGSI"].iloc[0]),
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm000", "R_ALSI"].iloc[0],
+            df_synth_bench.loc[df_synth_bench["SAMPLEID"] == "sm000", "R_MGSI"].iloc[0]),
                     xytext=(5, -28), textcoords="offset points",
                     bbox=dict(boxstyle="round,pad=0.1", facecolor="white",
                               edgecolor="black", linewidth=1.5, alpha=0.8),
@@ -1275,11 +1290,12 @@ class MixingArray:
         arrow = FancyArrowPatch((0.13, 0.95), (0.03, 1.27), mutation_scale=6, color="black",
                                 arrowstyle=style)
         ax2.add_patch(arrow)
-        ax2.text(0.06, 1.0, "Melting residue", rotation=-27, fontsize=fontsize * 0.833)
+        ax2.text(0.06, 1.0, "Melting residue", rotation=-25, fontsize=fontsize * 0.833)
 
-        legend = ax2.legend(handles=legend_handles, loc="upper center", frameon=False,
-                            bbox_to_anchor=(0.35, 0.188), ncol=3, columnspacing=0,
-                            handletextpad=-0.5, markerscale=3, fontsize=fontsize * 0.833)
+        legend = ax.legend(handles=legend_handles, loc="lower center", frameon=False,
+                           ncol=2, columnspacing=0, handletextpad=-0.5, markerscale=3,
+                           fontsize=fontsize * 0.833)
+
         # Legend order
         for i, label in enumerate(legend_lab):
             legend.get_texts()[i].set_text(label)
@@ -1304,10 +1320,10 @@ class MixingArray:
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax3, zorder=0)
         sns.scatterplot(data=df_synth_random, x="PC1", y="PC2", hue=XI_col, palette=pal,
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax3, zorder=0)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
                         x="PC1", y="PC2", facecolor="white", edgecolor="black",
                         linewidth=2, s=150, legend=False, ax=ax3, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
                         x="PC1", y="PC2", facecolor="white", edgecolor="black",
                         marker="D", linewidth=2, s=150, legend=False, ax=ax3, zorder=6)
 
@@ -1316,9 +1332,6 @@ class MixingArray:
             sns.scatterplot(data=df_bench[df_bench["SAMPLEID"] == name], x="PC1",
                             y="PC2", marker=mrkr[l], facecolor="white", edgecolor="black",
                             linewidth=2, s=150, legend=False, ax=ax3, zorder=7)
-
-        plt.xlim(ax.get_xlim())
-        plt.ylim(ax.get_ylim())
 
         # Add colorbar
         cbaxes = inset_axes(ax3, width="40%", height="3%", loc=1)
@@ -1338,10 +1351,10 @@ class MixingArray:
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax4, zorder=0)
         sns.scatterplot(data=df_synth_random, x="PC1", y=XI_col, hue=XI_col, palette=pal,
                         edgecolor="None", linewidth=2, s=55, legend=False, ax=ax4, zorder=0)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
                         x="PC1", y="XI_FRAC", facecolor="white", edgecolor="black",
                         linewidth=2, s=150, legend=False, ax=ax4, zorder=6)
-        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+        sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
                         x="PC1", y="XI_FRAC", facecolor="white", edgecolor="black",
                         marker="D", linewidth=2, s=150, legend=False, ax=ax4, zorder=6)
 
@@ -1364,8 +1377,8 @@ class MixingArray:
                    fontsize=fontsize * 0.833)
 
         # Add captions
-        fig.text(0.04, 0.97, "a)", fontsize=fontsize * 1.2)
-        fig.text(0.04, 0.50, "c)", fontsize=fontsize * 1.2)
+        fig.text(0.02, 0.97, "a)", fontsize=fontsize * 1.2)
+        fig.text(0.02, 0.50, "c)", fontsize=fontsize * 1.2)
         fig.text(0.52, 0.97, "b)", fontsize=fontsize * 1.2)
         fig.text(0.52, 0.50, "d)", fontsize=fontsize * 1.2)
 
@@ -1382,13 +1395,13 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize harker diagrams !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize_harker_diagrams(self, figwidth=6.3, figheight=5.8, fontsize=22):
+    def visualize_harker_diagrams(self, figwidth=6.3, figheight=5.5, fontsize=22):
         """
         """
         # Get self attributes
         fig_dir = self.fig_dir
         data = self.earthchem_filtered
-        oxides = [ox for ox in self.ox_gfem if ox not in ["SIO2", "FE2O3"]]
+        oxides = [ox for ox in self.ox_gfem if ox not in ["SIO2", "FE2O3", "K2O"]]
 
         # Check for benchmark samples
         df_bench_path = "assets/data/benchmark-samples.csv"
@@ -1450,8 +1463,8 @@ class MixingArray:
         axes = axes.flatten()
 
         # Legend order
-        legend_order = ["harzburgite", "lherzolite", "serpentinite"]
-        legend_lab = ["harz", "lherz", "serp"]
+        legend_order = ["lherzolite", "harzburgite"]
+        legend_lab = ["lherz", "harz"]
         colormap = plt.colormaps["tab10"]
 
         for k, y in enumerate(oxides):
@@ -1472,14 +1485,14 @@ class MixingArray:
                                 edgecolor="black", linewidth=2, s=150, legend=False, ax=ax,
                                 zorder=7)
 
-            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
+            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
                             x="SIO2", y=y, facecolor="white", edgecolor="black",
                             linewidth=2, s=75, legend=False, ax=ax, zorder=6)
-            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm129"],
+            sns.scatterplot(data=df_synth_bench[df_synth_bench["SAMPLEID"] == "sm000"],
                             x="SIO2", y=y, facecolor="white", edgecolor="black", marker="D",
                             linewidth=2, s=75, legend=False, ax=ax, zorder=6)
 
-            if k < (num_plots - num_cols):
+            if k < (num_plots - num_cols - 1):
                 ax.set_xticks([])
 
             ax.set_xlim(xmin - (xmin * 0.02), xmax + (xmax * 0.02))
@@ -1517,10 +1530,9 @@ class MixingArray:
         legend_handles.append(marker)
 
         legend_ax = axes[-1]
-        legend_ax.axis("off")
-        legend_ax.legend(handles=legend_handles, loc="best", columnspacing=0.2, ncol=2,
-                         bbox_to_anchor=(1.0, 1.0), handletextpad=-0.1,
-                         fontsize=fontsize * 0.833)
+        legend_ax.legend(handles=legend_handles, loc="upper right", columnspacing=0.2,
+                         ncol=len(legend_handles) / 2, bbox_to_anchor=(0.5, -0.2),
+                         handletextpad=-0.1, fontsize=fontsize * 0.833)
 
         # Save the plot to a file
         plt.savefig(f"{fig_dir}/earthchem-harker-diagram.png")
