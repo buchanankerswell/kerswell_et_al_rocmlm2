@@ -617,19 +617,15 @@ class MixingArray:
 
         df_bench_path = "assets/data/benchmark-samples.csv"
         df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
-        df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
 
-        sources = ["assets/data/synthetic-samples-mixing-mids.csv"]
-        sampleids = [["sm000", f"sm{str(res).zfill(3)}"]]
-
-        # Save synthetic benchmark models
-        for source, sids in zip(sources, sampleids):
-            self._samples_to_csv(sids, source, df_synth_bench_path)
+        # Get synthetic endmember compositions
+        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
+        df_mids = pd.read_csv("assets/data/synthetic-samples-mixing-mids.csv")
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
 
         # Read benchmark samples
-        if os.path.exists(df_bench_path) and os.path.exists(df_synth_bench_path):
+        if os.path.exists(df_bench_path):
             # Get max TiO2 from mixing array endpoints
-            df_synth_bench = pd.read_csv(df_synth_bench_path)
             ti_init = df_synth_bench["TIO2"].max()
 
             # Read benchmark samples
@@ -792,12 +788,16 @@ class MixingArray:
 
         # Create linear array of ad hoc loi
         loi = np.linspace(0.0, max_loi, res_loi + 1).round(digits)
+        sid_append = np.arange(0, len(loi))
 
         # Duplicate each sampleid
         df = df.reindex(df.index.repeat(res_loi + 1))
 
         # Add loi to each sampleid
         df["LOI"] = np.tile(loi, len(df) // len(loi))
+        df["SAMPLEID"] = (
+            df["SAMPLEID"] +
+            df.groupby(level=0).cumcount().map(lambda x: f"-loi{str(x).zfill(3)}"))
 
         return df
 
@@ -1239,21 +1239,22 @@ class MixingArray:
         XI_col = "XI_FRAC"
 
         # Check for benchmark samples
-        df_bench_path = "assets/data/benchmark-samples.csv"
         df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
-        df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
         df_synth_mids_path = "assets/data/synthetic-samples-mixing-mids.csv"
         df_synth_random_path = "assets/data/synthetic-samples-mixing-rnds.csv"
 
+        # Get synthetic endmember compositions
+        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
+        df_mids = pd.read_csv("assets/data/synthetic-samples-mixing-mids.csv")
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
+
+        # Mixing array endmembers
+        bend = df_synth_bench["SAMPLEID"].iloc[0]
+        tend = df_synth_bench["SAMPLEID"].iloc[-1]
+
         # Read benchmark samples
-        if (os.path.exists(df_bench_path) and os.path.exists(df_synth_bench_path) and
-            os.path.exists(df_bench_pca_path)):
+        if os.path.exists(df_bench_pca_path):
                 df_bench = pd.read_csv(df_bench_pca_path)
-                df_synth_bench = pd.read_csv(df_synth_bench_path)
-                df_bench["R_MGSI"] = df_bench["MGO"] / df_bench["SIO2"]
-                df_bench["R_ALSI"] = df_bench["AL2O3"] / df_bench["SIO2"]
-                df_synth_bench["R_MGSI"] = df_synth_bench["MGO"] / df_synth_bench["SIO2"]
-                df_synth_bench["R_ALSI"] = df_synth_bench["AL2O3"] / df_synth_bench["SIO2"]
 
         if (os.path.exists(df_synth_mids_path) and os.path.exists(df_synth_random_path)):
                 df_synth_mids = pd.read_csv(df_synth_mids_path)
@@ -1264,10 +1265,6 @@ class MixingArray:
 
         loadings = pd.DataFrame(
             (pca.components_.T * np.sqrt(pca.explained_variance_)).T, columns=oxides)
-
-        # Mixing array endmembers
-        bend = df_synth_bench["SAMPLEID"].iloc[0]
-        tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         # Check for figs directory
         if not os.path.exists(fig_dir):
@@ -1425,11 +1422,14 @@ class MixingArray:
                             linewidth=2, s=150, legend=False, ax=ax3, zorder=7)
 
         # Add colorbar
-        cbaxes = inset_axes(ax3, width="40%", height="3%", loc=1)
+        cbaxes = inset_axes(ax3, width="40%", height="3%", loc=2)
         colorbar = plt.colorbar(
             sm, ax=ax3, cax=cbaxes, label="Fertility, $\\xi$", orientation="horizontal")
         colorbar.ax.set_xticks([sm.get_clim()[0], sm.get_clim()[1]])
         colorbar.ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.2g"))
+
+        for label in colorbar.ax.get_xticklabels():
+            label.set_ha("left")
 
         ax3.set_xlabel("PC1")
         ax3.set_ylabel("PC2")
@@ -1490,29 +1490,28 @@ class MixingArray:
         """
         """
         # Get self attributes
+        res = self.res
         fig_dir = self.fig_dir
         data = self.earthchem_filtered
         oxides = [ox for ox in self.ox_gfem if ox not in ["SIO2", "FE2O3"]] + ["LOI"]
 
-        # Check for benchmark samples
         df_bench_path = "assets/data/benchmark-samples.csv"
-        df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
 
-        if os.path.exists(df_bench_path) and os.path.exists(df_synth_bench_path):
-            # Read benchmark samples
+        # Check for benchmark samples
+        if os.path.exists(df_bench_path):
             df_bench = pd.read_csv(df_bench_path)
-            df_synth_bench = pd.read_csv(df_synth_bench_path)
 
-        # Check for synthetic data
-        if not self.synthetic_data_written:
-            raise Exception("No synthetic data found! Call create_mixing_arrays() first ...")
-
-        # Initialize synthetic datasets
-        synthetic_samples = pd.read_csv(f"assets/data/synthetic-samples-mixing-rnds.csv")
+        # Get synthetic endmember compositions
+        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
+        df_mids = pd.read_csv("assets/data/synthetic-samples-mixing-mids.csv")
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
 
         # Mixing array endmembers
         bend = df_synth_bench["SAMPLEID"].iloc[0]
         tend = df_synth_bench["SAMPLEID"].iloc[-1]
+
+        # Initialize synthetic datasets
+        synthetic_samples = pd.read_csv(f"assets/data/synthetic-samples-mixing-rnds.csv")
 
         # Check for figs directory
         if not os.path.exists(fig_dir):
