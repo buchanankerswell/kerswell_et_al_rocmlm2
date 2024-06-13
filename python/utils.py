@@ -137,7 +137,7 @@ def compile_perplex():
                "previous_version/Perple_X_7.0.9_OSX_ARM_SP_Apr_16_2023.zip")
 
         print("Installing Perple_X from:")
-        print(f"{url}")
+        print(f"  {url}")
         download_and_unzip(url, "dynamic.zip", "Perple_X")
         print("Perple_X install successful!")
 
@@ -160,7 +160,7 @@ def main():
     if not os.path.exists("assets/data"):
         url = ("https://files.osf.io/v1/resources/erdcz/providers/osfstorage/"
                "665d7b3dd835c427734cdd2d/?zip=")
-        print(f"Downloading assets from OSF:\n{url}")
+        print(f"Downloading assets from OSF:\n  {url}")
         download_and_unzip(url, "all", "assets")
     else:
         print("Data assets found !")

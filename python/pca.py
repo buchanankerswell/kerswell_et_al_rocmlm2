@@ -63,11 +63,10 @@ class MixingArray:
         self.earthchem_imputed = pd.DataFrame()
         self.earthchem_filtered = pd.DataFrame()
         self.metadata = ["SAMPLEID", "SOURCE", "ROCKNAME"]
-        self.ox_exclude = ["CR2O3", "FE2O3", "P2O5", "NIO", "MNO", "K2O"] + self.volatiles
+        self.ox_exclude = ["FE2O3", "P2O5", "NIO", "MNO", "H2O", "CO2"]
+        self.ox_pca = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2", "CR2O3"]
         self.ox_data = ["SIO2", "AL2O3", "CAO", "MGO", "FEOT", "K2O", "NA2O", "TIO2",
                         "FE2O3", "CR2O3", "FE2O3T", "FEO", "NIO", "MNO", "P2O5"]
-        self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2"]
-        self.earthchem_filename = "earthchem-combined-deschamps-2013.txt"
 
         # PCA results
         self.scaler = None
@@ -107,7 +106,7 @@ class MixingArray:
         ox_data = self.ox_data
         metadata = self.metadata
         volatiles = self.volatiles
-        filename = self.earthchem_filename
+        filename = "earthchem-combined-deschamps-2013.txt"
         ox_methods = [string + "METH" for string in ox_data]
         trace_methods = [string + "METH" for string in trace]
         volatiles_methods = [string + "METH" for string in volatiles]
@@ -529,31 +528,32 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # normalize sample composition !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _normalize_sample_composition(self, row):
+    def _normalize_sample_composition(self, row, loi=False):
         """
         """
         # Get self attributes
         digits = self.digits
-        ox_gfem = self.ox_gfem
+        ox_pca = self.ox_pca
         ox_exclude = self.ox_exclude
-        ox_sub = [oxide for oxide in ox_gfem if oxide not in ox_exclude]
+        if loi: ox_pca = ox_pca + ["LOI"]
+        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
 
         # Get sample composition
-        sample_composition = row[ox_gfem].values
+        sample_composition = row[ox_pca].values
 
         # No normalizing for all components
         if not ox_exclude:
             return sample_composition
 
         # Check input
-        if len(sample_composition) != len(ox_gfem):
-            error_message = (f"The input sample list must have exactly {len(ox_gfem)} "
-                             f"components!\n{ox_gfem}")
+        if len(sample_composition) != len(ox_pca):
+            error_message = (f"The input sample list must have exactly {len(ox_pca)} "
+                             f"components!\n{ox_pca}")
 
             raise ValueError(error_message)
 
         # Filter components
-        subset_sample = [comp for comp, oxide in zip(sample_composition, ox_gfem)
+        subset_sample = [comp for comp, oxide in zip(sample_composition, ox_pca)
                          if oxide in ox_sub]
 
         # Set negative compositions to zero
@@ -607,20 +607,21 @@ class MixingArray:
         scaler = self.scaler
         digits = self.digits
         D_tio2 = self.D_tio2
-        ox_gfem = self.ox_gfem
+        ox_pca = self.ox_pca
         ox_exclude = self.ox_exclude
         metadata = ["SAMPLEID"]
         n_pca_components = self.n_pca_components
-        ox_sub = [oxide for oxide in ox_gfem if oxide not in ox_exclude]
+        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
         other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
                       "F_MELT_FRAC", "XI_FRAC"]
 
         df_bench_path = "assets/data/benchmark-samples.csv"
-        df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
+        df_bench_pca_path = "assets/data/bench-pca.csv"
 
-        # Get synthetic endmember compositions
-        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
-        df_mids = pd.read_csv("assets/data/synthetic-samples-mixing-mids.csv")
+        # Get dry synthetic endmember compositions
+        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_dry = df_mids[df_mids["LOI"] == 0]
+        sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
 
         # Read benchmark samples
@@ -641,7 +642,7 @@ class MixingArray:
             df_bench[ox_exclude] = float(0)
 
             # Standardize data
-            df_bench_scaled = scaler.transform(df_bench[ox_gfem])
+            df_bench_scaled = scaler.transform(df_bench[ox_pca])
 
             # Fit PCA to benchmark samples
             principal_components = pca.transform(df_bench_scaled)
@@ -651,7 +652,7 @@ class MixingArray:
             df_bench[pca_columns] = principal_components
 
             # Round numerical data
-            df_bench[ox_gfem + pca_columns] = df_bench[ox_gfem + pca_columns].round(3)
+            df_bench[ox_pca + pca_columns] = df_bench[ox_pca + pca_columns].round(3)
 
             # Calculate F melt
             df_bench["R_TIO2"] = round(df_bench["TIO2"] / ti_init, 3)
@@ -663,7 +664,7 @@ class MixingArray:
             df_bench["XI_FRAC"] = round(1 - df_bench["F_MELT_FRAC"], 3)
 
             # Select columns
-            df_bench = df_bench[metadata + ox_gfem + ["LOI"] + pca_columns + other_cols]
+            df_bench = df_bench[metadata + ox_pca + ["LOI"] + pca_columns + other_cols]
 
             # Save to csv
             df_bench.to_csv(df_bench_pca_path, index=False)
@@ -683,11 +684,11 @@ class MixingArray:
         digits = self.digits
         verbose = self.verbose
         ox_data = self.ox_data
-        ox_gfem = self.ox_gfem
+        ox_pca = self.ox_pca
         ox_exclude = self.ox_exclude
         data = self.earthchem_filtered.copy()
         n_pca_components = self.n_pca_components
-        ox_sub = [oxide for oxide in ox_gfem if oxide not in ox_exclude]
+        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
 
         # Check for earthchem data
         if data.empty:
@@ -704,7 +705,7 @@ class MixingArray:
         for rockname, subset in data.groupby("ROCKNAME"):
             subset = subset.reset_index(drop=True)
 
-            for col in ox_gfem:
+            for col in ox_pca:
                 column_to_impute = subset[[col]]
                 imputer = KNNImputer(weights="distance")
                 imputed_values = imputer.fit_transform(column_to_impute).round(digits)
@@ -724,7 +725,7 @@ class MixingArray:
         scaler = StandardScaler()
 
         # Standardize data
-        data_scaled = scaler.fit_transform(data[ox_gfem])
+        data_scaled = scaler.fit_transform(data[ox_pca])
 
         # Update attribute
         self.scaler = scaler
@@ -767,7 +768,7 @@ class MixingArray:
         data[pca_columns] = principal_components
 
         # Round numerical data
-        data[ox_gfem + pca_columns] = data[ox_gfem + pca_columns].round(3)
+        data[ox_pca + pca_columns] = data[ox_pca + pca_columns].round(3)
 
         # Update self attribute
         self.earthchem_pca = data.copy()
@@ -785,6 +786,9 @@ class MixingArray:
         digits = self.digits
         max_loi = self.max_loi
         res_loi = self.res_loi
+        ox_exclude = self.ox_exclude
+        ox_pca = self.ox_pca + ["LOI"]
+        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
 
         # Create linear array of ad hoc loi
         loi = np.linspace(0.0, max_loi, res_loi + 1).round(digits)
@@ -798,6 +802,11 @@ class MixingArray:
         df["SAMPLEID"] = (
             df["SAMPLEID"] +
             df.groupby(level=0).cumcount().map(lambda x: f"-loi{str(x).zfill(3)}"))
+
+        # Normalize compositions
+        normalized_values = df.apply(self._normalize_sample_composition, loi=True, axis=1)
+        df[ox_sub] = normalized_values.apply(pd.Series)
+        df[ox_exclude] = float(0)
 
         return df
 
@@ -825,7 +834,7 @@ class MixingArray:
         scaler = self.scaler
         pca = self.pca_model
         verbose = self.verbose
-        ox_gfem = self.ox_gfem
+        ox_pca = self.ox_pca
         metadata = self.metadata
         mc_sample = self.mc_sample
         data = self.earthchem_pca.copy()
@@ -987,19 +996,19 @@ class MixingArray:
                             np.hstack((scaler.inverse_transform(pca.inverse_transform(
                                 mixing_lines[f"{i + 1}{j + 1}"].T)),
                                 mixing_lines[f"{i + 1}{j + 1}"].T)),
-                            columns=ox_gfem + [f"PC{n + 1}" for n in range(n_pca_components)]
+                            columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
                         ).round(3)
                         tops_synthetic = pd.DataFrame(
                             np.hstack((scaler.inverse_transform(pca.inverse_transform(
                                 top_lines[f"{i + 1}{j + 1}"].T)),
                                 top_lines[f"{i + 1}{j + 1}"].T)),
-                            columns=ox_gfem + [f"PC{n + 1}" for n in range(n_pca_components)]
+                            columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
                         ).round(3)
                         bots_synthetic = pd.DataFrame(
                             np.hstack((scaler.inverse_transform(pca.inverse_transform(
                                 bottom_lines[f"{i + 1}{j + 1}"].T)),
                                 bottom_lines[f"{i + 1}{j + 1}"].T)),
-                            columns=ox_gfem + [f"PC{n + 1}" for n in range(n_pca_components)]
+                            columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
                         ).round(3)
 
                         # Append to list
@@ -1021,13 +1030,13 @@ class MixingArray:
                 0, "SAMPLEID", [f"sb{str(n).zfill(3)}" for n in range(len(all_bots))])
 
             # No negative oxides
-            data[ox_gfem] = data[ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_mixs[ox_gfem] = all_mixs[
-                ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_tops[ox_gfem] = all_tops[
-                ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_bots[ox_gfem] = all_bots[
-                ox_gfem].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            data[ox_pca] = data[ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            all_mixs[ox_pca] = all_mixs[
+                ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            all_tops[ox_pca] = all_tops[
+                ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            all_bots[ox_pca] = all_bots[
+                ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
 
             # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
             all_mixs["TIO2"] = all_mixs["TIO2"] + (all_mixs["TIO2"] * 0.1)
@@ -1044,12 +1053,12 @@ class MixingArray:
             data["XI_FRAC"] = round(1 - data["F_MELT_FRAC"], digits)
 
             # Select columns
-            data = data[metadata + ox_gfem + ["LOI"] + pca_columns + other_cols]
+            data = data[metadata + ox_pca + ["LOI"] + pca_columns + other_cols]
 
             self.earthchem_pca = data.copy()
 
             # Write csv file
-            data.to_csv(f"assets/data/earthchem-samples-pca.csv", index=False)
+            data.to_csv(f"assets/data/earthchem-pca.csv", index=False)
 
             # Calculate F melt
             all_mixs["R_TIO2"] = round(all_mixs["TIO2"] / ti_init, digits)
@@ -1090,14 +1099,14 @@ class MixingArray:
             all_bots = self._add_loi(all_bots)
 
             # Select columns
-            all_mixs = all_mixs[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
-            all_tops = all_tops[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
-            all_bots = all_bots[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
+            all_mixs = all_mixs[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
+            all_tops = all_tops[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
+            all_bots = all_bots[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
 
             # Write to csv
-            all_mixs.to_csv("assets/data/synthetic-samples-mixing-mids.csv", index=False)
-            all_tops.to_csv("assets/data/synthetic-samples-mixing-tops.csv", index=False)
-            all_bots.to_csv("assets/data/synthetic-samples-mixing-bots.csv", index=False)
+            all_mixs.to_csv("assets/data/synth-mids.csv", index=False)
+            all_tops.to_csv("assets/data/synth-tops.csv", index=False)
+            all_bots.to_csv("assets/data/synth-bots.csv", index=False)
 
             # Define bounding box around top and bottom mixing arrays
             min_x = min(mixing_array_tops[:, 0].min(), mixing_array_bots[:, 0].min())
@@ -1163,14 +1172,14 @@ class MixingArray:
             all_rnds = pd.DataFrame(
                 np.hstack((scaler.inverse_transform(pca.inverse_transform(
                     randomly_sampled_points)), randomly_sampled_points)),
-                columns=ox_gfem + [f"PC{n + 1}" for n in range(n_pca_components)]
+                columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
             ).round(3)
 
             # Add sample id column
             all_rnds.insert(0, "SAMPLEID", sample_ids)
 
             # No negative oxides
-            all_rnds[ox_gfem] = all_rnds[ox_gfem].apply(
+            all_rnds[ox_pca] = all_rnds[ox_pca].apply(
                 lambda x: x.apply(lambda y: max(0.001, y)))
 
             # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
@@ -1194,10 +1203,10 @@ class MixingArray:
             all_rnds = self._add_loi(all_rnds)
 
             # Select columns
-            all_rnds = all_rnds[["SAMPLEID"] + ox_gfem + ["LOI"] + pca_columns + other_cols]
+            all_rnds = all_rnds[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
 
             # Write to csv
-            all_rnds.to_csv("assets/data/synthetic-samples-mixing-rnds.csv", index=False)
+            all_rnds.to_csv("assets/data/synth-rnds.csv", index=False)
 
             # Process benchmark samples
             self._process_benchmark_samples_pca()
@@ -1231,7 +1240,7 @@ class MixingArray:
         # Get self attributes
         res = self.res
         pca = self.pca_model
-        oxides = self.ox_gfem
+        oxides = self.ox_pca
         fig_dir = self.fig_dir
         data = self.earthchem_pca
 
@@ -1239,13 +1248,14 @@ class MixingArray:
         XI_col = "XI_FRAC"
 
         # Check for benchmark samples
-        df_bench_pca_path = "assets/data/benchmark-samples-pca.csv"
-        df_synth_mids_path = "assets/data/synthetic-samples-mixing-mids.csv"
-        df_synth_random_path = "assets/data/synthetic-samples-mixing-rnds.csv"
+        df_bench_pca_path = "assets/data/bench-pca.csv"
+        df_synth_mids_path = "assets/data/synth-mids.csv"
+        df_synth_random_path = "assets/data/synth-rnds.csv"
 
-        # Get synthetic endmember compositions
-        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
-        df_mids = pd.read_csv("assets/data/synthetic-samples-mixing-mids.csv")
+        # Get dry synthetic endmember compositions
+        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_dry = df_mids[df_mids["LOI"] == 0]
+        sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
 
         # Mixing array endmembers
@@ -1493,7 +1503,7 @@ class MixingArray:
         res = self.res
         fig_dir = self.fig_dir
         data = self.earthchem_filtered
-        oxides = [ox for ox in self.ox_gfem if ox not in ["SIO2", "FE2O3"]] + ["LOI"]
+        oxides = [ox for ox in self.ox_pca if ox not in ["SIO2", "FE2O3", "K2O"]] + ["LOI"]
 
         df_bench_path = "assets/data/benchmark-samples.csv"
 
@@ -1501,9 +1511,10 @@ class MixingArray:
         if os.path.exists(df_bench_path):
             df_bench = pd.read_csv(df_bench_path)
 
-        # Get synthetic endmember compositions
-        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
-        df_mids = pd.read_csv("assets/data/synthetic-samples-mixing-mids.csv")
+        # Get dry synthetic endmember compositions
+        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_dry = df_mids[df_mids["LOI"] == 0]
+        sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
 
         # Mixing array endmembers
@@ -1511,7 +1522,7 @@ class MixingArray:
         tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         # Initialize synthetic datasets
-        synthetic_samples = pd.read_csv(f"assets/data/synthetic-samples-mixing-rnds.csv")
+        synthetic_samples = pd.read_csv(f"assets/data/synth-rnds.csv")
 
         # Check for figs directory
         if not os.path.exists(fig_dir):
@@ -1647,7 +1658,7 @@ class MixingArray:
 def main():
     """
     """
-    if not os.path.exists("assets/data/benchmark-samples-pca.csv"):
+    if not os.path.exists("assets/data/bench-pca.csv"):
         try:
             # Create mixing array
             mixing_array = MixingArray()

@@ -1321,7 +1321,7 @@ class GFEMModel:
             targets = ["rho", "Vp", "Vs", "melt", "h2o"]
 
         # Filter targets for dry samples
-        if sid in ["DMM", "PUM", "PYR"]:
+        if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
             targets = [t for t in targets if t != "h2o"]
 
         # Check for existing plots
@@ -2003,6 +2003,15 @@ class GFEMModel:
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
 
+        # Get synthetic endmember compositions
+        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
+        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
+
+        # Mixing array endmembers
+        bend = df_synth_bench["SAMPLEID"].iloc[0]
+        tend = df_synth_bench["SAMPLEID"].iloc[-1]
+
         for i, target in enumerate(targets):
             if target in ["rho", "Vp", "Vs"]:
                 # Get 1D reference model profiles
@@ -2034,9 +2043,9 @@ class GFEMModel:
                     P_gfem2, target_gfem2, P_stw105, target_stw105)
 
             # Change endmember sampleids
-            if sid == "sm000":
+            if sid == tend:
                 sid_lab = "DSUM"
-            elif sid == "sm129":
+            elif sid == bend:
                 sid_lab = "PSUM"
             else:
                 sid_lab = sid
@@ -2567,13 +2576,6 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
     # Get correct Depletion column
     XI_col = "XI_FRAC"
 
-    # Check for benchmark samples
-    df_synth_bench_path = "assets/data/synthetic-samples-benchmarks.csv"
-
-    # Read benchmark samples
-    if os.path.exists(df_synth_bench_path):
-        df_synth_bench = pd.read_csv(df_synth_bench_path)
-
     # Set plot style and settings
     plt.rcParams["figure.dpi"] = 300
     plt.rcParams["font.size"] = fontsize
@@ -2611,6 +2613,16 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
         # Get 1D reference models
         ref_models = model._get_1d_reference_models()
 
+        # Get dry synthetic endmember compositions
+        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_dry = df_mids[df_mids["LOI"] == 0]
+        sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
+
+        # Mixing array endmembers
+        bend = df_synth_bench["SAMPLEID"].iloc[0]
+        tend = df_synth_bench["SAMPLEID"].iloc[-1]
+
         for i, target in enumerate(targets):
             if target in ["rho", "Vp", "Vs"]:
                 # Get 1D reference model profiles
@@ -2640,16 +2652,16 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
             if j == 0:
                 if target in ["rho", "Vp", "Vs"]:
                     # Plot reference models
-                    ax.plot(target_prem, P_prem, "-", linewidth=4.5, color="forestgreen",
+                    ax.plot(target_prem, P_prem, "-", linewidth=3.5, color="forestgreen",
                             label="PREM", zorder=7)
-                    ax.plot(target_stw105, P_stw105, ":", linewidth=4.5, color="forestgreen",
+                    ax.plot(target_stw105, P_stw105, ":", linewidth=3.5, color="forestgreen",
                             label="STW105", zorder=7)
 
-            if sid == "sm129":
-                ax.plot(target_gfem, P_gfem, "-", linewidth=6.5, color=sm.to_rgba(xi),
+            if sid == bend:
+                ax.plot(target_gfem, P_gfem, "-", linewidth=3.5, color=sm.to_rgba(xi),
                         label="PSUM", zorder=6)
-            if sid == "sm000":
-                ax.plot(target_gfem, P_gfem, "-", linewidth=6.5, color=sm.to_rgba(xi),
+            if sid == tend:
+                ax.plot(target_gfem, P_gfem, "-", linewidth=3.5, color=sm.to_rgba(xi),
                         label="DSUM", zorder=6)
 
             # Plot GFEM and RocMLM profiles
@@ -2845,20 +2857,20 @@ def main():
     try:
         # Build GFEM models
         gfems = {}
-        sources = {"benchmark": "assets/data/benchmark-samples-pca.csv",
-                   "middle": "assets/data/synthetic-samples-mixing-middle.csv",
-                   "random": "assets/data/synthetic-samples-mixing-random.csv"}
+        sources = {"b": "assets/data/bench-pca.csv",
+                   "m": "assets/data/synth-mids.csv",
+                   "r": "assets/data/synth-rnds.csv"}
 
         for name, source in sources.items():
             sids = get_sampleids(source)
-            gfems[name] = build_gfem_models(source, sids)
+            gfems[name] = build_gfem_models(source, sids, res=32)
 
         # Compose plots
         for name, models in gfems.items():
             compose_gfem_plots(models)
 
         # Visualize profile compositions vs. PREM
-        visualize_prem_comps(gfems["middle"] + gfems["random"])
+        visualize_prem_comps(gfems["m"] + gfems["r"])
 
     except Exception as e:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")

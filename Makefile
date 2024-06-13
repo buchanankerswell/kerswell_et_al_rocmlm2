@@ -20,14 +20,13 @@ PYTHON = python/pca.py \
 # Cleanup directories
 DATAPURGE = log \
 						python/__pycache__ \
-						$(DATADIR)/synthetic*.csv \
+						$(DATADIR)/synth*.csv \
+						$(DATADIR)/bench-pca.csv \
 						$(DATADIR)/gfem_summaries \
+						$(DATADIR)/earthchem-pca.csv \
 						$(DATADIR)/lut-efficiency.csv \
 						$(DATADIR)/earthchem-counts.csv \
-						$(DATADIR)/earthchem-samples-pca.csv \
-						$(DATADIR)/benchmark-samples-pca.csv \
-						$(DATADIR)/gfem-model-results-summary.csv \
-						$(DATADIR)/synthetic-samples-benchmark.csv
+						$(DATADIR)/gfem-model-results-summary.csv
 DATACLEAN = assets MAGEMin Perple_X gfems rocmlms
 FIGSPURGE =
 FIGSCLEAN = figs
