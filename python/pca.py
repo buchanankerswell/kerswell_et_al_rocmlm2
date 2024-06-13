@@ -41,7 +41,7 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, res=64, res_loi=8, verbose=1):
+    def __init__(self, res=16, res_loi=8, verbose=1):
         # Input
         self.res = res + 1
         self.res_loi = res_loi
