@@ -528,14 +528,13 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # normalize sample composition !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _normalize_sample_composition(self, row, loi=False):
+    def _normalize_sample_composition(self, row):
         """
         """
         # Get self attributes
         digits = self.digits
         ox_pca = self.ox_pca
         ox_exclude = self.ox_exclude
-        if loi: ox_pca = ox_pca + ["LOI"]
         ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
 
         # Get sample composition
@@ -802,11 +801,6 @@ class MixingArray:
         df["SAMPLEID"] = (
             df["SAMPLEID"] +
             df.groupby(level=0).cumcount().map(lambda x: f"-loi{str(x).zfill(3)}"))
-
-        # Normalize compositions
-        normalized_values = df.apply(self._normalize_sample_composition, loi=True, axis=1)
-        df[ox_sub] = normalized_values.apply(pd.Series)
-        df[ox_exclude] = float(0)
 
         return df
 

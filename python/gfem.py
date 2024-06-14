@@ -105,8 +105,6 @@ class GFEMModel:
 
         # Perplex dirs and filepaths
         self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}"
-        self.perplex_assemblages = f"{self.model_out_dir}/assemblages.txt"
-        self.perplex_targets = f"{self.model_out_dir}/target-array.tab"
 
         # Output file paths
         self.data_dir = "assets/data"
@@ -277,10 +275,11 @@ class GFEMModel:
         # Set negative compositions to zero
         subset_sample = [comp if comp >= 0 else 0 for comp in subset_sample]
 
-        # Get total oxides
-        total_subset_concentration = sum([comp for comp in subset_sample if comp != 0])
+        # Get total oxides excluding LOI
+        total_subset_concentration = sum([comp for comp, oxide in zip(subset_sample, ox_sub)
+                                          if comp != 0 and oxide != "LOI"])
 
-        # Normalize
+        # Normalize excluding LOI
         normalized_concentrations = [
             round(((comp / total_subset_concentration) * 100 if comp != 0 else 0), digits)
             for comp, oxide in zip(subset_sample, ox_sub)]
@@ -531,29 +530,43 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get 1d profile !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_1d_profile(self, target, mantle_potential=1573, Qs=250e-3, Ts=273, A1=2.2e-8,
-                        A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35, litho_thickness=1):
+    def _get_1d_profile(self, target=None, mantle_potential=1573, Qs=250e-3, Ts=273,
+                        A1=2.2e-8, A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35,
+                        litho_thickness=1):
         """
         """
         # Get model attributes
+        res = self.res
+        P_min = self.P_min
+        P_max = self.P_max
+        T_min = self.T_min
+        T_max = self.T_max
         results = self.results
         geothresh = self.geothresh
         model_built = self.model_built
+        model_out_dir = self.model_out_dir
+        perplex_geotherm = f"{model_out_dir}/geotherm-{mantle_potential}"
 
         # Check for model
-        if not model_built:
+        if not model_built and target:
             raise Exception("No GFEM model! Call build_model() first ...")
 
         # Check for results
-        if not results:
+        if not results and target:
             raise Exception("No GFEM model results! Call get_results() first ...")
 
-        # Get P results
-        P = results["P"]
-
-        # Get PT and target values and transform units
-        df = pd.DataFrame({"P": results["P"], "T": results["T"], target: results[target]}
-                          ).sort_values(by="P")
+        # Define PT (target)
+        if not target:
+            P_array = np.linspace(P_min, P_max, res + 1)
+            T_array = np.linspace(T_min, T_max, res + 1)
+            P_grid, T_grid = np.meshgrid(P_array, T_array)
+            P, T = P_grid.flatten(), T_grid.flatten()
+            df = pd.DataFrame({"P": P, "T": T}).sort_values(by=["P", "T"])
+        else:
+            P = results["P"]
+            T = results["T"]
+            trg = results[target]
+            df = pd.DataFrame({"P": P, "T": T, target: trg}).sort_values(by=["P", "T"])
 
         # Geotherm Parameters
         Z_min = np.min(P) * 35e3
@@ -606,12 +619,22 @@ class GFEMModel:
         # Subset df along geotherm
         df = df[abs(df["T"] - df["geotherm_T"]) < geothresh]
 
-        # Extract the three vectors
+        # Get PT values
         P_values = np.nan_to_num(df["P"].values)
         T_values = np.nan_to_num(df["T"].values)
-        targets = np.nan_to_num(df[target].values)
 
-        return P_values, T_values, targets
+        # Write to tsv file
+        if not os.path.exists(perplex_geotherm):
+            df_to_save = pd.DataFrame({"P": P_values * 1e4, "T": T_values})
+            df_to_save.to_csv(perplex_geotherm, sep="\t", index=False, header=False,
+                              float_format="%.6E")
+
+        # Get target values
+        if target:
+            targets = np.nan_to_num(df[target].values)
+            return P_values, T_values, targets
+        else:
+            return P_values, T_values
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # crop 1d profile !!
@@ -736,6 +759,11 @@ class GFEMModel:
                                "{YNODES}": f"{int(res / 4)} {res + 1}"})
         self._replace_in_file(f"{model_out_dir}/{draw}",
                               {"{SAMPLEID}": f"{sid}"})
+
+        # Write geotherms to tsv files
+        self._get_1d_profile(mantle_potential=1173)
+        self._get_1d_profile(mantle_potential=1573)
+        self._get_1d_profile(mantle_potential=1773)
 
         return None
 
@@ -876,7 +904,8 @@ class GFEMModel:
         """
         # Get self attributes
         perplex_db = self.perplex_db
-        perplex_targets = self.perplex_targets
+        model_out_dir = self.model_out_dir
+        perplex_targets = f"{model_out_dir}/target-array.tab"
 
         # Initialize results
         results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [], "assemblage_index": [],
@@ -929,6 +958,7 @@ class GFEMModel:
         # Get self attributes
         model_built = self.model_built
         model_out_dir = self.model_out_dir
+        perplex_assemblages = f"{self.model_out_dir}/assemblages.txt"
 
         if model_built:
             df = pd.read_csv(f"{model_out_dir}/assemblages.csv")
@@ -938,7 +968,7 @@ class GFEMModel:
             assemblage_dict = {}
 
             # Open assemblage file
-            with open(self.perplex_assemblages, "r") as file:
+            with open(perplex_assemblages, "r") as file:
                 for i, line in enumerate(file, start=1):
                     assemblages = line.split("-")[1].strip().split()
 
@@ -962,8 +992,8 @@ class GFEMModel:
         verbose = self.verbose
         perplex_db = self.perplex_db
         model_out_dir = self.model_out_dir
-        perplex_targets = self.perplex_targets
-        perplex_assemblages = self.perplex_assemblages
+        perplex_targets = f"{model_out_dir}/target-array.tab"
+        perplex_assemblages = f"{model_out_dir}/assemblages.txt"
 
         # Check for targets
         if not os.path.exists(perplex_targets):
@@ -1025,28 +1055,6 @@ class GFEMModel:
 
         # Write to csv file
         df.to_csv(f"{model_out_dir}/results.csv", index=False)
-
-        # Clean up output directory
-        files_to_keep = ["assemblages.csv", "results.csv", f"log-{sid}"]
-
-        # Create dir to store model files
-        model_out_files_dir = f"{model_out_dir}/model"
-        os.makedirs(model_out_files_dir, exist_ok=True)
-
-        try:
-            # List all files in the directory
-            all_files = os.listdir(model_out_dir)
-
-            # Iterate through the files and delete those not in the exclusion list
-            for filename in all_files:
-                file_path = os.path.join(model_out_dir, filename)
-                destination_path = os.path.join(model_out_files_dir, filename)
-
-                if os.path.isfile(file_path) and filename not in files_to_keep:
-                    shutil.move(file_path, destination_path)
-
-        except Exception as e:
-            print(f"Error: {e}")
 
         self.model_built = True
 
@@ -1240,7 +1248,7 @@ class GFEMModel:
         ref_models = self._get_1d_reference_models()
 
         # Initialize metrics lists
-        smpid, db, ox, sz, trgt, tm = [], [], [], [], [], []
+        smpid, db, ox, sz, trg, tm = [], [], [], [], [], []
         rmse_prem_profile, r2_prem_profile = [], []
 
         for target in targets:
@@ -1259,14 +1267,14 @@ class GFEMModel:
             smpid.append(sid)
             sz.append(res**2)
             ox.append(len(ox_gfem))
-            trgt.append(target)
+            trg.append(target)
             tm.append(comp_time)
             db.append(perplex_db)
 
         # Create dataframe
         df = pd.DataFrame(
             {"SAMPLEID": smpid, "DATABASE": db, "N_OX_SYS": ox, "SIZE": sz,
-             "COMP_TIME": tm, "TARGET": trgt, "RMSE_PREM": rmse_prem, "R2_PREM": r2_prem})
+             "COMP_TIME": tm, "TARGET": trg, "RMSE_PREM": rmse_prem, "R2_PREM": r2_prem})
 
         # Write csv
         out_dir = f"{data_dir}/gfem_summaries"
@@ -2408,9 +2416,9 @@ def compose_itr(gfem_model, clean=False):
 
     if all(item in targets for item in ["rho", "melt", "h2o"]):
         captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-        trgts = ["rho", "melt", "h2o"]
+        trgs = ["rho", "melt", "h2o"]
 
-        for i, target in enumerate(trgts):
+        for i, target in enumerate(trgs):
             # Check for existing plots
             fig = f"{fig_dir}/{sid}-{target}.png"
             check_fig = os.path.exists(fig)
@@ -2463,9 +2471,9 @@ def compose_itr(gfem_model, clean=False):
     if all(item in targets for item in ["rho", "Vp", "Vs", "melt", "h2o"]):
         captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)"),
                     ("j)", "k)", "l)"), ("m)", "n)", "o)")]
-        trgts = ["rho", "Vp", "Vs", "melt", "h2o"]
+        trgs = ["rho", "Vp", "Vs", "melt", "h2o"]
 
-        for i, target in enumerate(trgts):
+        for i, target in enumerate(trgs):
             # Check for existing plots
             fig = f"{fig_dir}/{sid}-{target}.png"
             check_fig = os.path.exists(fig)
@@ -2863,7 +2871,7 @@ def main():
 
         for name, source in sources.items():
             sids = get_sampleids(source)
-            gfems[name] = build_gfem_models(source, sids, res=32)
+            gfems[name] = build_gfem_models(source, sids, res=64)
 
         # Compose plots
         for name, models in gfems.items():

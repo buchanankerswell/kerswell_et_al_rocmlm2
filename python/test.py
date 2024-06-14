@@ -4,13 +4,15 @@ from gfem import GFEMModel
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
-sid = "sm128"
-source = "assets/data/synthetic-samples-mixing-middle.csv"
+res = 64
+sid = "sm000-loi008"
+perplex_db = "hp633"
+source = "assets/data/synth-mids.csv"
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # helper functions !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def find_assemblage_centers(assemblage_array, assemblage_list, top_n=13):
+def find_assemblage_centers(assemblage_array, assemblage_list, top_n=40):
     # Convert assemblage_array to integers
     assemblage_array = assemblage_array.astype(int)
 
@@ -62,7 +64,7 @@ plt.rcParams["legend.loc"] = "upper left"
 plt.rcParams["legend.fontsize"] = "small"
 plt.rcParams["figure.autolayout"] = "True"
 
-model = GFEMModel("hp02", sid, source)
+model = GFEMModel(perplex_db, sid, source, res)
 model._get_target_array()
 
 res = model.res
@@ -80,14 +82,14 @@ for i, target in enumerate(targets):
 
 centers = find_assemblage_centers(img, assemblages)
 
-fig, ax = plt.subplots(figsize=(6.3, 4.725 * 2))
+fig, ax = plt.subplots(figsize=(6.3, 4.725 * 4))
 im = ax.imshow(img, extent=extent, aspect="auto", cmap="bone", origin="lower")
 
 legend_handles = []
 
 for value, (center_x, center_y, assemblage) in centers.items():
     T_val, P_val = convert_assemblage_centers_to_PT((center_x, center_y), extent, res)
-    ax.text(T_val, P_val, value, color="white", ha="center", va="center", fontweight="bold")
+    ax.text(T_val, P_val, value, color="white", ha="center", va="center", fontsize=22 * 0.633)
     legend_handles.append(mlines.Line2D([0], [0], color="black", linewidth=0,
                                         label=f"{value}: {assemblage}"))
 
@@ -99,41 +101,3 @@ plt.legend(title="", handles=legend_handles, loc="upper center", handleheight=1.
            fontsize=22 * 0.633)
 
 plt.savefig("test.png")
-
-model = GFEMModel("hp633", sid, source)
-model._get_target_array()
-
-res = model.res
-targets = model.targets
-results = model.results
-target_array = model.target_array
-P, T = results["P"], results["T"]
-model_out_dir = model.model_out_dir
-assemblages = model._read_perplex_assemblages()
-extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
-
-for i, target in enumerate(targets):
-    if target == "assemblage":
-        img = target_array[:, i].reshape(res + 1, res + 1)
-
-centers = find_assemblage_centers(img, assemblages)
-
-fig, ax = plt.subplots(figsize=(6.3, 4.725 * 2))
-im = ax.imshow(img, extent=extent, aspect="auto", cmap="bone", origin="lower")
-
-legend_handles = []
-
-for value, (center_x, center_y, assemblage) in centers.items():
-    T_val, P_val = convert_assemblage_centers_to_PT((center_x, center_y), extent, res)
-    ax.text(T_val, P_val, value, color="white", ha="center", va="center", fontweight="bold")
-    legend_handles.append(mlines.Line2D([0], [0], color="black", linewidth=0,
-                                        label=f"{value}: {assemblage}"))
-
-ax.set_xlabel("T (K)")
-ax.set_ylabel("P (GPa)")
-plt.colorbar(im, ax=ax, label="")
-plt.legend(title="", handles=legend_handles, loc="upper center", handleheight=1.2,
-           bbox_to_anchor=(0.5, -0.2), columnspacing=0.2, handletextpad=-0.1,
-           fontsize=22 * 0.633)
-
-plt.savefig("test1.png")
