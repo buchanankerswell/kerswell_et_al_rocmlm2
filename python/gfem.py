@@ -91,8 +91,8 @@ class GFEMModel:
         self.target_units = ["g/cm$^3$", "km/s", "km/s", "vol.%", "wt.%", "", ""]
 
         # Check perplex db
-        if perplex_db not in ["hp02", "hp633"]:
-            self.perplex_db = "hp02"
+        if perplex_db not in ["hp02", "hp633", "stx21"]:
+            self.perplex_db = "hp633"
         else:
             self.perplex_db = perplex_db
 
@@ -102,9 +102,11 @@ class GFEMModel:
                         "CR2O3", "LOI"]
         if self.perplex_db == "hp02":
             self.ox_gfem = [ox for ox in self.ox_gfem if ox != "CR2O3"]
+        if self.perplex_db == "stx21":
+            self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O"]
 
         # Perplex dirs and filepaths
-        self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}"
+        self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
 
         # Output file paths
         self.data_dir = "assets/data"
@@ -133,7 +135,7 @@ class GFEMModel:
             if (os.path.exists(f"{self.model_out_dir}/results.csv") and
                 os.path.exists(f"{self.model_out_dir}/assemblages.csv")):
                 if verbose >= 1:
-                    print(f"  Found GFEM model for sample {self.sid} !")
+                    print(f"  Found {self.perplex_db} GFEM model for sample {self.sid} !")
 
                 try:
                     self.model_built = True
@@ -183,6 +185,11 @@ class GFEMModel:
         perplex_db = self.perplex_db
         model_built = self.model_built
         model_out_dir = self.model_out_dir
+
+        # Filter targets for stx21
+        if perplex_db == "stx21":
+            targets = [t for t in targets if t not in ["melt", "h2o"]]
+            features = [f for f in features if f not in ["LOI"]]
 
         print("+++++++++++++++++++++++++++++++++++++++++++++")
         print(f"GFEM model: {sid}")
@@ -625,7 +632,7 @@ class GFEMModel:
 
         # Write to tsv file
         if not os.path.exists(perplex_geotherm):
-            df_to_save = pd.DataFrame({"P": P_values * 1e4, "T": T_values})
+            df_to_save = pd.DataFrame({"T": T_values, "P": P_values * 1e4})
             df_to_save.to_csv(perplex_geotherm, sep="\t", index=False, header=False,
                               float_format="%.6E")
 
@@ -690,6 +697,444 @@ class GFEMModel:
     #+ .1.1.          Perple_X Functions             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # write perplex config !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _write_perplex_config(self):
+        """
+        """
+        # Get self attributes
+        sid = self.sid
+        res = self.res
+        geotherms = []
+        data_dir = self.data_dir
+        perplex_db = self.perplex_db
+        model_out_dir = self.model_out_dir
+        sample_comp = self._get_sample_comp()
+        T_min, T_max = self.T_min, self.T_max
+        norm_comp = self._normalize_sample_comp()
+        norm_comp = " ".join(map(str, norm_comp))
+        mantle_potential_temps = [1173, 1573, 1773]
+        P_min, P_max = self.P_min * 1e4, self.P_max * 1e4
+
+        # Build options
+        # https://www.perplex.ethz.ch/perplex_options.html
+        o = (f"composition_system     wt\n"
+             f"composition_phase      wt\n"
+             f"intermediate_savdyn    T\n"
+             f"intermediate_savrpc    T\n"
+             f"warn_no_limit          F\n"
+             f"grid_levels            1 1\n"
+             f"x_nodes                {int(res / 4)} {res + 1}\n"
+             f"y_nodes                {int(res / 4)} {res + 1}\n"
+             f"bounds                 VRH\n"
+             f"vrh/hs_weighting       0.5\n"
+             f"Anderson-Gruneisen     F\n"
+             f"explicit_bulk_modulus  T\n"
+             f"melt_is_fluid          T\n"
+             f"poisson_test           F\n"
+             f"poisson_ratio          on 0.35\n"
+             f"seismic_output         some\n")
+
+        # Write build options
+        with open(f"{model_out_dir}/build-options", "w") as file:
+            file.write(o)
+
+        # Write plot options
+        # https://www.perplex.ethz.ch/perplex_PLOT_options.html
+        with open(f"{model_out_dir}/perplex_plot_option.dat", "w") as file:
+            file.write("numeric_field_label T")
+
+        # Write vertex minimize
+        with open(f"{model_out_dir}/vertex-minimize", "w") as file:
+            file.write(f"{sid}")
+
+        # Write pssect-draw
+        with open(f"{model_out_dir}/pssect-draw", "w") as file:
+            file.write(f"{sid}\nN")
+
+        if perplex_db == "hp633":
+            # Build
+            b = (f"{sid}\n"            # Proj name
+                 f"td-data\n"          # Thermodynamic data file
+                 f"build-options\n"    # Build options file
+                 f"N\n"                # Transform components ?
+                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
+                 f"N\n"                # Calculations with saturated fluid ?
+                 f"N\n"                # Calculations with saturated components ?
+                 f"N\n"                # Use chemical potentials as independent variables ?
+                 f"SiO2\n"             # Select components (1 per line)
+                 f"Al2O3\n"            # Select components (1 per line)
+                 f"CaO\n"              # Select components (1 per line)
+                 f"MgO\n"              # Select components (1 per line)
+                 f"FeO\n"              # Select components (1 per line)
+                 f"K2O\n"              # Select components (1 per line)
+                 f"Na2O\n"             # Select components (1 per line)
+                 f"TiO2\n"             # Select components (1 per line)
+                 f"Cr2O3\n"            # Select components (1 per line)
+                 f"H2O\n"              # Select components (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
+                 f"N\n"                # Calculate along a geotherm ?
+                 f"2\n"                # X-axis variable (2: T(K))
+                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
+                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
+                 f"Y\n"                # Specify component amounts by mass ?
+                 f"{norm_comp}\n"      # Enter mass amounts of components
+                 f"N\n"                # Print output file ?
+                 f"Y\n"                # Exclude pure and/or endmember phases ?
+                 f"N\n"                # Prompt for phases ?
+                 f"anL\n"              # Enter names (1 per line)
+                 f"perL\n"             # Enter names (1 per line)
+                 f"enL\n"              # Enter names (1 per line)
+                 f"hemL\n"             # Enter names (1 per line)
+                 f"hmL\n"              # Enter names (1 per line)
+                 f"hmWL\n"             # Enter names (1 per line)
+                 f"hmTHL\n"            # Enter names (1 per line)
+                 f"tiL\n"              # Enter names (1 per line)
+                 f"tiWL\n"             # Enter names (1 per line)
+                 f"tiTHL\n"            # Enter names (1 per line)
+                 f"ruL\n"              # Enter names (1 per line)
+                 f"faTL\n"             # Enter names (1 per line)
+                 f"fa8L\n"             # Enter names (1 per line)
+                 f"foTHL\n"            # Enter names (1 per line)
+                 f"kWL\n"              # Enter names (1 per line)
+                 f"kjL\n"              # Enter names (1 per line)
+                 f"kjTHL\n"            # Enter names (1 per line)
+                 f"kspL\n"             # Enter names (1 per line)
+                 f"lcL\n"              # Enter names (1 per line)
+                 f"fbi\n"              # Enter names (1 per line)
+                 f"tbi\n"              # Enter names (1 per line)
+                 f"lc\n"               # Enter names (1 per line)
+                 f"kjd\n"              # Enter names (1 per line)
+                 f"kls\n"              # Enter names (1 per line)
+                 f"hol\n"              # Enter names (1 per line)
+                 f"wa\n"               # Enter names (1 per line)
+                 f"cen\n"              # Enter names (1 per line)
+                 f"naph\n"             # Enter names (1 per line)
+                 f"cz\n"               # Enter names (1 per line)
+                 f"h2oL\n"             # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"Y\n"                # Include solution models ?
+                 f"solution-models\n"  # Solution model file
+                 f"O(HGP)\n"           # Enter names (1 per line)
+                 f"Wad(H)\n"           # Enter names (1 per line)
+                 f"Ring(H)\n"          # Enter names (1 per line)
+                 f"Aki(H)\n"           # Enter names (1 per line)
+                 f"Cpx(HGP)\n"         # Enter names (1 per line)
+                 f"Omph(GHP)\n"        # Enter names (1 per line)
+                 f"Hpx(H)\n"           # Enter names (1 per line)
+                 f"Opx(HGP)\n"         # Enter names (1 per line)
+                 f"Sp(HGP)\n"          # Enter names (1 per line)
+                 f"Gt(HGP)\n"          # Enter names (1 per line)
+                 f"Maj\n"              # Enter names (1 per line)
+                 f"feldspar\n"         # Enter names (1 per line)
+                 f"Anth\n"             # Enter names (1 per line)
+                 f"Wus\n"              # Enter names (1 per line)
+                 f"Pv\n"               # Enter names (1 per line)
+                 f"Fper(H)\n"          # Enter names (1 per line)
+                 f"Mpv(H)\n"           # Enter names (1 per line)
+                 f"Cpv(H)\n"           # Enter names (1 per line)
+                 f"CFer(H)\n"          # Enter names (1 per line)
+                 f"Chl(W)\n"           # Enter names (1 per line)
+                 f"Atg(PN)\n"          # Enter names (1 per line)
+                 f"A-phase\n"          # Enter names (1 per line)
+                 f"B\n"                # Enter names (1 per line)
+                 f"T\n"                # Enter names (1 per line)
+                 f"melt(HGPH)\n"       # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"{sid}\n"            # Calculation title
+                 )
+            # Werami targets
+            w = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"2\n"                # Select a property (2: Density kg/m3)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"13\n"               # Select a property (13: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"14\n"               # Select a property (14: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"24\n"               # Select a property (24: Assemblage index)
+                 f"7\n"                # Select a property (7: Mode % of phase)
+                 f"melt(HGPH)\n"       # Enter solution or compound
+                 f"6\n"                # Select a property (6: Composition of system)
+                 f"1\n"                # Enter a component (1: H2O)
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"0\n"                # Zero to finish
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select the grid resolution (enter to continue)
+                 f"5\n"                # Dummy
+                 f"0\n"                # Zero to exit
+                 )
+            # Copy thermodynamic data
+            shutil.copy(f"{data_dir}/hp633-td", f"{model_out_dir}/td-data")
+            shutil.copy(f"{data_dir}/hp633-sl", f"{model_out_dir}/solution-models")
+        elif perplex_db == "hp02":
+            # Build
+            b = (f"{sid}\n"            # Proj name
+                 f"td-data\n"          # Thermodynamic data file
+                 f"build-options\n"    # Build options file
+                 f"N\n"                # Transform components ?
+                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
+                 f"N\n"                # Calculations with saturated fluid ?
+                 f"N\n"                # Calculations with saturated components ?
+                 f"N\n"                # Use chemical potentials as independent variables ?
+                 f"SIO2\n"             # Select components (1 per line)
+                 f"AL2O3\n"            # Select components (1 per line)
+                 f"CAO\n"              # Select components (1 per line)
+                 f"MGO\n"              # Select components (1 per line)
+                 f"FEO\n"              # Select components (1 per line)
+                 f"K2O\n"              # Select components (1 per line)
+                 f"NA2O\n"             # Select components (1 per line)
+                 f"TIO2\n"             # Select components (1 per line)
+                 f"H2O\n"              # Select components (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
+                 f"N\n"                # Calculate along a geotherm ?
+                 f"2\n"                # X-axis variable (2: T(K))
+                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
+                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
+                 f"Y\n"                # Specify component amounts by mass ?
+                 f"{norm_comp}\n"      # Enter mass amounts of components
+                 f"N\n"                # Print output file ?
+                 f"Y\n"                # Exclude pure and/or endmember phases ?
+                 f"N\n"                # Prompt for phases ?
+                 f"anL\n"              # Enter names (1 per line)
+                 f"enL\n"              # Enter names (1 per line)
+                 f"fa8L\n"             # Enter names (1 per line)
+                 f"faL\n"              # Enter names (1 per line)
+                 f"faGL\n"             # Enter names (1 per line)
+                 f"foGL\n"             # Enter names (1 per line)
+                 f"kalGL\n"            # Enter names (1 per line)
+                 f"woGL\n"             # Enter names (1 per line)
+                 f"tiGL\n"             # Enter names (1 per line)
+                 f"nasGL\n"            # Enter names (1 per line)
+                 f"kspL\n"             # Enter names (1 per line)
+                 f"diL\n"              # Enter names (1 per line)
+                 f"ilm_nol\n"          # Enter names (1 per line)
+                 f"musp\n"             # Enter names (1 per line)
+                 f"naph\n"             # Enter names (1 per line)
+                 f"cz\n"               # Enter names (1 per line)
+                 f"h2oL\n"             # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"Y\n"                # Include solution models ?
+                 f"solution-models\n"  # Solution model file
+                 f"O(HP)\n"            # Enter names (1 per line)
+                 f"Cpx(HGP)\n"         # Enter names (1 per line)
+                 f"Omph(GHP)\n"        # Enter names (1 per line)
+                 f"Opx(HGP)\n"         # Enter names (1 per line)
+                 f"Sp(HP)\n"           # Enter names (1 per line)
+                 f"Gt(HGP)\n"          # Enter names (1 per line)
+                 f"Maj\n"              # Enter names (1 per line)
+                 f"feldspar\n"         # Enter names (1 per line)
+                 f"Anth\n"             # Enter names (1 per line)
+                 f"Wus\n"              # Enter names (1 per line)
+                 f"Fper(H)\n"          # Enter names (1 per line)
+                 f"Chl(W)\n"           # Enter names (1 per line)
+                 f"Atg(PN)\n"          # Enter names (1 per line)
+                 f"A-phase\n"          # Enter names (1 per line)
+                 f"B\n"                # Enter names (1 per line)
+                 f"T\n"                # Enter names (1 per line)
+                 f"melt(HP)\n"         # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"{sid}\n"            # Calculation title
+                 )
+            # Werami targets
+            w = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"2\n"                # Select a property (2: Density kg/m3)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"13\n"               # Select a property (13: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"14\n"               # Select a property (14: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"24\n"               # Select a property (24: Assemblage index)
+                 f"7\n"                # Select a property (7: Mode % of phase)
+                 f"melt(HP)\n"         # Enter solution or compound
+                 f"6\n"                # Select a property (6: Composition of system)
+                 f"1\n"                # Enter a component (1: H2O)
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"0\n"                # Zero to finish
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select the grid resolution (enter to continue)
+                 f"5\n"                # Dummy
+                 f"0\n"                # Zero to exit
+                 )
+            # Copy thermodynamic data
+            shutil.copy(f"{data_dir}/hp02-td", f"{model_out_dir}/td-data")
+            shutil.copy(f"{data_dir}/hp02-sl", f"{model_out_dir}/solution-models")
+        elif perplex_db == "stx21":
+            # Build
+            b = (f"{sid}\n"            # Proj name
+                 f"td-data\n"          # Thermodynamic data file
+                 f"build-options\n"    # Build options file
+                 f"N\n"                # Transform components ?
+                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
+                 f"N\n"                # Calculations with saturated fluid ?
+                 f"N\n"                # Calculations with saturated components ?
+                 f"SIO2\n"             # Select components (1 per line)
+                 f"AL2O3\n"            # Select components (1 per line)
+                 f"CAO\n"              # Select components (1 per line)
+                 f"MGO\n"              # Select components (1 per line)
+                 f"FEO\n"              # Select components (1 per line)
+                 f"NA2O\n"             # Select components (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"N\n"                # Calculate along a geotherm ?
+                 f"2\n"                # X-axis variable (2: T(K))
+                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
+                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
+                 f"Y\n"                # Specify component amounts by mass ?
+                 f"{norm_comp}\n"      # Enter mass amounts of components
+                 f"N\n"                # Print output file ?
+                 f"Y\n"                # Exclude pure and/or endmember phases ?
+                 f"N\n"                # Prompt for phases ?
+                 f"anL\n"              # Enter names (1 per line)
+                 f"perL\n"             # Enter names (1 per line)
+                 f"enL\n"              # Enter names (1 per line)
+                 f"hemL\n"             # Enter names (1 per line)
+                 f"hmL\n"              # Enter names (1 per line)
+                 f"hmWL\n"             # Enter names (1 per line)
+                 f"hmTHL\n"            # Enter names (1 per line)
+                 f"tiL\n"              # Enter names (1 per line)
+                 f"tiWL\n"             # Enter names (1 per line)
+                 f"tiTHL\n"            # Enter names (1 per line)
+                 f"ruL\n"              # Enter names (1 per line)
+                 f"faTL\n"             # Enter names (1 per line)
+                 f"fa8L\n"             # Enter names (1 per line)
+                 f"foTHL\n"            # Enter names (1 per line)
+                 f"kWL\n"              # Enter names (1 per line)
+                 f"kjL\n"              # Enter names (1 per line)
+                 f"kjTHL\n"            # Enter names (1 per line)
+                 f"kspL\n"             # Enter names (1 per line)
+                 f"lcL\n"              # Enter names (1 per line)
+                 f"fbi\n"              # Enter names (1 per line)
+                 f"tbi\n"              # Enter names (1 per line)
+                 f"lc\n"               # Enter names (1 per line)
+                 f"kjd\n"              # Enter names (1 per line)
+                 f"kls\n"              # Enter names (1 per line)
+                 f"hol\n"              # Enter names (1 per line)
+                 f"wa\n"               # Enter names (1 per line)
+                 f"cen\n"              # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"Y\n"                # Include solution models ?
+                 f"solution-models\n"  # Solution model file
+                 f"C2/c\n"             # Enter names (1 per line)
+                 f"Wus\n"              # Enter names (1 per line)
+                 f"Pv\n"               # Enter names (1 per line)
+                 f"Pl\n"               # Enter names (1 per line)
+                 f"Sp\n"               # Enter names (1 per line)
+                 f"O\n"                # Enter names (1 per line)
+                 f"Wad\n"              # Enter names (1 per line)
+                 f"Ring\n"             # Enter names (1 per line)
+                 f"Opx\n"              # Enter names (1 per line)
+                 f"Cpx\n"              # Enter names (1 per line)
+                 f"Aki\n"              # Enter names (1 per line)
+                 f"Gt\n"               # Enter names (1 per line)
+                 f"Ppv\n"              # Enter names (1 per line)
+                 f"CF\n"               # Enter names (1 per line)
+                 f"NaAl\n"             # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"{sid}\n"            # Calculation title
+                 )
+            # Werami targets
+            w = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"2\n"                # Select a property (2: Density kg/m3)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"13\n"               # Select a property (13: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"14\n"               # Select a property (14: S-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"24\n"               # Select a property (24: Assemblage index)
+                 f"0\n"                # Zero to finish
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select grid resolution (enter to continue)
+                 f"0\n"                # Zero to exit
+                 )
+            # Copy thermodynamic data
+            shutil.copy(f"{data_dir}/stx21-td", f"{model_out_dir}/td-data")
+            shutil.copy(f"{data_dir}/stx21-sl", f"{model_out_dir}/solution-models")
+        else:
+            raise Exception("Unrecognized thermodynamic dataset !")
+
+        # Write build config
+        with open(f"{model_out_dir}/build-config", "w") as file:
+            file.write(b)
+
+        # Write werami targets
+        with open(f"{model_out_dir}/werami-targets", "w") as file:
+            file.write(w)
+
+        # Write geotherms to tsv files
+        for temp in mantle_potential_temps:
+            self._get_1d_profile(mantle_potential=temp)
+
+        if perplex_db in ["hp633", "hp02"]:
+            # Werami phase
+            f = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"25\n"               # Select a property (25: Modes of all phases)
+                 f"N\n"                # Output cumulative modes ?
+                 f"Y\n"                # Include fluid in computation of properties ?
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select grid resolution (enter to continue)
+                 f"0\n"                # Zero to exit
+                 )
+            # Werami geotherm
+            for temp in mantle_potential_temps:
+                g = (f"{sid}\n"            # Proj name
+                     f"4\n"                # Operational mode (4: properties along a 1d path)
+                     f"2\n"                # Path described by (2: a file with T-P points)
+                     f"geotherm-{temp}\n"  # Enter filename
+                     f"1\n"                # How many nth points to plot ?
+                     f"25\n"               # Select a property (25: Modes of all phases)
+                     f"N\n"                # Output cumulative modes ?
+                     f"N\n"                # Include fluid in computation of properties ?
+                     f"0\n"                # Zero to exit
+                     )
+                geotherms.append(g)
+        elif perplex_db == "stx21":
+            # Werami phase
+            f = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"25\n"               # Select a property (25: Modes of all phases)
+                 f"N\n"                # Output cumulative modes ?
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select grid resolution (enter to continue)
+                 f"0\n"                # Zero to exit
+                 )
+            # Werami geotherm
+            for temp in mantle_potential_temps:
+                g = (f"{sid}\n"            # Proj name
+                     f"4\n"                # Operational mode (4: properties along a 1d path)
+                     f"2\n"                # Path described by (2: a file with T-P points)
+                     f"geotherm-{temp}\n"  # Enter filename
+                     f"1\n"                # How many nth points to plot ?
+                     f"25\n"               # Select a property (25: Modes of all phases)
+                     f"N\n"                # Output cumulative modes ?
+                     f"0\n"                # Zero to exit
+                     )
+                geotherms.append(g)
+        else:
+            raise Exception("Unrecognized thermodynamic dataset !")
+
+        # Write werami phase
+        with open(f"{model_out_dir}/werami-phase", "w") as file:
+            file.write(f)
+
+        # Write werami geotherm
+        for i, g in enumerate(geotherms):
+            with open(f"{model_out_dir}/werami-geotherm{i}", "w") as file:
+                file.write(g)
+
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # configure perplex model !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _configure_perplex_model(self):
@@ -709,61 +1154,8 @@ class GFEMModel:
             shutil.rmtree(model_out_dir)
             os.makedirs(model_out_dir, exist_ok=True)
 
-        # Transform units to bar
-        T_min, T_max = self.T_min, self.T_max
-        P_min, P_max = self.P_min * 1e4, self.P_max * 1e4
-
-        # Get sample composition
-        sample_comp = self._get_sample_comp()
-        norm_comp = self._normalize_sample_comp()
-
-        # Config dir
-        config_dir = f"assets/config_{perplex_db}"
-
-        # Configuration files
-        draw = "pssect-draw"
-        thermodb = "td-data"
-        plot = "plot-options"
-        build = "build-config"
-        phase = "werami-phase"
-        options = "build-options"
-        targets = "werami-targets"
-        minimize = "vertex-minimize"
-        solutions = "solution-models"
-
-        # Copy original configuration files to the perplex directory
-        shutil.copy(f"{config_dir}/{draw}", f"{model_out_dir}/{draw}")
-        shutil.copy(f"{config_dir}/{build}", f"{model_out_dir}/{build}")
-        shutil.copy(f"{config_dir}/{phase}", f"{model_out_dir}/{phase}")
-        shutil.copy(f"{config_dir}/{targets}", f"{model_out_dir}/{targets}")
-        shutil.copy(f"{config_dir}/{options}", f"{model_out_dir}/{options}")
-        shutil.copy(f"{config_dir}/{thermodb}", f"{model_out_dir}/{thermodb}")
-        shutil.copy(f"{config_dir}/{minimize}", f"{model_out_dir}/{minimize}")
-        shutil.copy(f"{config_dir}/{solutions}", f"{model_out_dir}/{solutions}")
-        shutil.copy(f"{config_dir}/{plot}", f"{model_out_dir}/perplex_plot_option.dat")
-
-        # Modify the copied configuration files within the perplex directory
-        self._replace_in_file(f"{model_out_dir}/{build}",
-                              {"{SAMPLEID}": f"{sid}",
-                               "{TMIN}": str(T_min), "{TMAX}": str(T_max),
-                               "{PMIN}": str(P_min), "{PMAX}": str(P_max),
-                               "{SAMPLECOMP}": " ".join(map(str, norm_comp))})
-        self._replace_in_file(f"{model_out_dir}/{minimize}",
-                              {"{SAMPLEID}": f"{sid}"})
-        self._replace_in_file(f"{model_out_dir}/{targets}",
-                              {"{SAMPLEID}": f"{sid}"})
-        self._replace_in_file(f"{model_out_dir}/{phase}",
-                              {"{SAMPLEID}": f"{sid}"})
-        self._replace_in_file(f"{model_out_dir}/{options}",
-                              {"{XNODES}": f"{int(res / 4)} {res + 1}",
-                               "{YNODES}": f"{int(res / 4)} {res + 1}"})
-        self._replace_in_file(f"{model_out_dir}/{draw}",
-                              {"{SAMPLEID}": f"{sid}"})
-
-        # Write geotherms to tsv files
-        self._get_1d_profile(mantle_potential=1173)
-        self._get_1d_profile(mantle_potential=1573)
-        self._get_1d_profile(mantle_potential=1773)
+        # Write perplex configuration files
+        self._write_perplex_config()
 
         return None
 
@@ -812,6 +1204,9 @@ class GFEMModel:
             elif program == "werami":
                 config_files.append(f"{model_out_dir}/werami-targets")
                 config_files.append(f"{model_out_dir}/werami-phase")
+                config_files.append(f"{model_out_dir}/werami-geotherm0")
+                config_files.append(f"{model_out_dir}/werami-geotherm1")
+                config_files.append(f"{model_out_dir}/werami-geotherm2")
 
                 self._replace_in_file(f"{model_out_dir}/build-options",
                                       {"Anderson-Gruneisen     F":
@@ -870,6 +1265,30 @@ class GFEMModel:
                         # Remove old output
                         os.remove(f"{model_out_dir}/{sid}_1.tab")
 
+                    elif program == "werami" and i == 2:
+                        # Copy werami mineral assemblage output
+                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
+                                    f"{model_out_dir}/geotherm0.tab")
+
+                        # Remove old output
+                        os.remove(f"{model_out_dir}/{sid}_1.tab")
+
+                    elif program == "werami" and i == 3:
+                        # Copy werami mineral assemblage output
+                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
+                                    f"{model_out_dir}/geotherm1.tab")
+
+                        # Remove old output
+                        os.remove(f"{model_out_dir}/{sid}_1.tab")
+
+                    elif program == "werami" and i == 4:
+                        # Copy werami mineral assemblage output
+                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
+                                    f"{model_out_dir}/geotherm2.tab")
+
+                        # Remove old output
+                        os.remove(f"{model_out_dir}/{sid}_1.tab")
+
                     elif program == "pssect":
                         # Copy pssect assemblages output
                         shutil.copy(f"{model_out_dir}/"
@@ -908,8 +1327,13 @@ class GFEMModel:
         perplex_targets = f"{model_out_dir}/target-array.tab"
 
         # Initialize results
-        results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [], "assemblage_index": [],
-                   "melt": [], "h2o": [], "assemblage": [], "variance": []}
+        if perplex_db == "stx21":
+            results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
+                       "assemblage_index": [], "assemblage": [], "variance": []}
+        else:
+            results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
+                       "assemblage_index": [], "melt": [], "h2o": [],
+                       "assemblage": [], "variance": []}
 
         # Open file
         with open(perplex_targets, "r") as file:
@@ -1040,7 +1464,11 @@ class GFEMModel:
         results["assemblage"] = encoded_assemblages
 
         # Point results that can be converted to numpy arrays
-        point_params = ["T", "P", "rho", "Vp", "Vs", "melt", "h2o", "assemblage", "variance"]
+        if perplex_db == "stx21":
+            point_params = ["T", "P", "rho", "Vp", "Vs", "assemblage", "variance"]
+        else:
+            point_params = ["T", "P", "rho", "Vp", "Vs", "melt", "h2o",
+                            "assemblage", "variance"]
 
         # Convert numeric point results into numpy arrays
         for key, value in results.items():
@@ -1173,6 +1601,10 @@ class GFEMModel:
             n_neighbors = 4
         elif res <= 128:
             n_neighbors = 5
+
+        # Filter targets for stx21
+        if perplex_db == "stx21":
+            targets = [t for t in targets if t not in ["melt", "h2o"]]
 
         # Initialize empty list for target arrays
         target_array_list = []
@@ -1323,10 +1755,15 @@ class GFEMModel:
         sid = self.sid
         targets = self.targets
         fig_dir = self.fig_dir
+        perplex_db = self.perplex_db
 
         # Filter targets for gradient images
         if gradient:
             targets = ["rho", "Vp", "Vs", "melt", "h2o"]
+
+        # Filter targets for stx21
+        if perplex_db == "stx21":
+            targets = [t for t in targets if t not in ["melt", "h2o"]]
 
         # Filter targets for dry samples
         if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
@@ -1380,12 +1817,37 @@ class GFEMModel:
             return False
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # check model geotherm assemblages !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _check_model_geotherm_assemblages_images(self):
+        """
+        """
+        # Get model data
+        sid = self.sid
+        fig_dir = self.fig_dir
+        geotherms = [1173, 1573, 1773]
+
+        # Check for existing plots
+        existing_figs = []
+        for i, g in enumerate(geotherms):
+            path = f"{fig_dir}/{sid}-geotherm{g}-assemblages.png"
+            check = os.path.exists(path)
+
+            if check:
+                existing_figs.append(check)
+
+        if len(existing_figs) == len(geotherms):
+            return True
+        else:
+            return False
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize gfem pt range !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _visualize_gfem_pt_range(self, fontsize=12, figwidth=6.3, figheight=3.3):
         """
         """
-        # Get model data
+        # Get self attributes
         sid = self.sid
         res = self.res
         targets = self.targets
@@ -1636,13 +2098,14 @@ class GFEMModel:
                                 gradient=False, figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
-        # Get model data
+        # Get self attributes
         sid = self.sid
         res = self.res
         targets = self.targets
         results = self.results
         fig_dir = self.fig_dir
         geothresh = self.geothresh
+        perplex_db = self.perplex_db
         model_built = self.model_built
         target_array = self.target_array
         target_units = self.target_units
@@ -1668,6 +2131,10 @@ class GFEMModel:
         # Filter targets for gradient images
         if gradient:
             targets = ["rho", "Vp", "Vs", "melt", "h2o"]
+
+        # Filter targets for stx21
+        if perplex_db == "stx21":
+            targets = [t for t in targets if t not in ["melt", "h2o"]]
 
         # Set plot style and settings
         plt.rcParams["figure.dpi"] = 300
@@ -1821,13 +2288,13 @@ class GFEMModel:
                             linewidth=3)
                     ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="white",
                             linewidth=3)
-                    plt.text(1163 + (6 * 0.5 * 35), 6, "1173", fontsize=fontsize * 0.833,
+                    plt.text(1163 + (6 * 0.5 * 35), 6, "1173 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
                              rotation=67, color="white")
-                    plt.text(1563 + (6 * 0.5 * 35), 6, "1573", fontsize=fontsize * 0.833,
+                    plt.text(1563 + (6 * 0.5 * 35), 6, "1573 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
                              rotation=67, color="white")
-                    plt.text(1763 + (6 * 0.5 * 35), 6, "1773", fontsize=fontsize * 0.833,
+                    plt.text(1763 + (6 * 0.5 * 35), 6, "1773 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
                              rotation=67, color="white")
                 ax.set_xlabel("T (K)")
@@ -1901,13 +2368,13 @@ class GFEMModel:
                             linewidth=3)
                     ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="white",
                             linewidth=3)
-                    plt.text(1163 + (6 * 0.5 * 35), 6, "1173", fontsize=fontsize * 0.833,
+                    plt.text(1163 + (6 * 0.5 * 35), 6, "1173 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
                              rotation=67, color="white")
-                    plt.text(1563 + (6 * 0.5 * 35), 6, "1573", fontsize=fontsize * 0.833,
+                    plt.text(1563 + (6 * 0.5 * 35), 6, "1573 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
                              rotation=67, color="white")
-                    plt.text(1763 + (6 * 0.5 * 35), 6, "1773", fontsize=fontsize * 0.833,
+                    plt.text(1763 + (6 * 0.5 * 35), 6, "1773 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
                              rotation=67, color="white")
                 ax.set_xlabel("T (K)")
@@ -2008,6 +2475,10 @@ class GFEMModel:
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
 
+        # Filter targets for stx21
+        if perplex_db == "stx21":
+            targets = [t for t in targets if t not in ["melt", "h2o"]]
+
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
 
@@ -2078,19 +2549,19 @@ class GFEMModel:
             # Plot GFEM model profiles
             if "low" in geotherms:
                 ax1.plot(target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
-                         label=f"{sid_lab}-1173")
+                         label=f"1173 K")
                 ax1.fill_betweenx(
                     P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
                     color=colormap(0), alpha=0.2)
             if "mid" in geotherms:
                 ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
-                         label=f"{sid_lab}-1573")
+                         label=f"1573 K")
                 ax1.fill_betweenx(
                     P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
                     color=colormap(2), alpha=0.2)
             if "high" in geotherms:
                 ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
-                         label=f"{sid_lab}-1773")
+                         label=f"1773 K")
                 ax1.fill_betweenx(
                     P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
                     color=colormap(1), alpha=0.3)
@@ -2159,6 +2630,165 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # visualize geotherm assemblages !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _visualize_geotherm_assemblages(self, geotherms=[1173, 1573, 1773], modal_thresh=5,
+                                        figwidth=6.3, figheight=4.725, fontsize=22):
+        """
+        """
+        # Get self attributes
+        sid = self.sid
+        res = self.res
+        fig_dir = self.fig_dir
+        perplex_db = self.perplex_db
+        model_built = self.model_built
+        model_out_dir = self.model_out_dir
+
+        # Check for model
+        if not model_built:
+            raise Exception("No GFEM model! Call build_model() first ...")
+
+        # Check for figs directory
+        if not os.path.exists(fig_dir):
+            os.makedirs(fig_dir, exist_ok=True)
+
+        # Check for werami files
+        for i, g in enumerate(geotherms):
+            path = f"{model_out_dir}/geotherm{i}.tab"
+            if not os.path.exists(path):
+                raise Exception(f"No werami data found at {path} !")
+
+        # Set plot style and settings
+        plt.rcParams["figure.dpi"] = 300
+        plt.rcParams["font.size"] = 22
+        plt.rcParams["savefig.bbox"] = "tight"
+        plt.rcParams["axes.facecolor"] = "0.9"
+        plt.rcParams["legend.frameon"] = "False"
+        plt.rcParams["legend.facecolor"] = "0.9"
+        plt.rcParams["legend.loc"] = "upper left"
+        plt.rcParams["legend.fontsize"] = "small"
+        plt.rcParams["figure.autolayout"] = "True"
+
+        # Get unique phases
+        all_column_names = set()
+        for i, g in enumerate(geotherms):
+            df = pd.read_csv(f"gfems/{sid}_{perplex_db}/geotherm{i}.tab",
+                             sep="\\s+", skiprows=8)
+            df = df.dropna(axis=1, how="all")
+            df = df.drop(columns=[col for col in df.columns if
+                                  (df[col] < modal_thresh).all()])
+            all_column_names.update(df.drop(["T(K)", "P(bar)"], axis=1).columns)
+
+        # Sort unique phases and assign unique colors
+        sorted_column_names = sorted(all_column_names, key=lambda x: x[:2])
+        num_colors = len(sorted_column_names)
+#        cmap = plt.get_cmap("tab20b", num_colors)
+#        colors = [cmap(i) for i in range(num_colors)]
+        colors = sns.color_palette("husl", num_colors)
+        color_map = {col_name: colors[idx % num_colors] for idx, col_name in
+                     enumerate(sorted_column_names)}
+
+        # Get 1D reference models
+        ref_models = self._get_1d_reference_models()
+        Pp, rhop = ref_models["prem"]["P"], ref_models["prem"]["rho"]
+
+        # Plot assemblages and rock properties along geotherms
+        for i, g in enumerate(geotherms):
+            filename = f"{sid}-geotherm{g}-assemblages.png"
+
+            # Read wearmi file and drop minor phases
+            df = pd.read_csv(f"gfems/{sid}_{perplex_db}/geotherm{i}.tab",
+                             sep="\\s+", skiprows=8)
+            df = df.dropna(axis=1, how="all")
+            df = df.fillna(0)
+            df = df.drop(columns=[col for col in df.columns if
+                                  (df[col] < modal_thresh).all()])
+
+            # Get rock property profiles
+            Pg, Tg, rhog = self._get_1d_profile("rho", g)
+            if perplex_db != "stx21":
+                _, _, h2og = self._get_1d_profile("h2o", g)
+            else:
+                h2og = np.zeros(len(Pg))
+
+            # Crop profiles
+            Pg, rhog, Pp, rhop, rmse, r2 = self._crop_1d_profile(Pg, rhog, Pp, rhop)
+
+            # Plot assemblages and rock properties
+            fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(figwidth * 2, figheight * 2))
+            colors_plot = [color_map[col] for col in
+                           df.drop(["T(K)", "P(bar)"], axis=1).columns]
+
+            ax_stack = axes[0]
+            ax_stack.stackplot(df["P(bar)"].values / 1e4,
+                               df.drop(["T(K)", "P(bar)"], axis=1).values.T,
+                               labels=df.drop(["T(K)", "P(bar)"], axis=1).columns,
+                               colors=colors_plot)
+            cumulative = np.cumsum(df.drop(["T(K)", "P(bar)"], axis=1).values, axis=1)
+            for col, color in enumerate(colors_plot):
+                ax_stack.plot(df["P(bar)"].values / 1e4, cumulative[:, col],
+                              color="black", lw=0.8)
+
+            ax_stack.set_xlim(1, 28)
+            ax_stack.set_ylim(0, 100)
+            ax_stack.set_xlabel("")
+            ax_stack.set_xticks([])
+            ax_stack.set_ylabel("Cumulative %")
+            ax_stack.set_title(f"Sample: {sid}")
+
+            ax_line = axes[1]
+            ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
+            ax_line.plot(Pp, rhop, color="black", linewidth=2, linestyle="--",
+                         label=f"PREM $\\rho$")
+            ax_line.set_xlim(1, 28)
+            ax_line.set_xlabel("Pressure (GPa)")
+            ax_line.set_ylabel("Density (g/cm$^3$)")
+            lines1, labels1 = ax_line.get_legend_handles_labels()
+
+            ax_line_sec = ax_line.twinx()
+            ax_line_sec.plot(Pg, h2og, color="blue", linewidth=2, label="GFEM H$_2$O")
+            ax_line_sec.set_ylabel("H$_2$O (wt.%)")
+            ax_line_sec.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+            if perplex_db == "stx21":
+                ax_line_sec.set_ylim(-0.04, 1)
+                ax_line_sec.set_yticks([0])
+            lines2, labels2 = ax_line_sec.get_legend_handles_labels()
+            ax_line.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+            ax_line.set_title(f"Mantle potential: {g} K")
+
+            handles, labels = ax_stack.get_legend_handles_labels()
+            sorted_handles_labels = sorted(zip(handles, labels),
+                                           key=lambda x: sorted_column_names.index(x[1]))
+            handles, labels = zip(*sorted_handles_labels)
+            labels = [label.split("(")[0].strip() for label in labels]
+
+            fig.legend(handles=handles, labels=labels, loc="upper left",
+                       bbox_to_anchor=(0.9, 0.95), ncol=2, title="Stable phases")
+
+            # Vertical text spacing
+            text_margin_x = 0.02
+            text_margin_y = 0.52
+            text_spacing_y = 0.1
+
+            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
+                     f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
+                     fontsize=fontsize * 0.833, horizontalalignment="left",
+                     verticalalignment="top")
+            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 1)),
+                     f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
+                     fontsize=fontsize * 0.833, horizontalalignment="left",
+                     verticalalignment="top")
+
+            # Save the plot to a file
+            plt.savefig(f"{fig_dir}/{filename}")
+
+            # Close device
+            plt.close()
+            print(f"  Figure saved to: {fig_dir}/{filename} ...")
+
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize model !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize_model(self):
@@ -2173,6 +2803,8 @@ class GFEMModel:
                 self._visualize_target_array(gradient=True)
             if not self._check_model_prem_images():
                 self._visualize_prem()
+            if not self._check_model_geotherm_assemblages_images():
+                self._visualize_geotherm_assemblages()
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in visualize_model() !!!")
@@ -2871,7 +3503,7 @@ def main():
 
         for name, source in sources.items():
             sids = get_sampleids(source)
-            gfems[name] = build_gfem_models(source, sids, res=64)
+            gfems[name] = build_gfem_models(source, sids, "stx21", 16)
 
         # Compose plots
         for name, models in gfems.items():
