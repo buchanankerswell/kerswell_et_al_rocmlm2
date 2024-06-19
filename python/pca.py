@@ -41,7 +41,7 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, res=16, res_loi=8, verbose=1):
+    def __init__(self, res=8, res_loi=16, verbose=1):
         # Input
         self.res = res + 1
         self.res_loi = res_loi
@@ -440,7 +440,8 @@ class MixingArray:
         data = self._convert_to_fe2o3t(data)
 
         # Normalize to volatile free basis
-        self.max_loi = data["LOI"].max()
+#        self.max_loi = data["LOI"].max()
+        self.max_loi = 5
         data = self._normalize_volatile_free(data)
 
         # Convert all Fe oxides to FEOT

@@ -8,14 +8,14 @@ def test():
 def main():
     """
     """
-    res = 32
+    res = 64
+    db = "hp633"
     source = "assets/data/synth-mids.csv"
 
-    for db in ["stx21", "hp633"]:
-        for i in [0, 2, 4, 6, 8]:
-            sid = f"sm000-loi00{i}"
-            model = GFEMModel(db, sid, source, res)
-            model.build_model()
+    for i in range(16):
+        sid = f"sm000-loi{str(i).zfill(3)}"
+        model = GFEMModel(db, sid, source, res)
+        model.build_model()
 
     return None
 

@@ -828,6 +828,7 @@ class GFEMModel:
                  f"Gt(HGP)\n"          # Enter names (1 per line)
                  f"Maj\n"              # Enter names (1 per line)
                  f"feldspar\n"         # Enter names (1 per line)
+                 f"Chum\n"             # Enter names (1 per line)
                  f"Anth\n"             # Enter names (1 per line)
                  f"Wus\n"              # Enter names (1 per line)
                  f"Pv\n"               # Enter names (1 per line)
@@ -1710,7 +1711,7 @@ class GFEMModel:
 
         # Write csv
         out_dir = f"{data_dir}/gfem_summaries"
-        filename = f"{out_dir}/{sid}-results-summary.csv"
+        filename = f"{out_dir}/{sid}-{perplex_db}-{res}-results-summary.csv"
 
         if not os.path.exists(out_dir):
             os.makedirs(out_dir, exist_ok=True)
@@ -2350,7 +2351,7 @@ class GFEMModel:
                     if target == "melt": vmin, vmax = 0, 100
 
                     # Set h2o fraction to 0–100 wt.%
-                    if target == "h2o": vmin, vmax = 0, 20
+                    if target == "h2o": vmin, vmax = 0, 5
 
                 # Set nan color
                 cmap = plt.colormaps[cmap]
@@ -2585,6 +2586,8 @@ class GFEMModel:
             else:
                 ax1.set_xlabel(f"{target_label}")
             ax1.set_ylabel("P (GPa)")
+            if target == "h2o":
+                ax1.set_xlim(None, 5)
             ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
             ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
@@ -2639,7 +2642,9 @@ class GFEMModel:
         # Get self attributes
         sid = self.sid
         res = self.res
+        loi = self.loi
         fig_dir = self.fig_dir
+        xi = self.fertility_index
         perplex_db = self.perplex_db
         model_built = self.model_built
         model_out_dir = self.model_out_dir
@@ -2670,17 +2675,18 @@ class GFEMModel:
         plt.rcParams["figure.autolayout"] = "True"
 
         # Get unique phases
-        all_column_names = set()
-        for i, g in enumerate(geotherms):
-            df = pd.read_csv(f"gfems/{sid}_{perplex_db}/geotherm{i}.tab",
-                             sep="\\s+", skiprows=8)
-            df = df.dropna(axis=1, how="all")
-            df = df.drop(columns=[col for col in df.columns if
-                                  (df[col] < modal_thresh).all()])
-            all_column_names.update(df.drop(["T(K)", "P(bar)"], axis=1).columns)
+        if perplex_db in ["hp02", "hp633"]:
+            phase_names = ["O(HGP)", "Wad(H)", "Ring(H)", "Aki(H)", "Cpx(HGP)", "Omph(GHP)",
+                           "Hpx(H)", "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
+                           "Chum", "Anth", "Wus", "Pv", "Fper(H)", "Mpv(H)", "Cpv(H)",
+                           "CFer(H)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T", "melt(HGPH)",
+                           "stv", "parg_dqf", "chdr", "prl", "maj"]
+        else:
+            phase_names = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
+                           "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
 
         # Sort unique phases and assign unique colors
-        sorted_column_names = sorted(all_column_names, key=lambda x: x[:2])
+        sorted_column_names = sorted(phase_names, key=lambda x: x[:2])
         num_colors = len(sorted_column_names)
 #        cmap = plt.get_cmap("tab20b", num_colors)
 #        colors = [cmap(i) for i in range(num_colors)]
@@ -2697,8 +2703,7 @@ class GFEMModel:
             filename = f"{sid}-geotherm{g}-assemblages.png"
 
             # Read wearmi file and drop minor phases
-            df = pd.read_csv(f"gfems/{sid}_{perplex_db}/geotherm{i}.tab",
-                             sep="\\s+", skiprows=8)
+            df = pd.read_csv(f"{model_out_dir}/geotherm{i}.tab", sep="\\s+", skiprows=8)
             df = df.dropna(axis=1, how="all")
             df = df.fillna(0)
             df = df.drop(columns=[col for col in df.columns if
@@ -2734,7 +2739,8 @@ class GFEMModel:
             ax_stack.set_xlabel("")
             ax_stack.set_xticks([])
             ax_stack.set_ylabel("Cumulative %")
-            ax_stack.set_title(f"Sample: {sid}")
+            ax_stack.set_title(
+                f"Sample: {sid[2:5]} ({xi:.2f} $\\xi$, {loi:.2f} wt.% H$_2$O)")
 
             ax_line = axes[1]
             ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
@@ -2749,9 +2755,11 @@ class GFEMModel:
             ax_line_sec.plot(Pg, h2og, color="blue", linewidth=2, label="GFEM H$_2$O")
             ax_line_sec.set_ylabel("H$_2$O (wt.%)")
             ax_line_sec.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-            if perplex_db == "stx21":
+            if perplex_db == "stx21" or np.all(h2og == 0):
                 ax_line_sec.set_ylim(-0.04, 1)
                 ax_line_sec.set_yticks([0])
+            else:
+                ax_line_sec.set_ylim(None, 5)
             lines2, labels2 = ax_line_sec.get_legend_handles_labels()
             ax_line.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
             ax_line.set_title(f"Mantle potential: {g} K")
@@ -3503,7 +3511,7 @@ def main():
 
         for name, source in sources.items():
             sids = get_sampleids(source)
-            gfems[name] = build_gfem_models(source, sids, "stx21", 16)
+            gfems[name] = build_gfem_models(source, sids)
 
         # Compose plots
         for name, models in gfems.items():
