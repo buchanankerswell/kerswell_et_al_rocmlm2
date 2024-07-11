@@ -2763,17 +2763,17 @@ class GFEMModel:
 
         # Get unique phases
         if perplex_db in ["hp02", "hp633"]:
-            phase_names = ["O(HGP)", "Wad(H)", "Ring(H)", "Aki(H)", "Cpx(HGP)", "Omph(GHP)",
-                           "Hpx(H)", "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                           "Chum", "Anth", "Wus", "Pv", "Fper(H)", "Mpv(H)", "Cpv(H)",
-                           "CFer(H)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T", "melt(HGPH)",
-                           "stv", "parg_dqf", "chdr", "prl", "maj"]
+            phase_names = ["O(HGP)", "O(HP)", "Wad(H)", "Ring(H)", "Aki(H)", "Cpx(HGP)",
+                           "Omph(GHP)", "Hpx(H)", "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj",
+                           "feldspar", "Chum", "Anth", "Wus", "Pv", "Fper(H)", "Mpv(H)",
+                           "Cpv(H)", "CFer(H)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                           "melt(HGPH)", "stv", "parg", "parg_dqf", "chdr", "prl", "maj"]
         elif perplex_db == "koma06":
             phase_names = ["chum", "phA", "phE", "phD", "phB", "hwd", "hrg", "br", "fo",
                            "hen", "wd", "rg", "aki", "pv", "per", "stv"]
         else:
             phase_names = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
-                           "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
+                           "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl", "ca-pv"]
 
         # Sort unique phases and assign unique colors
         sorted_column_names = sorted(phase_names, key=lambda x: x[:2])
