@@ -9,7 +9,7 @@ def main():
     """
     """
     res = 64
-    db = "hp633"
+    db = "koma06"
     source = "assets/data/synth-mids.csv"
 
     for i in range(16):

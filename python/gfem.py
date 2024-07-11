@@ -91,7 +91,7 @@ class GFEMModel:
         self.target_units = ["g/cm$^3$", "km/s", "km/s", "vol.%", "wt.%", "", ""]
 
         # Check perplex db
-        if perplex_db not in ["hp02", "hp633", "stx21"]:
+        if perplex_db not in ["hp02", "hp633", "stx21", "koma06"]:
             self.perplex_db = "hp633"
         else:
             self.perplex_db = perplex_db
@@ -104,6 +104,8 @@ class GFEMModel:
             self.ox_gfem = [ox for ox in self.ox_gfem if ox != "CR2O3"]
         if self.perplex_db == "stx21":
             self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O"]
+        if self.perplex_db == "koma06":
+            self.ox_gfem = ["SIO2", "MGO", "LOI"]
 
         # Perplex dirs and filepaths
         self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
@@ -190,6 +192,8 @@ class GFEMModel:
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
             features = [f for f in features if f not in ["LOI"]]
+        if perplex_db == "koma06":
+            targets = [t for t in targets if t not in ["melt"]]
 
         print("+++++++++++++++++++++++++++++++++++++++++++++")
         print(f"GFEM model: {sid}")
@@ -357,7 +361,6 @@ class GFEMModel:
         res = self.res
         ox_gfem = self.ox_gfem
         log_file = self.log_file
-        perplex_db = self.perplex_db
 
         if os.path.exists(log_file):
             with open(log_file, "r") as log:
@@ -718,22 +721,45 @@ class GFEMModel:
 
         # Build options
         # https://www.perplex.ethz.ch/perplex_options.html
-        o = (f"composition_system     wt\n"
-             f"composition_phase      wt\n"
-             f"intermediate_savdyn    T\n"
-             f"intermediate_savrpc    T\n"
-             f"warn_no_limit          F\n"
-             f"grid_levels            1 1\n"
-             f"x_nodes                {int(res / 4)} {res + 1}\n"
-             f"y_nodes                {int(res / 4)} {res + 1}\n"
-             f"bounds                 VRH\n"
-             f"vrh/hs_weighting       0.5\n"
-             f"Anderson-Gruneisen     F\n"
-             f"explicit_bulk_modulus  T\n"
-             f"melt_is_fluid          T\n"
-             f"poisson_test           F\n"
-             f"poisson_ratio          on 0.35\n"
-             f"seismic_output         some\n")
+        if perplex_db != "koma06":
+            o = (f"composition_system     wt\n"
+                 f"composition_phase      wt\n"
+                 f"intermediate_savdyn    T\n"
+                 f"intermediate_savrpc    T\n"
+                 f"warn_no_limit          F\n"
+                 f"grid_levels            1 1\n"
+                 f"x_nodes                {int(res / 4)} {res + 1}\n"
+                 f"y_nodes                {int(res / 4)} {res + 1}\n"
+                 f"bounds                 VRH\n"
+                 f"vrh/hs_weighting       0.5\n"
+                 f"Anderson-Gruneisen     F\n"
+                 f"explicit_bulk_modulus  T\n"
+                 f"melt_is_fluid          T\n"
+                 f"poisson_test           F\n"
+                 f"poisson_ratio          on 0.35\n"
+                 f"seismic_output         some\n"
+                 f"auto_refine_file       F\n"
+                 f"seismic_data_file      F\n")
+        else:
+            o = (f"composition_system     wt\n"
+                 f"composition_phase      wt\n"
+                 f"intermediate_savdyn    T\n"
+                 f"intermediate_savrpc    T\n"
+                 f"warn_no_limit          F\n"
+                 f"grid_levels            1 1\n"
+                 f"x_nodes                {int(res / 4)} {res + 1}\n"
+                 f"y_nodes                {int(res / 4)} {res + 1}\n"
+                 f"bounds                 VRH\n"
+                 f"vrh/hs_weighting       0.5\n"
+                 f"Anderson-Gruneisen     F\n"
+                 f"approx_alpha           F\n"
+                 f"explicit_bulk_modulus  T\n"
+                 f"melt_is_fluid          T\n"
+                 f"poisson_test           F\n"
+                 f"poisson_ratio          on 0.35\n"
+                 f"seismic_output         some\n"
+                 f"auto_refine_file       F\n"
+                 f"seismic_data_file      F\n")
 
         # Write build options
         with open(f"{model_out_dir}/build-options", "w") as file:
@@ -1060,6 +1086,56 @@ class GFEMModel:
             # Copy thermodynamic data
             shutil.copy(f"{data_dir}/stx21-td", f"{model_out_dir}/td-data")
             shutil.copy(f"{data_dir}/stx21-sl", f"{model_out_dir}/solution-models")
+        elif perplex_db == "koma06":
+            # Build
+            b = (f"{sid}\n"            # Proj name
+                 f"td-data\n"          # Thermodynamic data file
+                 f"build-options\n"    # Build options file
+                 f"N\n"                # Transform components ?
+                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
+                 f"N\n"                # Calculations with saturated fluid ?
+                 f"N\n"                # Calculations with saturated components ?
+                 f"N\n"                # Use chemical potentials as independent variables ?
+                 f"SIO2\n"             # Select components (1 per line)
+                 f"MGO\n"              # Select components (1 per line)
+                 f"H2O\n"              # Select components (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
+                 f"N\n"                # Calculate along a geotherm ?
+                 f"2\n"                # X-axis variable (2: T(K))
+                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
+                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
+                 f"Y\n"                # Specify component amounts by mass ?
+                 f"{norm_comp}\n"      # Enter mass amounts of components
+                 f"N\n"                # Print output file ?
+                 f"N\n"                # Exclude pure and/or endmember phases ?
+                 f"N\n"                # Include solution models ?
+                 f"{sid}\n"            # Calculation title
+                 )
+            # Werami targets
+            w = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"2\n"                # Select a property (2: Density kg/m3)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"13\n"               # Select a property (13: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"14\n"               # Select a property (14: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"24\n"               # Select a property (24: Assemblage index)
+                 f"6\n"                # Select a property (6: Composition of system)
+                 f"1\n"                # Enter a component (1: H2O)
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"0\n"                # Zero to finish
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select the grid resolution (enter to continue)
+                 f"5\n"                # Dummy
+                 f"0\n"                # Zero to exit
+                 )
+            # Copy thermodynamic data
+            shutil.copy(f"{data_dir}/koma06-td", f"{model_out_dir}/td-data")
         else:
             raise Exception("Unrecognized thermodynamic dataset !")
 
@@ -1075,13 +1151,13 @@ class GFEMModel:
         for temp in mantle_potential_temps:
             self._get_1d_profile(mantle_potential=temp)
 
-        if perplex_db in ["hp633", "hp02"]:
+        if perplex_db in ["hp633", "hp02", "koma06"]:
             # Werami phase
             f = (f"{sid}\n"            # Proj name
                  f"2\n"                # Operational mode (2: properties on 2D grid)
                  f"25\n"               # Select a property (25: Modes of all phases)
                  f"N\n"                # Output cumulative modes ?
-                 f"Y\n"                # Include fluid in computation of properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
                  f"N\n"                # Change default variable range ?
                  f"\n"                 # Select grid resolution (enter to continue)
                  f"0\n"                # Zero to exit
@@ -1144,8 +1220,6 @@ class GFEMModel:
         # Get self attributes
         res = self.res
         sid = self.sid
-        digits = self.digits
-        perplex_db = self.perplex_db
         model_out_dir = self.model_out_dir
 
         # Check for existing incomplete model
@@ -1296,20 +1370,8 @@ class GFEMModel:
                                     f"{sid}_assemblages.txt",
                                     f"{model_out_dir}/assemblages.txt")
 
-                        # Copy pssect auto refine output
-                        shutil.copy(f"{model_out_dir}/"
-                                    f"{sid}_auto_refine.txt",
-                                    f"{model_out_dir}/auto_refine.txt")
-
-                        # Copy pssect seismic data output
-                        shutil.copy(f"{model_out_dir}/"
-                                    f"{sid}_seismic_data.txt",
-                                    f"{model_out_dir}/seismic_data.txt")
-
                         # Remove old output
                         os.remove(f"{model_out_dir}/{sid}_assemblages.txt")
-                        os.remove(f"{model_out_dir}/{sid}_auto_refine.txt")
-                        os.remove(f"{model_out_dir}/{sid}_seismic_data.txt")
 
                 except subprocess.CalledProcessError as e:
                     print(f"Error: {e}")
@@ -1327,10 +1389,22 @@ class GFEMModel:
         model_out_dir = self.model_out_dir
         perplex_targets = f"{model_out_dir}/target-array.tab"
 
+        # Replace P(bars) with P(bar) in koma06 models to be consistent
+        with open(perplex_targets, "r") as file:
+            content = file.read()
+
+        content = content.replace("P(bars)", "P(bar)")
+
+        with open(perplex_targets, "w") as file:
+            file.write(content)
+
         # Initialize results
         if perplex_db == "stx21":
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "assemblage": [], "variance": []}
+        elif perplex_db == "koma06":
+            results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
+                       "assemblage_index": [], "h2o": [], "assemblage": [], "variance": []}
         else:
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "melt": [], "h2o": [],
@@ -1371,6 +1445,9 @@ class GFEMModel:
 
                 except ValueError:
                     continue
+
+        if all(len(values) == 0 for values in results.values()):
+            raise ValueError("Results are empty. No data was read from the file.")
 
         return results
 
@@ -1467,6 +1544,8 @@ class GFEMModel:
         # Point results that can be converted to numpy arrays
         if perplex_db == "stx21":
             point_params = ["T", "P", "rho", "Vp", "Vs", "assemblage", "variance"]
+        elif perplex_db == "koma06":
+            point_params = ["T", "P", "rho", "Vp", "Vs", "h2o", "assemblage", "variance"]
         else:
             point_params = ["T", "P", "rho", "Vp", "Vs", "melt", "h2o",
                             "assemblage", "variance"]
@@ -1606,6 +1685,8 @@ class GFEMModel:
         # Filter targets for stx21
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
+        if perplex_db == "koma06":
+            targets = [t for t in targets if t not in ["melt"]]
 
         # Initialize empty list for target arrays
         target_array_list = []
@@ -1765,6 +1846,8 @@ class GFEMModel:
         # Filter targets for stx21
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
+        if perplex_db == "koma06":
+            targets = [t for t in targets if t not in ["melt"]]
 
         # Filter targets for dry samples
         if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
@@ -2136,6 +2219,8 @@ class GFEMModel:
         # Filter targets for stx21
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
+        if perplex_db == "koma06":
+            targets = [t for t in targets if t not in ["melt"]]
 
         # Set plot style and settings
         plt.rcParams["figure.dpi"] = 300
@@ -2479,6 +2564,8 @@ class GFEMModel:
         # Filter targets for stx21
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
+        if perplex_db == "koma06":
+            targets = [t for t in targets if t not in ["melt"]]
 
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
@@ -2681,6 +2768,9 @@ class GFEMModel:
                            "Chum", "Anth", "Wus", "Pv", "Fper(H)", "Mpv(H)", "Cpv(H)",
                            "CFer(H)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T", "melt(HGPH)",
                            "stv", "parg_dqf", "chdr", "prl", "maj"]
+        elif perplex_db == "koma06":
+            phase_names = ["chum", "phA", "phE", "phD", "phB", "hwd", "hrg", "br", "fo",
+                           "hen", "wd", "rg", "aki", "pv", "per", "stv"]
         else:
             phase_names = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
                            "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
@@ -2700,10 +2790,20 @@ class GFEMModel:
 
         # Plot assemblages and rock properties along geotherms
         for i, g in enumerate(geotherms):
+            tabfile = f"{model_out_dir}/geotherm{i}.tab"
             filename = f"{sid}-geotherm{g}-assemblages.png"
 
+            # Replace P(bars) with P(bar) in koma06 models to be consistent
+            with open(tabfile, "r") as file:
+                content = file.read()
+
+            content = content.replace("P(bars)", "P(bar)")
+
+            with open(tabfile, "w") as file:
+                file.write(content)
+
             # Read wearmi file and drop minor phases
-            df = pd.read_csv(f"{model_out_dir}/geotherm{i}.tab", sep="\\s+", skiprows=8)
+            df = pd.read_csv(tabfile, sep="\\s+", skiprows=8)
             df = df.dropna(axis=1, how="all")
             df = df.fillna(0)
             df = df.drop(columns=[col for col in df.columns if
