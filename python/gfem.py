@@ -188,7 +188,7 @@ class GFEMModel:
         model_built = self.model_built
         model_out_dir = self.model_out_dir
 
-        # Filter targets for stx21
+        # Filter targets for stx21 and koma06
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
             features = [f for f in features if f not in ["LOI"]]
@@ -1682,7 +1682,7 @@ class GFEMModel:
         elif res <= 128:
             n_neighbors = 5
 
-        # Filter targets for stx21
+        # Filter targets for stx21 and koma06
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
         if perplex_db == "koma06":
@@ -1843,7 +1843,7 @@ class GFEMModel:
         if gradient:
             targets = ["rho", "Vp", "Vs", "melt", "h2o"]
 
-        # Filter targets for stx21
+        # Filter targets for stx21 and koma06
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
         if perplex_db == "koma06":
@@ -2216,7 +2216,7 @@ class GFEMModel:
         if gradient:
             targets = ["rho", "Vp", "Vs", "melt", "h2o"]
 
-        # Filter targets for stx21
+        # Filter targets for stx21 and koma06
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
         if perplex_db == "koma06":
@@ -2561,7 +2561,7 @@ class GFEMModel:
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
 
-        # Filter targets for stx21
+        # Filter targets for stx21 and koma06
         if perplex_db == "stx21":
             targets = [t for t in targets if t not in ["melt", "h2o"]]
         if perplex_db == "koma06":
@@ -2773,7 +2773,7 @@ class GFEMModel:
                            "hen", "wd", "rg", "aki", "pv", "per", "stv"]
         else:
             phase_names = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
-                           "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl", "ca-pv"]
+                           "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl", "ca-pv", "st"]
 
         # Sort unique phases and assign unique colors
         sorted_column_names = sorted(phase_names, key=lambda x: x[:2])
@@ -2955,6 +2955,7 @@ class GFEMModel:
                 else:
                     self.model_build_error = True
                     self.model_error = e
+
                     return None
         try:
             self._summarize_gfem_model_results()
@@ -3185,10 +3186,12 @@ def compose_itr(gfem_model, clean=False):
 
         # Check for existing plots
         fig = f"{fig_dir}/{sid}-h2o.png"
-        check_fig = os.path.exists(fig)
+        check_fig_h2o = os.path.exists(fig)
+        fig = f"{fig_dir}/{sid}-melt.png"
+        check_fig_melt = os.path.exists(fig)
 
-        if not check_fig:
-            print(f"  No h2o plot found. Skipping composition ...")
+        if not check_fig_h2o or not check_fig_melt:
+            print(f"  No h2o or melt plot found. Skipping composition ...")
         else:
             combine_plots_vertically(
                 f"{fig_dir}/temp-rho.png",
@@ -3256,18 +3259,12 @@ def compose_itr(gfem_model, clean=False):
 
         # Check for existing plots
         fig = f"{fig_dir}/{sid}-h2o.png"
-        check_fig = os.path.exists(fig)
+        check_fig_h2o = os.path.exists(fig)
+        fig = f"{fig_dir}/{sid}-melt.png"
+        check_fig_melt = os.path.exists(fig)
 
-        if not check_fig:
-            combine_plots_vertically(
-                f"{fig_dir}/temp2.png",
-                f"{fig_dir}/temp-melt.png",
-                f"{fig_dir}/image12-{sid}.png",
-                caption1="",
-                caption2=""
-            )
-
-            print(f"  Figure saved to: {fig_dir}/image12-{sid}.png ...")
+        if not check_fig_h2o or not check_fig_melt:
+            print(f"  No h2o or melt plot found. Skipping composition ...")
         else:
             combine_plots_vertically(
                 f"{fig_dir}/temp2.png",
@@ -3352,6 +3349,10 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
         geothresh = model.geothresh
         perplex_db = model.perplex_db
         target_units = model.target_units
+
+        # Filter targets for stx21
+        if perplex_db == "stx21":
+            targets = [t for t in targets if t not in ["melt", "h2o"]]
 
         # Filter targets for PREM
         t_ind = [i for i, t in enumerate(targets) if t in ["rho", "h2o"]]
@@ -3588,12 +3589,13 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp633", res=128, Pmin=
 
     if error_count > 0:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print(f"Total models with errors: {error_count}")
+        print(f"Total GFEM models with errors: {error_count}")
     else:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print("All GFEM models built successfully !")
 
     print(":::::::::::::::::::::::::::::::::::::::::::::")
+
     return gfems
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
