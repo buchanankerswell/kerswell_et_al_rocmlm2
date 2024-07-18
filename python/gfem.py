@@ -9,13 +9,10 @@ import os
 import re
 import time
 import glob
-import random
 import shutil
 import warnings
 import traceback
-import itertools
 import subprocess
-from datetime import datetime
 from contextlib import redirect_stdout
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -87,8 +84,19 @@ class GFEMModel:
 
         self.digits = 3
         self.features = ["XI_FRAC", "LOI"]
-        self.targets = ["rho", "Vp", "Vs", "melt", "h2o", "assemblage", "variance"]
         self.target_units = ["g/cm$^3$", "km/s", "km/s", "vol.%", "wt.%", "", ""]
+        self.targets = ["rho", "Vp", "Vs", "melt", "h2o", "assemblage", "variance"]
+
+        # Filter targets for stx21 and koma06
+        if perplex_db == "stx21":
+            t_ind = [i for i, t in enumerate(self.targets) if t not in ["melt", "h2o"]]
+            self.targets = [self.targets[i] for i in t_ind]
+            self.target_units = [self.target_units[i] for i in t_ind]
+            self.features = [f for f in self.features if f not in ["LOI"]]
+        elif perplex_db == "koma06":
+            t_ind = [i for i, t in enumerate(self.targets) if t not in ["melt"]]
+            self.targets = [self.targets[i] for i in t_ind]
+            self.target_units = [self.target_units[i] for i in t_ind]
 
         # Check perplex db
         if perplex_db not in ["hp02", "hp633", "stx21", "koma06"]:
@@ -138,10 +146,11 @@ class GFEMModel:
                 os.path.exists(f"{self.model_out_dir}/assemblages.csv")):
                 if verbose >= 1:
                     print(f"  Found {self.perplex_db} GFEM model for sample {self.sid} !")
-
                 try:
                     self.model_built = True
                     self._get_sample_comp()
+                    self._normalize_sample_comp()
+                    self._get_sample_features()
                     self._summarize_gfem_model_results()
                 except Exception as e:
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -150,7 +159,6 @@ class GFEMModel:
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     traceback.print_exc()
                     return None
-
                 self.visualize_model()
                 return None
             else:
@@ -187,13 +195,6 @@ class GFEMModel:
         perplex_db = self.perplex_db
         model_built = self.model_built
         model_out_dir = self.model_out_dir
-
-        # Filter targets for stx21 and koma06
-        if perplex_db == "stx21":
-            targets = [t for t in targets if t not in ["melt", "h2o"]]
-            features = [f for f in features if f not in ["LOI"]]
-        if perplex_db == "koma06":
-            targets = [t for t in targets if t not in ["melt"]]
 
         print("+++++++++++++++++++++++++++++++++++++++++++++")
         print(f"GFEM model: {sid}")
@@ -466,7 +467,6 @@ class GFEMModel:
 
                         if nan_count >= int((((((n_neighbors * 2) + 1)**2) - 1) / 3)):
                             result_array[i, j] = 0
-
                         else:
                             result_array[i, j] = np.mean(surrounding_values)
 
@@ -558,11 +558,11 @@ class GFEMModel:
         perplex_geotherm = f"{model_out_dir}/geotherm-{mantle_potential}"
 
         # Check for model
-        if not model_built and target:
+        if not model_built:
             raise Exception("No GFEM model! Call build_model() first ...")
 
         # Check for results
-        if not results and target:
+        if not results:
             raise Exception("No GFEM model results! Call get_results() first ...")
 
         # Define PT (target)
@@ -1682,12 +1682,6 @@ class GFEMModel:
         elif res <= 128:
             n_neighbors = 5
 
-        # Filter targets for stx21 and koma06
-        if perplex_db == "stx21":
-            targets = [t for t in targets if t not in ["melt", "h2o"]]
-        if perplex_db == "koma06":
-            targets = [t for t in targets if t not in ["melt"]]
-
         # Initialize empty list for target arrays
         target_array_list = []
 
@@ -1828,9 +1822,9 @@ class GFEMModel:
             return False
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check model target images !!
+    # check model array images !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_target_images(self, gradient=False):
+    def _check_model_array_images(self, gradient=False):
         """
         """
         # Get model data
@@ -1841,17 +1835,14 @@ class GFEMModel:
 
         # Filter targets for gradient images
         if gradient:
-            targets = ["rho", "Vp", "Vs", "melt", "h2o"]
-
-        # Filter targets for stx21 and koma06
-        if perplex_db == "stx21":
-            targets = [t for t in targets if t not in ["melt", "h2o"]]
-        if perplex_db == "koma06":
-            targets = [t for t in targets if t not in ["melt"]]
+            grad_targets = ["rho", "Vp", "Vs", "melt", "h2o"]
+            t_ind = [i for i, t in enumerate(targets) if t in grad_targets]
+            targets = [targets[i] for i in t_ind]
 
         # Filter targets for dry samples
         if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
-            targets = [t for t in targets if t != "h2o"]
+            t_ind = [i for i, t in enumerate(targets) if t not in ["h2o"]]
+            targets = [targets[i] for i in t_ind]
 
         # Check for existing plots
         existing_figs = []
@@ -1860,6 +1851,38 @@ class GFEMModel:
                 path = f"{fig_dir}/{sid}-{target}-grad.png"
             else:
                 path = f"{fig_dir}/{sid}-{target}.png"
+
+            check = os.path.exists(path)
+
+            if check:
+                existing_figs.append(check)
+
+        if len(existing_figs) == len(targets):
+            return True
+        else:
+            return False
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # check model array surfs !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _check_model_array_surfs(self):
+        """
+        """
+        # Get model data
+        sid = self.sid
+        targets = self.targets
+        fig_dir = self.fig_dir
+        perplex_db = self.perplex_db
+
+        # Filter targets for dry samples
+        if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
+            t_ind = [i for i, t in enumerate(targets) if t not in ["h2o"]]
+            targets = [targets[i] for i in t_ind]
+
+        # Check for existing plots
+        existing_figs = []
+        for i, target in enumerate(targets):
+            path = f"{fig_dir}/{sid}-{target}-surf.png"
 
             check = os.path.exists(path)
 
@@ -2176,10 +2199,10 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize targets  !!
+    # visualize array image  !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_target_array(self, rmse=None, r2=None, palette="bone", geotherms=True,
-                                gradient=False, figwidth=6.3, figheight=4.725, fontsize=22):
+    def _visualize_array_image(self, palette="bone", geotherms=True, gradient=False,
+                               figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
         # Get self attributes
@@ -2214,13 +2237,9 @@ class GFEMModel:
 
         # Filter targets for gradient images
         if gradient:
-            targets = ["rho", "Vp", "Vs", "melt", "h2o"]
-
-        # Filter targets for stx21 and koma06
-        if perplex_db == "stx21":
-            targets = [t for t in targets if t not in ["melt", "h2o"]]
-        if perplex_db == "koma06":
-            targets = [t for t in targets if t not in ["melt"]]
+            grad_targets = ["rho", "Vp", "Vs", "melt", "h2o"]
+            t_ind = [i for i, t in enumerate(targets) if t in grad_targets]
+            targets = [targets[i] for i in t_ind]
 
         # Set plot style and settings
         plt.rcParams["figure.dpi"] = 300
@@ -2310,9 +2329,6 @@ class GFEMModel:
             else:
                 vmin = int(np.nanmin(np.unique(square_target)))
                 vmax = int(np.nanmax(np.unique(square_target)))
-
-            # Make results df
-            results = pd.DataFrame({"P": P, "T": T, target: square_target.flatten()})
 
             # Get geotherm
             P_geotherm, T_geotherm, _ = self._get_1d_profile(target, 1173)
@@ -2498,25 +2514,292 @@ class GFEMModel:
             text_margin_y = 0.15
             text_spacing_y = 0.1
 
-            # Add rmse and r2
-            if rmse is not None and r2 is not None:
-                bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="white", lw=1.5,
-                                  alpha=0.3)
-                plt.text(text_margin_x, text_margin_y - (text_spacing_y * 0),
-                         f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
-                         fontsize=fontsize * 0.833, horizontalalignment="left",
-                         verticalalignment="bottom", bbox=bbox_props)
-                plt.text(text_margin_x, text_margin_y - (text_spacing_y * 1),
-                         f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
-                         fontsize=fontsize * 0.833, horizontalalignment="left",
-                         verticalalignment="bottom", bbox=bbox_props)
-
             # Save the plot to a file
             plt.savefig(f"{fig_dir}/{filename}")
 
             # Close device
             plt.close()
             print(f"  Figure saved to: {fig_dir}/{filename} ...")
+
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # visualize target surf !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _visualize_target_surf(self, palette="bone", figwidth=6.3, figheight=4.725,
+                               fontsize=22):
+        """
+        """
+        # Get self attributes
+        sid = self.sid
+        res = self.res
+        targets = self.targets
+        results = self.results
+        fig_dir = self.fig_dir
+        geothresh = self.geothresh
+        perplex_db = self.perplex_db
+        model_built = self.model_built
+        target_array = self.target_array
+        target_units = self.target_units
+        P = results["P"].reshape(res + 1, res + 1)
+        T = results["T"].reshape(res + 1, res + 1)
+
+        # Check for model
+        if not model_built:
+            raise Exception("No GFEM model! Call build_model() first ...")
+
+        # Check for results
+        if not results:
+            raise Exception("No GFEM model results! Call get_results() first ...")
+
+        # Check for targets
+        if target_array is None or target_array.size == 0:
+            raise Exception("No GFEM model target array! Call get_target_array() first ...")
+
+        # Check for figs directory
+        if not os.path.exists(fig_dir):
+            os.makedirs(fig_dir, exist_ok=True)
+
+        # Set plot style and settings
+        plt.rcParams["figure.dpi"] = 300
+        plt.rcParams["font.size"] = fontsize
+        plt.rcParams["savefig.bbox"] = "tight"
+        plt.rcParams["axes.facecolor"] = "0.9"
+        plt.rcParams["legend.frameon"] = "False"
+        plt.rcParams["legend.facecolor"] = "0.9"
+        plt.rcParams["legend.loc"] = "upper left"
+        plt.rcParams["legend.fontsize"] = "small"
+        plt.rcParams["figure.autolayout"] = "True"
+
+        for i, target in enumerate(targets):
+            # Target labels
+            if target == "rho":
+                target_label = "Density"
+            elif target == "h2o":
+                target_label = "H$_2$O"
+            elif target == "melt":
+                target_label = "Melt"
+            else:
+                target_label = target
+
+            # Set filename
+            filename = f"{sid}-{target}-surf.png"
+            if target not in ["assemblage", "variance"]:
+                title = f"{target_label} ({target_units[i]})"
+            else:
+                title = f"{target_label}"
+
+            # Reshape targets into square array
+            square_target = target_array[:, i].reshape(res + 1, res + 1)
+
+            # Check for all nans
+            if np.all(np.isnan(square_target)):
+                print(f"  All nans in {target} array. Skipping plot ...")
+                continue
+
+            # Use discrete colorscale
+            if target in ["assemblage", "variance"]:
+                color_discrete = True
+            else:
+                color_discrete = False
+
+            # Reverse color scale
+            if palette in ["grey"]:
+                if target in ["variance"]:
+                    color_reverse = True
+                else:
+                    color_reverse = False
+            else:
+                if target in ["variance"]:
+                    color_reverse = False
+                else:
+                    color_reverse = True
+
+            # Set colorbar limits for better comparisons
+            if not color_discrete:
+                non_nan_values = square_target[np.logical_not(np.isnan(square_target))]
+                if non_nan_values.size > 0:
+                    vmin = np.min(non_nan_values)
+                    vmax = np.max(non_nan_values)
+                else:
+                    vmin = 0
+                    vmax = 0
+            else:
+                vmin = int(np.nanmin(np.unique(square_target)))
+                vmax = int(np.nanmax(np.unique(square_target)))
+
+            if color_discrete:
+                # Discrete color palette
+                num_colors = vmax - vmin + 1
+
+                if palette == "viridis":
+                    if color_reverse:
+                        pal = plt.get_cmap("viridis_r", num_colors)
+                    else:
+                        pal = plt.get_cmap("viridis", num_colors)
+                elif palette == "bone":
+                    if color_reverse:
+                        pal = plt.get_cmap("bone_r", num_colors)
+                    else:
+                        pal = plt.get_cmap("bone", num_colors)
+                elif palette == "pink":
+                    if color_reverse:
+                        pal = plt.get_cmap("pink_r", num_colors)
+                    else:
+                        pal = plt.get_cmap("pink", num_colors)
+                elif palette == "seismic":
+                    if color_reverse:
+                        pal = plt.get_cmap("seismic_r", num_colors)
+                    else:
+                        pal = plt.get_cmap("seismic", num_colors)
+                elif palette == "grey":
+                    if color_reverse:
+                        pal = plt.get_cmap("Greys_r", num_colors)
+                    else:
+                        pal = plt.get_cmap("Greys", num_colors)
+                elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
+                    if color_reverse:
+                        pal = plt.get_cmap("Blues_r", num_colors)
+                    else:
+                        pal = plt.get_cmap("Blues", num_colors)
+
+                # Descritize
+                color_palette = pal(np.linspace(0, 1, num_colors))
+                cmap = ListedColormap(color_palette)
+
+                # Set nan color
+                cmap.set_bad(color="white")
+
+                # 3D surface
+                fig = plt.figure(figsize=(figwidth, figheight), constrained_layout=True)
+                ax = fig.add_subplot(111, projection="3d")
+
+                surf = ax.plot_surface(T, P, square_target, cmap=cmap, vmin=vmin, vmax=vmax)
+
+                ax.set_xlabel("T (K)", labelpad=18)
+                ax.set_ylabel("P (GPa)", labelpad=18)
+                ax.set_zlabel("")
+                ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                plt.tick_params(axis="x", which="major")
+                plt.tick_params(axis="y", which="major")
+                plt.title(title, y=0.95)
+                ax.view_init(20, -145)
+                ax.set_box_aspect((1.5, 1.5, 1), zoom=1)
+                ax.set_facecolor("white")
+                cbar = fig.colorbar(surf, ax=ax, label="", shrink=0.6,
+                                    ticks=np.arange(vmin, vmax, num_colors // 4))
+                cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                cbar.ax.set_ylim(vmax, vmin)
+
+            else:
+                # Continuous color palette
+                if palette == "viridis":
+                    if color_reverse:
+                        cmap = "viridis_r"
+                    else:
+                        cmap = "viridis"
+                elif palette == "bone":
+                    if color_reverse:
+                        cmap = "bone_r"
+                    else:
+                        cmap = "bone"
+                elif palette == "pink":
+                    if color_reverse:
+                        cmap = "pink_r"
+                    else:
+                        cmap = "pink"
+                elif palette == "seismic":
+                    if color_reverse:
+                        cmap = "seismic_r"
+                    else:
+                        cmap = "seismic"
+                elif palette == "grey":
+                    if color_reverse:
+                        cmap = "Greys_r"
+                    else:
+                        cmap = "Greys"
+                elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
+                    if color_reverse:
+                        cmap="Blues_r"
+                    else:
+                        cmap="Blues"
+
+                # Adjust diverging colorscale to center on zero
+                if palette == "seismic":
+                    vmin = -np.max(
+                        np.abs(square_target[np.logical_not(np.isnan(square_target))]))
+                    vmax = np.max(
+                        np.abs(square_target[np.logical_not(np.isnan(square_target))]))
+                else:
+                    vmin, vmax = vmin, vmax
+
+                    # Adjust vmin close to zero
+                    if vmin <= 1e-4: vmin = 0
+
+                    # Set melt fraction to 0–100 vol.%
+                    if target == "melt": vmin, vmax = 0, 100
+
+                    # Set h2o fraction to 0–100 wt.%
+                    if target == "h2o": vmin, vmax = 0, 5
+
+                # Set nan color
+                cmap = plt.get_cmap(cmap)
+                cmap.set_bad(color="white")
+
+                # 3D surface
+                fig = plt.figure(figsize=(figwidth, figheight), constrained_layout=True)
+                ax = fig.add_subplot(111, projection="3d")
+
+                surf = ax.plot_surface(T, P, square_target, cmap=cmap, vmin=vmin, vmax=vmax)
+
+                ax.set_xlabel("T (K)", labelpad=18)
+                ax.set_ylabel("P (GPa)", labelpad=18)
+                ax.set_zlabel("")
+                ax.set_zlim(vmin - (vmin * 0.05), vmax + (vmax * 0.05))
+                plt.tick_params(axis="x", which="major")
+                plt.tick_params(axis="y", which="major")
+                plt.title(title, y=0.95)
+                ax.view_init(20, -145)
+                ax.set_box_aspect((1.5, 1.5, 1), zoom=1)
+                ax.set_facecolor("white")
+
+                # Diverging colorbar
+                if palette == "seismic":
+                    cbar = fig.colorbar(surf, ax=ax, ticks=[vmin, 0, vmax], label="",
+                                        shrink=0.6)
+
+                # Continous colorbar
+                else:
+                    cbar = fig.colorbar(surf, ax=ax, ticks=np.linspace(vmin, vmax, num=4),
+                                        label="", shrink=0.6)
+
+                # Set z and colorbar limits and number formatting
+                if target == "rho":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                elif target == "Vp":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                elif target == "Vs":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                elif target == "melt":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                elif target == "assemblage":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                elif target == "variance":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+
+                cbar.ax.set_ylim(vmin, vmax)
+
+            # Save the plot to a file
+            plt.savefig(f"{fig_dir}/{filename}")
+
+            # Close fig
+            plt.close()
 
         return None
 
@@ -2560,12 +2843,6 @@ class GFEMModel:
         t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "melt", "h2o"]]
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
-
-        # Filter targets for stx21 and koma06
-        if perplex_db == "stx21":
-            targets = [t for t in targets if t not in ["melt", "h2o"]]
-        if perplex_db == "koma06":
-            targets = [t for t in targets if t not in ["melt"]]
 
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
@@ -2905,10 +3182,12 @@ class GFEMModel:
         try:
             if not self._check_pt_range_image():
                 self._visualize_gfem_pt_range()
-            if not self._check_model_target_images():
-                self._visualize_target_array()
-            if not self._check_model_target_images(gradient=True):
-                self._visualize_target_array(gradient=True)
+            if not self._check_model_array_images():
+                self._visualize_array_image()
+            if not self._check_model_array_images(gradient=True):
+                self._visualize_array_image(gradient=True)
+            if not self._check_model_array_surfs():
+                self._visualize_target_surf()
             if not self._check_model_prem_images():
                 self._visualize_prem()
             if not self._check_model_geotherm_assemblages_images():
@@ -3350,10 +3629,6 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
         perplex_db = model.perplex_db
         target_units = model.target_units
 
-        # Filter targets for stx21
-        if perplex_db == "stx21":
-            targets = [t for t in targets if t not in ["melt", "h2o"]]
-
         # Filter targets for PREM
         t_ind = [i for i, t in enumerate(targets) if t in ["rho", "h2o"]]
         target_units = [target_units[i] for i in t_ind]
@@ -3393,7 +3668,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
             # Create colorbar
             pal = sns.color_palette("magma", as_cmap=True).reversed()
             norm = plt.Normalize(df_synth_bench[XI_col].min(), df_synth_bench[XI_col].max())
-            sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
+            sm = plt.ScalarMappable(cmap="magma_r", norm=norm)
             sm.set_array([])
 
             ax = axes[i]

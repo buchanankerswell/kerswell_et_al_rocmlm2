@@ -15,7 +15,6 @@ PYTHON = python/pca.py \
 				 python/gfem.py \
 				 python/utils.py \
 				 python/rocmlm.py \
-				 python/visualize.py \
 				 python/write-md-tables.py
 # Cleanup directories
 DATAPURGE = log \
