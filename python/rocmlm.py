@@ -10,21 +10,11 @@ import time
 import joblib
 import warnings
 import traceback
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-from gfem import get_sampleids, build_gfem_models
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# parallel computing !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-import multiprocessing as mp
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# dataframes and arrays !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import numpy as np
 import pandas as pd
-from scipy.interpolate import RegularGridInterpolator
+from tqdm import tqdm
+import multiprocessing as mp
+from gfem import get_sampleids, build_gfem_models
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
@@ -37,6 +27,7 @@ from sklearn.neighbors import KNeighborsRegressor
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
+from scipy.interpolate import RegularGridInterpolator
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_squared_error, r2_score
 
@@ -62,8 +53,8 @@ class RocMLM:
     def __init__(self, gfem_models, ml_model, X_step=1, PT_step=1,
                  training_features=["XI_FRAC", "LOI"],
                  training_targets=["rho", "h2o", "melt"], tune=True,
-                 epochs=100, batchprop=0.2, kfolds=5, nprocs=os.cpu_count() - 2, seed=42,
-                 verbose=1):
+                 epochs=100, batchprop=0.2, kfolds=5, nprocs=os.cpu_count() - 2,
+                 seed=42, verbose=1):
         """
         """
         # Input
@@ -223,9 +214,21 @@ class RocMLM:
         # Check for existing model build
         if os.path.exists(self.model_out_dir):
             if os.path.exists(self.rocmlm_path):
-                self.ml_model_trained = True
                 if self.verbose >= 1:
                     print(f"Found pretrained model {self.rocmlm_path}!")
+                try:
+                    self.ml_model_trained = True
+                    rocmlm = joblib.load(self.rocmlm_path)
+                    rocmlm.visualize_model()
+                except Exception as e:
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    print(f"!!! ERROR in RocMLM() !!!")
+                    print(f"{e}")
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    traceback.print_exc()
+                return None
+            else:
+                os.makedirs(self.model_out_dir, exist_ok=True)
         else:
             os.makedirs(self.model_out_dir, exist_ok=True)
 
@@ -498,7 +501,7 @@ class RocMLM:
                         litho_thickness=1):
         """
         """
-        # Get model attributes
+        # Get self attributes
         res = self.res
         P_min = self.P_min
         P_max = self.P_max
@@ -1409,67 +1412,34 @@ class RocMLM:
     #+ .1.4.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check model array images !!
+    # check rocmlm images !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_array_images(self, type="targets"):
+    def _check_rocmlm_images(self, type="targets"):
         """
         """
-        # Get ml model attributes
+        # Get self attributes
         sids = self.sids
         fig_dir = self.fig_dir
         model_prefix = self.model_prefix
         training_targets = self.training_targets
 
-        # Check for existing plots
-        existing_figs = []
-        for sid in sids:
-            for i, target in enumerate(training_targets):
-                target_rename = target.replace("_", "-")
-                if type == "targets":
-                    path = f"{fig_dir}/{model_prefix}-{sid}-{target_rename}-targets.png"
-                elif type == "predictions":
-                    path = f"{fig_dir}/{model_prefix}-{sid}-{target_rename}-prediction.png"
-                elif type == "diff":
-                    path = f"{fig_dir}/{model_prefix}-{sid}-{target_rename}-diff.png"
-                else:
-                    raise ValueError("Unrecognized array image type!")
-                check = os.path.exists(path)
-                if check:
-                    existing_figs.append(check)
+        if type not in {"targets", "predictions", "diff", "prem"}:
+            raise ValueError("Unrecognized array image type!")
 
-        if len(existing_figs) == len(training_targets) * len(sids):
-            return True
-        else:
-            return False
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check model prem images !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_prem_images(self):
-        """
-        """
-        # Get model data
-        sids = self.sids
-        fig_dir = self.fig_dir
-        training_targets = self.training_targets
-
-        # Filter targets for PREM
-        t_ind = [i for i, t in enumerate(training_targets) if t in ["rho", "Vp", "Vs"]]
-        targets = [training_targets[i] for i in t_ind]
+        missing_sids = []
 
         # Check for existing plots
-        existing_figs = []
         for sid in sids:
-            for i, target in enumerate(training_targets):
-                path = f"{fig_dir}/{sid}-{target}-prem.png"
-                check = os.path.exists(path)
-                if check:
-                    existing_figs.append(check)
+            all_files_exist = True
+            for target in training_targets:
+                path = f"{fig_dir}/{model_prefix}-{sid}-{target}-{type}.png"
+                if not os.path.exists(path):
+                    all_files_exist = False
+                    break
+            if not all_files_exist:
+                missing_sids.append(sid)
 
-        if len(existing_figs) == len(training_targets) * len(sids):
-            return True
-        else:
-            return False
+        return missing_sids
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize loss curve !!
@@ -1538,12 +1508,11 @@ class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize array image  !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, palette="bone", geotherms=True, type="targets",
+    def _visualize_array_image(self, sids, palette="bone", geotherms=True, type="targets",
                                figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
-        # Get ml model attributes
-        sids = self.sids
+        # Get self attributes
         cv_info = self.cv_info
         fig_dir = self.fig_dir
         verbose = self.verbose
@@ -1580,7 +1549,7 @@ class RocMLM:
 
         try:
             for s, sid in enumerate(sids):
-                if verbose >= 1: print(f"Visualizing {model_prefix}-{sid} ...")
+                if verbose >= 1: print(f"  Visualizing {model_prefix}-{sid} ...")
 
                 # Slice arrays
                 feature_array = feature_arrays[s, :, :, :]
@@ -1588,9 +1557,6 @@ class RocMLM:
                 pred_array = pred_arrays[s, :, :, :]
 
                 for i, target in enumerate(training_targets):
-                    # Rename target
-                    target_rename = target.replace("_", "-")
-
                     # Get 2d arrays
                     P = feature_array[:, :, 0 + n_feats]
                     T = feature_array[:, :, 1 + n_feats]
@@ -1600,11 +1566,11 @@ class RocMLM:
 
                     if type == "targets":
                         square_array = t
-                        filename = f"{model_prefix}-{sid}-{target_rename}-targets.png"
+                        filename = f"{model_prefix}-{sid}-{target}-targets.png"
                         rmse, r2 = None, None
                     elif type == "predictions":
                         square_array = p
-                        filename = f"{model_prefix}-{sid}-{target_rename}-predictions.png"
+                        filename = f"{model_prefix}-{sid}-{target}-predictions.png"
                         rmse, r2 = None, None
                     elif type == "diff":
                         mask = np.isnan(t)
@@ -1614,7 +1580,7 @@ class RocMLM:
                         rmse = cv_info[f"rmse_test_mean_{target}"]
                         r2 = cv_info[f"r2_test_mean_{target}"]
                         palette = "seismic"
-                        filename = f"{model_prefix}-{sid}-{target_rename}-diff.png"
+                        filename = f"{model_prefix}-{sid}-{target}-diff.png"
                     else:
                         raise ValueError("Unrecognized array image type!")
 
@@ -1798,6 +1764,9 @@ class RocMLM:
                             # Adjust vmin close to zero
                             if vmin <= 1e-4: vmin = 0
 
+                            # Set rho to 1.8–4.6 g/cm3
+                            if target == "rho": vmin, vmax = 1.8, 4.6
+
                             # Set melt fraction to 0–100 vol.%
                             if target == "melt": vmin, vmax = 0, 100
 
@@ -1898,13 +1867,12 @@ class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize prem !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_prem(self, type="targets", geotherms=["low", "mid", "high"],
+    def _visualize_prem(self, sids, type="targets", geotherms=["low", "mid", "high"],
                         figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
         # Get model data
         res = self.res
-        sids = self.sids
         P_min = self.P_min
         P_max = self.P_max
         fig_dir = self.fig_dir
@@ -1963,7 +1931,7 @@ class RocMLM:
 
         try:
             for s, sid in enumerate(sids):
-                if verbose >= 1: print(f"Visualizing {model_prefix}-{sid} ...")
+                if verbose >= 1: print(f"  Visualizing {model_prefix}-{sid} ...")
 
                 # Slice arrays
                 feature_array = feature_arrays[s, :, :, :]
@@ -1971,9 +1939,6 @@ class RocMLM:
                 pred_array = pred_arrays[s, :, :, :]
 
                 for i, target in enumerate(training_targets):
-                    # Rename target
-                    target_rename = target.replace("_", "-")
-
                     # Get 2d arrays
                     P = feature_array[:, :, 0 + n_feats]
                     T = feature_array[:, :, 1 + n_feats]
@@ -1991,7 +1956,7 @@ class RocMLM:
                     if np.all(np.isnan(square_array)):
                         square_array = np.nan_to_num(square_array)
 
-                    filename = f"{model_prefix}-{sid}-{target_rename}-prem.png"
+                    filename = f"{model_prefix}-{sid}-{target}-prem.png"
 
                     if target in ["rho", "Vp", "Vs"]:
                         # Get 1D reference model profiles
@@ -2141,15 +2106,22 @@ class RocMLM:
     def visualize_model(self):
         """
         """
+        # Get self attributes
+        S = self.shape_feature_square[0]
+        W = self.shape_feature_square[1]
+
+        # Only visualize largets models
+        if S < 323 and W < 129: return None
+
         try:
-            if not self._check_model_array_images(type="targets"):
-                self._visualize_array_image(type="targets")
-            if not self._check_model_array_images(type="predictions"):
-                self._visualize_array_image(type="predictions")
-            if not self._check_model_array_images(type="diff"):
-                self._visualize_array_image(type="diff")
-            if not self._check_model_prem_images():
-                self._visualize_prem()
+            sids = self._check_rocmlm_images(type="targets")
+            if sids: self._visualize_array_image(sids, type="targets")
+            sids = self._check_rocmlm_images(type="predictions")
+            if sids: self._visualize_array_image(sids, type="predictions")
+            sids = self._check_rocmlm_images(type="diff")
+            if sids: self._visualize_array_image(sids, type="diff")
+            sids = self._check_rocmlm_images(type="prem")
+            if sids: self._visualize_prem(sids)
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in visualize_model() !!!")
@@ -2168,11 +2140,11 @@ class RocMLM:
     def train_rocmlm(self):
         """
         """
+        # Check for pretrained model
+        if self.ml_model_trained:
+            return None
         max_retries = 3
         for retry in range(max_retries):
-            # Check for pretrained model
-            if self.ml_model_trained:
-                break
             try:
                 self._configure_rocmlm()
                 self._print_rocmlm_info()
@@ -2189,7 +2161,6 @@ class RocMLM:
                 model_size_mb = round(model_size / (1024 ** 2), 5)
                 self.cv_info["model_size_mb"] = model_size_mb
                 self._append_to_csv()
-
             except Exception as e:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"!!! ERROR in train_rocmlm() !!!")
@@ -2202,17 +2173,15 @@ class RocMLM:
                 else:
                     self.ml_model_training_error = True
                     self.ml_model_error = e
-
                     return None
-        try:
-            self.visualize_model()
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in train_rocmlm() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-
+            try:
+                self.visualize_model()
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in train_rocmlm() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
         return None
 
 #######################################################
@@ -2304,154 +2273,169 @@ def combine_plots_vertically(image1_path, image2_path, output_path, caption1, ca
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compose rocmlm img3 itr !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compose_rocmlm_img3_itr(args):
+    # Unpack args
+    sid, target, rocmlm = args
+
+    # Get rocmlm attributes
+    fig_dir = rocmlm.fig_dir
+    verbose = rocmlm.verbose
+    model_prefix = rocmlm.model_prefix
+    ml_model_label = rocmlm.ml_model_label
+    training_targets = rocmlm.training_targets
+
+    # Unique pid
+    pid = os.getpid()
+
+    # Define temp paths
+    temp = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
+
+    # Define fig paths
+    fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
+    fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
+    fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
+    fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
+
+    # Define composition paths
+    img3_diff = f"{fig_dir}/image3-{sid}-{ml_model_label}-{target}-diff.png"
+    img3_prof = f"{fig_dir}/image3-{sid}-{ml_model_label}-{target}-profile.png"
+
+    # Check for existing plots
+    fig_1 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-diff.png"
+    fig_2 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-profile.png"
+    if (os.path.exists(fig_1) and os.path.exists(fig_2)):
+        if os.path.exists(temp): os.remove(temp)
+        return None
+
+    if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
+
+    # Image3 diff
+    combine_plots_horizontally(fig_trg, fig_pred, temp, caption1="a)", caption2="b)")
+    combine_plots_horizontally(temp, fig_diff, img3_diff, caption1="", caption2="c)")
+
+    # Image3 profile
+    combine_plots_horizontally(fig_trg, fig_pred, temp, caption1="a)", caption2="b)")
+    combine_plots_horizontally(temp, fig_prem, img3_prof, caption1="", caption2="c)")
+
+    # Clean up temporary files created by this worker
+    if os.path.exists(temp): os.remove(temp)
+
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compose rocmlm img9 itr !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compose_rocmlm_img9_itr(args):
+    # Unpack args
+    sid, rocmlm = args
+
+    # Get rocmlm attributes
+    fig_dir = rocmlm.fig_dir
+    verbose = rocmlm.verbose
+    model_prefix = rocmlm.model_prefix
+    ml_model_label = rocmlm.ml_model_label
+    training_targets = rocmlm.training_targets
+
+    # Unique pid
+    pid = os.getpid()
+
+    # Define temp paths
+    temp = f"{fig_dir}/temp-{pid}-{sid}.png"
+    temp_rho = f"{fig_dir}/temp-rho-{pid}-{sid}.png"
+    temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
+    temp_h2o = f"{fig_dir}/temp-h2o-{pid}-{sid}.png"
+
+    # Define composition paths
+    img9_diff = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
+    img9_prof = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
+
+    # Check for existing plots
+    fig_1 = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
+    fig_2 = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
+    if (os.path.exists(fig_1) and os.path.exists(fig_2)):
+        for file in [temp, temp_rho, temp_melt, temp_h2o]:
+            if os.path.exists(file): os.remove(file)
+        return None
+
+    # Image9 diff
+    captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
+    for i, target in enumerate(training_targets):
+        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
+        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
+        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
+        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
+        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
+        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
+        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
+        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
+                                   caption2=captions[i][1])
+        combine_plots_horizontally(temp1, fig_diff, temp2, caption1="",
+                                   caption2=captions[i][2])
+
+    combine_plots_vertically(temp_rho, temp_melt, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_h2o, img9_diff, caption1="", caption2="")
+
+    for i, target in enumerate(training_targets):
+        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
+        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
+        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
+        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
+        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
+        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
+        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
+        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
+                                   caption2=captions[i][1])
+        combine_plots_horizontally(temp1, fig_prem, temp2, caption1="",
+                                   caption2=captions[i][2])
+
+    combine_plots_vertically(temp_rho, temp_melt, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_h2o, img9_prof, caption1="", caption2="")
+
+    # Clean up temporary files created by this worker
+    for file in [temp, temp1, temp2, temp_rho, temp_melt, temp_h2o]:
+        if os.path.exists(file): os.remove(file)
+
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # compose rocmlm plots !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def compose_rocmlm_plots(rocmlm):
     """
     """
-    # Get ml model attributes
-    res = rocmlm.res
+    # Get rocmlm attributes
     sids = rocmlm.sids
+    nprocs = rocmlm.nprocs
     fig_dir = rocmlm.fig_dir
-    verbose = rocmlm.verbose
-    fig_dir_perf = "figs/rocmlm"
-    model_prefix = rocmlm.model_prefix
-    ml_model_label = rocmlm.ml_model_label
     training_targets = rocmlm.training_targets
 
-    # Rename targets
-    targets_rename = [target.replace("_", "-") for target in training_targets]
+    # Create list of args for mp pooling
+    args_img3 = [(sid, target, rocmlm) for sid in sids for target in training_targets]
+    args_img9 = [(sid, rocmlm) for sid in sids]
 
-    # Check for existing plots
-    existing_figs = []
-    for target in targets_rename:
-        for sid in sids:
-            fig_1 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-diff.png"
-            fig_2 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-profile.png"
-            fig_3 = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
-            fig_4 = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
-            check = (os.path.exists(fig_1) and os.path.exists(fig_2) and
-                     os.path.exists(fig_3) and os.path.exists(fig_4))
-            if check: existing_figs.append(check)
-    if existing_figs: return None
+    print("Composing RocMLM plots for samples:")
+    print(sids)
 
-    for sid in sids:
-        for target in targets_rename:
-            if verbose >= 1:
-                print(f"Composing {model_prefix}-{sid}-{target} ...")
+    # Create a multiprocessing pool
+    with mp.Pool(processes=nprocs) as pool:
+        pool.map(compose_rocmlm_img3_itr, args_img3)
 
-            combine_plots_horizontally(
-                f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
-                f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
-                f"{fig_dir}/temp1.png",
-                caption1="a)",
-                caption2="b)"
-            )
+        # Wait for all processes
+        pool.close()
+        pool.join()
 
-            combine_plots_horizontally(
-                f"{fig_dir}/temp1.png",
-                f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png",
-                f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-diff.png",
-                caption1="",
-                caption2="c)"
-            )
+    # Create a multiprocessing pool
+    with mp.Pool(processes=nprocs) as pool:
+        pool.map(compose_rocmlm_img9_itr, args_img9)
 
-            combine_plots_horizontally(
-                f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
-                f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
-                f"{fig_dir}/temp1.png",
-                caption1="a)",
-                caption2="b)"
-            )
+        # Wait for all processes
+        pool.close()
+        pool.join()
 
-            combine_plots_horizontally(
-                f"{fig_dir}/temp1.png",
-                f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png",
-                f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-profile.png",
-                caption1="",
-                caption2="c)"
-            )
-
-            if all(item in targets_rename for item in ["rho", "melt", "h2o"]):
-                captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-                targets = ["rho", "melt", "h2o"]
-
-                for i, target in enumerate(targets):
-                    combine_plots_horizontally(
-                        f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
-                        f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
-                        f"{fig_dir}/temp1.png",
-                        caption1=captions[i][0],
-                        caption2=captions[i][1]
-                    )
-
-                    combine_plots_horizontally(
-                        f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png",
-                        f"{fig_dir}/temp-{target}.png",
-                        caption1="",
-                        caption2=captions[i][2]
-                    )
-
-                combine_plots_vertically(
-                    f"{fig_dir}/temp-rho.png",
-                    f"{fig_dir}/temp-melt.png",
-                    f"{fig_dir}/temp1.png",
-                    caption1="",
-                    caption2=""
-                )
-
-                combine_plots_vertically(
-                    f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/temp-h2o.png",
-                    f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png",
-                    caption1="",
-                    caption2=""
-                )
-
-            if all(item in targets_rename for item in ["rho", "melt", "h2o"]):
-                captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-                targets = ["rho", "melt", "h2o"]
-
-                for i, target in enumerate(targets):
-                    combine_plots_horizontally(
-                        f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png",
-                        f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png",
-                        f"{fig_dir}/temp1.png",
-                        caption1=captions[i][0],
-                        caption2=captions[i][1]
-                    )
-
-                    combine_plots_horizontally(
-                        f"{fig_dir}/temp1.png",
-                        f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png",
-                        f"{fig_dir}/temp-{target}.png",
-                        caption1="",
-                        caption2=captions[i][2]
-                    )
-
-                combine_plots_vertically(
-                    f"{fig_dir}/temp-rho.png",
-                    f"{fig_dir}/temp-melt.png",
-                    f"{fig_dir}/temp1.png",
-                    caption1="",
-                    caption2=""
-                )
-
-                combine_plots_vertically(
-                    f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/temp-h2o.png",
-                    f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png",
-                    caption1="",
-                    caption2=""
-                )
-
-    # Clean up directory
-    rocmlm_files = glob.glob(f"{fig_dir}/{model_prefix}*.png")
     tmp_files = glob.glob(f"{fig_dir}/temp*.png")
-
-    for file in rocmlm_files + tmp_files:
-        os.remove(file)
+    for file in tmp_files: os.remove(file)
 
     return None
 

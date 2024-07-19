@@ -25,7 +25,7 @@ def main():
 
     # Train RocMLMs
     for name, models in training_data.items():
-        rocmlms[name] = train_rocmlms(models, ["DT"])
+        rocmlms[name] = train_rocmlms(models, ["DT", "KN", "NN1", "NN2", "NN3"])
 
 #    # Visualize RocMLMs
 #    visualize_rocmlm_performance()
