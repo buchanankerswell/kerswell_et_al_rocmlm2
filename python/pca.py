@@ -8,13 +8,9 @@ import os
 import math
 import warnings
 import traceback
-from scipy import stats
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# dataframes and arrays !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!

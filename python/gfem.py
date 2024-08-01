@@ -3572,7 +3572,7 @@ def compose_itr(gfem_model, clean=False):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # visualize prem comps !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
+def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.8, fontsize=28):
     """
     """
     warnings.simplefilter("ignore", category=UserWarning)
@@ -3606,7 +3606,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
     # Colormap
     colormap = plt.colormaps["tab10"]
 
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(figwidth * 2, figheight))
+    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(figwidth * 3, figheight))
 
     for j, model in enumerate(gfem_models):
         # Get gfem model data
@@ -3622,7 +3622,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
         target_units = model.target_units
 
         # Filter targets for PREM
-        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "h2o"]]
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "h2o", "melt"]]
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
 
@@ -3660,7 +3660,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
             # Create colorbar
             pal = sns.color_palette("magma", as_cmap=True).reversed()
             norm = plt.Normalize(df_synth_bench[XI_col].min(), df_synth_bench[XI_col].max())
-            sm = plt.ScalarMappable(cmap="magma_r", norm=norm)
+            sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
             sm.set_array([])
 
             ax = axes[i]
@@ -3693,7 +3693,10 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
             else:
                 target_label = target
 
-            ax.set_ylabel("P (GPa)")
+            if i != 0:
+                ax.set_ylabel("")
+            else:
+                ax.set_ylabel("P (GPa)")
 
             if target not in ["assemblage", "variance"]:
                 ax.set_xlabel(f"{target_label} ({target_units[i]})")
@@ -3712,7 +3715,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
             depth_conversion = lambda P: P * 30
             depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
 
-            if i == 1:
+            if i == 2:
                 # Create the secondary y-axis and plot depth on it
                 ax2 = ax.secondary_yaxis(
                     "right", functions=(depth_conversion, depth_conversion))
@@ -3724,8 +3727,9 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.3, fontsize=22):
                 colorbar.ax.set_xticks([sm.get_clim()[0], sm.get_clim()[1]])
                 colorbar.ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.2g"))
 
-    fig.text(0.02, 0.96, "a)", fontsize=fontsize * 1.4)
-    fig.text(0.47, 0.96, "b)", fontsize=fontsize * 1.4)
+    fig.text(0.00, 0.98, "a)", fontsize=fontsize * 1.4)
+    fig.text(0.33, 0.98, "b)", fontsize=fontsize * 1.4)
+    fig.text(0.63, 0.98, "c)", fontsize=fontsize * 1.4)
 
     # Save the plot to a file
     filename = f"prem-comps-{perplex_db}.png"
@@ -3807,7 +3811,7 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp633", res=128, Pmin=
         raise Exception(f"Source {source} does not exist!")
 
     models = []
-    print("Building GFEM models for samples:")
+    print(f"Building GFEM models for {len(sampleids)} samples:")
     print(sampleids)
 
     # Define number of processors

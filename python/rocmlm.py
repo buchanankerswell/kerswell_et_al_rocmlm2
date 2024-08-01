@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import multiprocessing as mp
-from gfem import get_sampleids, build_gfem_models
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
@@ -32,6 +31,7 @@ from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_squared_error, r2_score
 
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", category=UserWarning, message=".*tight_layout.*")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
@@ -117,7 +117,7 @@ class RocMLM:
         # Output filepaths
         self.data_dir = "assets/data"
         self.model_out_dir = f"rocmlms"
-        if any(sample in self.sids for sample in ["PUM", "DMM", "PYR"]):
+        if any(s in self.sids for s in ["PUM", "DMM", "PYR"]):
             self.model_prefix = (f"benchmark-{self.ml_model_label}-"
                                  f"S{self.shape_feature_square[0]}-"
                                  f"W{self.shape_feature_square[1]}")
@@ -387,7 +387,6 @@ class RocMLM:
                 self.feature_train = feature_train
                 self.shape_target_square = shape_target_square
                 self.shape_feature_square = shape_feature_square
-
             else:
                 # Reshape arrays
                 new_feature_train = feature_train.reshape((shape_feature_square))
@@ -721,7 +720,7 @@ class RocMLM:
         target_train = self.target_train
 
         # Check benchmark models
-        if any(sample in sids for sample in ["PUM", "DMM", "PYR"]):
+        if any(s in sids for s in ["PUM", "DMM", "PYR"]):
             return None
 
         # Check for gfem models
@@ -749,9 +748,9 @@ class RocMLM:
             sample, model_label, size, eval_time, model_size_mb = [], [], [], [], []
 
             # Subset grid
-            X_sub = X[::X_step]
             P_sub = P[::PT_step]
             T_sub = T[::PT_step]
+            X_sub = X[::X_step]
 
             # Initialize eval times
             eval_times = []
@@ -1163,7 +1162,7 @@ class RocMLM:
         inference_time_std = np.std(inference_times)
 
         # Get sample label
-        if any(sample in sids for sample in ["PUM", "DMM", "PYR"]):
+        if any(s in sids for s in ["PUM", "DMM", "PYR"]):
             sample_label = "benchmark"
         elif any("sm" in sample or "sr" in sample for sample in sids):
             sample_label = f"SYNTH{M}"
@@ -1767,11 +1766,11 @@ class RocMLM:
                             # Set rho to 1.8–4.6 g/cm3
                             if target == "rho": vmin, vmax = 1.8, 4.6
 
-                            # Set melt fraction to 0–100 vol.%
-                            if target == "melt": vmin, vmax = 0, 100
-
                             # Set h2o fraction to 0–100 wt.%
                             if target == "h2o": vmin, vmax = 0, 5
+
+                            # Set melt fraction to 0–100 vol.%
+                            if target == "melt": vmin, vmax = 0, 100
 
                         # Set nan color
                         cmap = plt.colormaps[cmap]
@@ -1819,10 +1818,10 @@ class RocMLM:
                         # Set colorbar limits and number formatting
                         if target == "rho":
                             cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
-                        elif target == "melt":
-                            cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                         elif target == "h2o":
                             cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                        elif target == "melt":
+                            cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                         elif target == "assemblage":
                             cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                         elif target == "variance":
@@ -2107,27 +2106,30 @@ class RocMLM:
         """
         """
         # Get self attributes
+        sids = self.sids
         S = self.shape_feature_square[0]
         W = self.shape_feature_square[1]
 
         # Only visualize largets models
-        if S < 323 and W < 129: return None
-
-        try:
-            sids = self._check_rocmlm_images(type="targets")
-            if sids: self._visualize_array_image(sids, type="targets")
-            sids = self._check_rocmlm_images(type="predictions")
-            if sids: self._visualize_array_image(sids, type="predictions")
-            sids = self._check_rocmlm_images(type="diff")
-            if sids: self._visualize_array_image(sids, type="diff")
-            sids = self._check_rocmlm_images(type="prem")
-            if sids: self._visualize_prem(sids)
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in visualize_model() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+        if ((S == 323 and W == 129) or
+            (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+            try:
+                sids = self._check_rocmlm_images(type="targets")
+                if sids: self._visualize_array_image(sids, type="targets")
+                sids = self._check_rocmlm_images(type="predictions")
+                if sids: self._visualize_array_image(sids, type="predictions")
+                sids = self._check_rocmlm_images(type="diff")
+                if sids: self._visualize_array_image(sids, type="diff")
+                sids = self._check_rocmlm_images(type="prem")
+                if sids: self._visualize_prem(sids, type="predictions")
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in visualize_model() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
+        else:
+            return None
 
         return None
 
@@ -2344,8 +2346,8 @@ def compose_rocmlm_img9_itr(args):
     # Define temp paths
     temp = f"{fig_dir}/temp-{pid}-{sid}.png"
     temp_rho = f"{fig_dir}/temp-rho-{pid}-{sid}.png"
-    temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
     temp_h2o = f"{fig_dir}/temp-h2o-{pid}-{sid}.png"
+    temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
 
     # Define composition paths
     img9_diff = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
@@ -2355,7 +2357,7 @@ def compose_rocmlm_img9_itr(args):
     fig_1 = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
     fig_2 = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
     if (os.path.exists(fig_1) and os.path.exists(fig_2)):
-        for file in [temp, temp_rho, temp_melt, temp_h2o]:
+        for file in [temp, temp_rho, temp_h2o, temp_melt]:
             if os.path.exists(file): os.remove(file)
         return None
 
@@ -2374,8 +2376,8 @@ def compose_rocmlm_img9_itr(args):
         combine_plots_horizontally(temp1, fig_diff, temp2, caption1="",
                                    caption2=captions[i][2])
 
-    combine_plots_vertically(temp_rho, temp_melt, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_h2o, img9_diff, caption1="", caption2="")
+    combine_plots_vertically(temp_rho, temp_h2o, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_melt, img9_diff, caption1="", caption2="")
 
     for i, target in enumerate(training_targets):
         if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
@@ -2390,11 +2392,11 @@ def compose_rocmlm_img9_itr(args):
         combine_plots_horizontally(temp1, fig_prem, temp2, caption1="",
                                    caption2=captions[i][2])
 
-    combine_plots_vertically(temp_rho, temp_melt, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_h2o, img9_prof, caption1="", caption2="")
+    combine_plots_vertically(temp_rho, temp_h2o, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_melt, img9_prof, caption1="", caption2="")
 
     # Clean up temporary files created by this worker
-    for file in [temp, temp1, temp2, temp_rho, temp_melt, temp_h2o]:
+    for file in [temp, temp1, temp2, temp_rho, temp_h2o, temp_melt]:
         if os.path.exists(file): os.remove(file)
 
     return None
@@ -2409,33 +2411,40 @@ def compose_rocmlm_plots(rocmlm):
     sids = rocmlm.sids
     nprocs = rocmlm.nprocs
     fig_dir = rocmlm.fig_dir
+    S = rocmlm.shape_feature_square[0]
+    W = rocmlm.shape_feature_square[1]
     training_targets = rocmlm.training_targets
 
-    # Create list of args for mp pooling
-    args_img3 = [(sid, target, rocmlm) for sid in sids for target in training_targets]
-    args_img9 = [(sid, rocmlm) for sid in sids]
+    # Only visualize largets models
+    if ((S == 323 and W == 129) or
+        (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+        # Create list of args for mp pooling
+        args_img3 = [(sid, target, rocmlm) for sid in sids for target in training_targets]
+        args_img9 = [(sid, rocmlm) for sid in sids]
 
-    print("Composing RocMLM plots for samples:")
-    print(sids)
+        print(f"Composing RocMLM plots for {len(sids)} samples:")
+        print(sids)
 
-    # Create a multiprocessing pool
-    with mp.Pool(processes=nprocs) as pool:
-        pool.map(compose_rocmlm_img3_itr, args_img3)
+        # Create a multiprocessing pool
+        with mp.Pool(processes=nprocs) as pool:
+            pool.map(compose_rocmlm_img3_itr, args_img3)
 
-        # Wait for all processes
-        pool.close()
-        pool.join()
+            # Wait for all processes
+            pool.close()
+            pool.join()
 
-    # Create a multiprocessing pool
-    with mp.Pool(processes=nprocs) as pool:
-        pool.map(compose_rocmlm_img9_itr, args_img9)
+        # Create a multiprocessing pool
+        with mp.Pool(processes=nprocs) as pool:
+            pool.map(compose_rocmlm_img9_itr, args_img9)
 
-        # Wait for all processes
-        pool.close()
-        pool.join()
+            # Wait for all processes
+            pool.close()
+            pool.join()
 
-    tmp_files = glob.glob(f"{fig_dir}/temp*.png")
-    for file in tmp_files: os.remove(file)
+        tmp_files = glob.glob(f"{fig_dir}/temp*.png")
+        for file in tmp_files: os.remove(file)
+    else:
+        return None
 
     return None
 
@@ -2454,7 +2463,19 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
         os.makedirs(fig_dir, exist_ok=True)
 
     # Read gfem efficiency data
-    data_gfem = pd.read_csv(f"{data_dir}/gfem-efficiency.csv")
+    gfem_summaries = os.listdir(f"{data_dir}/gfem_summaries")
+    csv_files = [f for f in gfem_summaries if f.endswith(".csv")]
+
+    gfem_dfs = []
+    for file in csv_files:
+        file_path = os.path.join(f"{data_dir}/gfem_summaries", file)
+        df = pd.read_csv(file_path)
+        gfem_dfs.append(df)
+
+    data_gfem = pd.concat(gfem_dfs, ignore_index=True)
+    data_gfem = data_gfem[data_gfem["DATABASE"] == "hp633"]
+
+    data_gfem.rename(columns={"COMP_TIME": "time", "SIZE": "size"}, inplace=True)
     data_gfem["time"] = data_gfem["time"] / data_gfem["size"]
 
     # Get Perple_X program size
@@ -2472,15 +2493,19 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     # Calculate efficiency in milliseconds/Megabyte
     data_gfem["model_size_mb"] = round(perplex_size / (1024 ** 2), 5)
     data_gfem["model_efficiency"] = data_gfem["time"] * 1e3 * data_gfem["model_size_mb"]
-    data_gfem = data_gfem[data_gfem["program"] == "perplex"]
+
+    # Add RMSE
+    data_gfem["rmse_test_mean_rho"] = 0
+    data_gfem["rmse_test_mean_h2o"] = 0
+    data_gfem["rmse_test_mean_melt"] = 0
 
     # Read lookup table efficiency data
     data_lut = pd.read_csv(f"{data_dir}/lut-efficiency.csv")
 
     # Add RMSE
-    data_lut["rmse_val_mean_rho"] = 0
-    data_lut["rmse_val_mean_Vp"] = 0
-    data_lut["rmse_val_mean_Vs"] = 0
+    data_lut["rmse_test_mean_rho"] = 0
+    data_lut["rmse_test_mean_h2o"] = 0
+    data_lut["rmse_test_mean_melt"] = 0
 
     # Calculate efficiency in milliseconds/Megabyte
     data_lut["model_efficiency"] = data_lut["time"] * 1e3 * data_lut["model_size_mb"]
@@ -2489,21 +2514,15 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     data_rocmlm = pd.read_csv(f"{data_dir}/rocmlm-performance.csv")
 
     # Process rocmlm df for merging
-    data_rocmlm.drop([col for col in data_rocmlm.columns if "training" in col],
-                     axis=1, inplace=True)
-    data_rocmlm.drop([col for col in data_rocmlm.columns if "rmse_test" in col],
-                     axis=1, inplace=True)
-    data_rocmlm.drop([col for col in data_rocmlm.columns if "rmse_val_std" in col],
-                     axis=1, inplace=True)
     data_rocmlm.drop([col for col in data_rocmlm.columns if "r2" in col],
                      axis=1, inplace=True)
+    data_rocmlm.drop(["n_targets", "k_folds", "inference_time_std"], axis=1, inplace=True)
 
     # Combine model with rocmlm
     def label_rocmlm_model(row):
         return f"RocMLM ({row["model"]})"
 
-    data_rocmlm["program"] = data_rocmlm.apply(label_rocmlm_model, axis=1)
-    data_rocmlm.drop(["n_targets", "k_folds", "inference_time_std"], axis=1, inplace=True)
+    data_rocmlm["model"] = data_rocmlm.apply(label_rocmlm_model, axis=1)
     data_rocmlm.rename(columns={"inference_time_mean": "time"}, inplace=True)
 
     # Calculate efficiency in milliseconds/Megabyte
@@ -2511,28 +2530,29 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
                                        data_rocmlm["model_size_mb"])
 
     # Select columns
-    data_rocmlm = data_rocmlm[["sample", "program", "size", "time",
-                               "model_size_mb", "model_efficiency", "rmse_val_mean_rho",
-                               "rmse_val_mean_Vp", "rmse_val_mean_Vs"]]
+    data_rocmlm = data_rocmlm[["sample", "model", "size", "time",
+                               "model_size_mb", "model_efficiency", "rmse_test_mean_rho",
+                               "rmse_test_mean_h2o", "rmse_test_mean_melt"]]
 
     # Combine data
     data = pd.concat([data_lut, data_rocmlm], axis=0, ignore_index=True)
 
-    # Relabel programs
-    def label_programs(row):
-        if row["program"] == "perplex":
+    # Relabel models
+    def label_models(row):
+        if row["model"] == "gfem":
             return "Perple_X"
-        elif row["program"] == "lut":
+        elif row["model"] == "lut":
             return "Lookup Table"
         else:
-            return row["program"]
+            return row["model"]
 
-    data["program"] = data.apply(label_programs, axis=1)
+    data["model"] = data.apply(label_models, axis=1)
 
-    # Filter samples and programs
-    data = data[data["sample"].isin(["SYNTH129", "SYNTH65", "SYNTH33", "SYNTH11"])]
-    data = data[data["program"].isin(["Lookup Table", "RocMLM (DT)", "RocMLM (KN)",
-                                      "RocMLM (NN1)", "RocMLM (NN3)"])]
+    # Filter samples and models
+    data = data[data["sample"].isin(["SYNTH323", "SYNTH162", "SYNTH81", "SYNTH41",
+                                     "SYNTH21"])]
+    data = data[data["model"].isin(["Lookup Table", "RocMLM (DT)", "RocMLM (KN)",
+                                    "RocMLM (NN1)", "RocMLM (NN3)"])]
 
     # Get X resolution
     def get_x_res(row):
@@ -2549,20 +2569,20 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     data["size"] = np.log2(data["size"] * data["x_res"]).astype(int)
 
     # Arrange data by resolution and sample
-    data.sort_values(by=["size", "sample", "program"], inplace=True)
+    data.sort_values(by=["size", "sample", "model"], inplace=True)
 
-    # Group by size and select min time
-    grouped_data = data.groupby(["program", "size"])
-    min_time_indices = grouped_data["time"].idxmin()
-    data = data.loc[min_time_indices]
-    data.reset_index(drop=True, inplace=True)
+#    # Group by size and select min time
+#    grouped_data = data.groupby(["model", "size"])
+#    min_time_indices = grouped_data["time"].idxmin()
+#    data = data.loc[min_time_indices]
+#    data.reset_index(drop=True, inplace=True)
 
     # Compute summary statistics
-    summary_stats = data.groupby(["program"]).agg({
+    summary_stats = data.groupby(["model"]).agg({
         "time": ["mean", "std", "min", "max"],
-        "rmse_val_mean_rho": ["mean", "std", "min", "max"],
-        "rmse_val_mean_Vp": ["mean", "std", "min", "max"],
-        "rmse_val_mean_Vs": ["mean", "std", "min", "max"],
+        "rmse_test_mean_rho": ["mean", "std", "min", "max"],
+        "rmse_test_mean_h2o": ["mean", "std", "min", "max"],
+        "rmse_test_mean_melt": ["mean", "std", "min", "max"],
         "model_efficiency": ["mean", "std", "min", "max"]
     })
     summary_stats_gfem = data_gfem.agg({
@@ -2595,21 +2615,21 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     plt.rcParams["legend.fontsize"] = "small"
     plt.rcParams["figure.autolayout"] = "True"
 
-    # Define marker types for each program
+    # Define marker types for each model
     marker_dict = {"Lookup Table": "o", "RocMLM (DT)": "d", "RocMLM (KN)": "s",
                    "RocMLM (NN1)": "X", "RocMLM (NN3)": "^"}
 
     # Create a colormap
-    palette = sns.color_palette("mako_r", data["rmse_val_mean_rho"].nunique())
+    palette = sns.color_palette("mako_r", data["rmse_test_mean_rho"].nunique())
     cmap = plt.get_cmap("mako_r")
 
     # Create a ScalarMappable to map rmse to colors
-    norm = Normalize(data["rmse_val_mean_rho"].min(), data["rmse_val_mean_rho"].max())
-    sm = plt.ScalarMappable(cmap=cmap, norm=norm)
+    norm = Normalize(data["rmse_test_mean_rho"].min(), data["rmse_test_mean_rho"].max())
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
 
     # Map X resolution to colors
-    color_dict = dict(zip(sorted(data["rmse_val_mean_rho"].unique()),
-                          cmap(norm(sorted(data["rmse_val_mean_rho"].unique())))))
+    color_dict = dict(zip(sorted(data["rmse_test_mean_rho"].unique()),
+                          cmap(norm(sorted(data["rmse_test_mean_rho"].unique())))))
 
     fig = plt.figure(figsize=(figwidth * 2, figheight))
     ax = fig.add_subplot(121)
@@ -2618,69 +2638,62 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     ax.fill_between(data["size"], data_gfem["time"].min() * 1e3,
                     data_gfem["time"].max() * 1e3, facecolor="white", edgecolor="black")
 
-    plt.text(data["size"].min(), data_gfem["time"].min() * 1e3, "Perple_X",
-             fontsize=fontsize * 0.833, horizontalalignment="left",
-             verticalalignment="bottom")
-    plt.text(data["size"].min(), data_gfem["time"].min() * 1e3 * 1.2,
-             " [stx21, NCFMAS, 15]", fontsize=fontsize * 0.833,
+    plt.text(data["size"].min(), data_gfem["time"].max() * 1e3 * 0.9,
+             " GFEM [Perple_X]", fontsize=fontsize * 0.833,
              horizontalalignment="left", verticalalignment="top")
-    plt.text(data["size"].min(), data_gfem["time"].max() * 1e3 * 0.80,
-             " [hp633, KNCFMASTCr, 21]", fontsize=fontsize * 0.833,
-             horizontalalignment="left", verticalalignment="bottom")
 
     # Plot rocmlm efficiency
-    for program, group in data.groupby("program"):
-        for rmse, sub_group in group.groupby("rmse_val_mean_rho"):
-            if program in ["RocMLM (DT)", "RocMLM (KN)", "RocMLM (NN1)", "RocMLM (NN3)"]:
+    for model, group in data.groupby("model"):
+        for rmse, sub_group in group.groupby("rmse_test_mean_rho"):
+            if model in ["RocMLM (DT)", "RocMLM (KN)", "RocMLM (NN1)", "RocMLM (NN3)"]:
                 ax.scatter(x=sub_group["size"], y=(sub_group["time"] * 1e3),
-                           marker=marker_dict.get(program, "o"), s=65,
+                           marker=marker_dict.get(model, "o"), s=65,
                            color=color_dict[rmse], edgecolor="black", zorder=2)
             else:
                 ax.scatter(x=sub_group["size"], y=(sub_group["time"] * 1e3),
-                           marker=marker_dict.get(program, "o"), s=65,
-                           color="pink", edgecolor="black", zorder=2)
+                           marker=marker_dict.get(model, "o"), s=65,
+                           color="pink", edgecolor="black", zorder=99)
 
     # Set labels and title
     plt.xlabel("Log2 Capacity")
     plt.ylabel("Elapsed Time (ms)")
     plt.title("Execution Speed")
     plt.yscale("log")
-    plt.gca().invert_yaxis()
-    plt.xticks(np.arange(11, 22, 2))
+    plt.xticks(np.arange(10, 23, 2))
 
     ax2 = fig.add_subplot(122)
 
     # Plot gfem efficiency
-    ax2.fill_between(data["size"], data_gfem["model_efficiency"].min(),
-                     data_gfem["model_efficiency"].max(), facecolor="white",
+    ax2.fill_between(data["size"], data_gfem["model_size_mb"].min(),
+                     data_gfem["model_size_mb"].max(), facecolor="white",
                      edgecolor="black")
 
     # Plot lut and rocmlm efficiency
-    for program, group in data.groupby("program"):
-        for rmse, sub_group in group.groupby("rmse_val_mean_rho"):
-            if program in ["RocMLM (DT)", "RocMLM (KN)", "RocMLM (NN1)", "RocMLM (NN3)"]:
-                ax2.scatter(x=sub_group["size"], y=sub_group["model_efficiency"],
-                            marker=marker_dict.get(program, "o"), s=65,
+    for model, group in data.groupby("model"):
+        for rmse, sub_group in group.groupby("rmse_test_mean_rho"):
+            if model in ["RocMLM (DT)", "RocMLM (KN)", "RocMLM (NN1)", "RocMLM (NN3)"]:
+                ax2.scatter(x=sub_group["size"], y=sub_group["model_size_mb"],
+                            marker=marker_dict.get(model, "o"), s=65,
                             color=color_dict[rmse], edgecolor="black", zorder=2)
             else:
-                ax2.scatter(x=sub_group["size"], y=sub_group["model_efficiency"],
-                            marker=marker_dict.get(program, "o"), s=65,
-                            color="pink", edgecolor="black", zorder=2)
+                ax2.scatter(x=sub_group["size"], y=sub_group["model_size_mb"],
+                            marker=marker_dict.get(model, "o"), s=65,
+                            color="pink", edgecolor="black", zorder=99)
 
     # Create the legend
     legend_elements = []
-    for program, marker in marker_dict.items():
-        if program in ["RocMLM (DT)", "RocMLM (KN)", "RocMLM (NN1)", "RocMLM (NN3)"]:
+    for model, marker in marker_dict.items():
+        if model in ["RocMLM (DT)", "RocMLM (KN)", "RocMLM (NN1)", "RocMLM (NN3)"]:
             legend_elements.append(
                 mlines.Line2D(
-                    [0], [0], marker=marker, color="none", label=program,
+                    [0], [0], marker=marker, color="none", label=model,
                     markerfacecolor="black", markersize=10)
             )
         else:
             legend_elements.append(
                 mlines.Line2D(
                     [0], [0], marker=marker, color="none", markeredgecolor="black",
-                    label=program, markerfacecolor="pink", markersize=10)
+                    label=model, markerfacecolor="pink", markersize=10)
             )
 
     fig.legend(handles=legend_elements, title="Method", loc="center right", ncol=1,
@@ -2695,11 +2708,10 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
 
     # Set labels and title
     plt.xlabel("Log2 Capacity")
-    plt.ylabel("Inefficiency (ms$\\cdot$Mb)")
-    plt.title("Model Efficiency")
+    plt.ylabel("Size (Mb)")
+    plt.title("Model Size")
     plt.yscale("log")
-    plt.gca().invert_yaxis()
-    plt.xticks(np.arange(11, 22, 2))
+    plt.xticks(np.arange(10, 23, 2))
 
     # Add captions
     fig.text(0.025, 0.92, "a)", fontsize=fontsize * 1.3)
@@ -2733,35 +2745,41 @@ def train_rocmlms(gfem_models, ml_models=["DT", "KN", "NN1", "NN2", "NN3"],
 
     # Single X step for benchmark models
     sids = [m.sid for m in gfem_models]
-    if any(sample in sids for sample in ["PUM", "DMM", "PYR"]):
+    if any(s in sids for s in ["PUM", "DMM", "PYR"]):
         X_steps = [1]
 
     # Train rocmlm models at various PTX grid resolution levels
-    rocmlms = []
-    for X_step in X_steps:
-        for PT_step in PT_steps:
-            mlms = []
-            for model in ml_models:
-                rocmlm = RocMLM(gfem_models, model, X_step, PT_step)
-                if rocmlm.ml_model_trained:
-                    pretrained_rocmlm = joblib.load(rocmlm.rocmlm_path)
-                    mlms.append(pretrained_rocmlm)
-                else:
-                    rocmlm.train_rocmlm()
-                    mlms.append(rocmlm)
-                    with open(rocmlm.rocmlm_path, "wb") as file:
-                        joblib.dump(rocmlm, file)
+    try:
+        rocmlms = []
+        for X_step in X_steps:
+            for PT_step in PT_steps:
+                mlms = []
+                for model in ml_models:
+                    rocmlm = RocMLM(gfem_models, model, X_step, PT_step)
+                    if rocmlm.ml_model_trained:
+                        pretrained_rocmlm = joblib.load(rocmlm.rocmlm_path)
+                        mlms.append(pretrained_rocmlm)
+                    else:
+                        rocmlm.train_rocmlm()
+                        mlms.append(rocmlm)
+                        with open(rocmlm.rocmlm_path, "wb") as file:
+                            joblib.dump(rocmlm, file)
 
-            # Compile rocmlms
-            rocmlms.extend(mlms)
+                # Compile rocmlms
+                rocmlms.extend(mlms)
+
+    except Exception as e:
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        print(f"!!! ERROR in train_rocmlms() !!!")
+        print(f"{e}")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        traceback.print_exc()
 
     # Check for errors in the models
     error_count = 0
-
     for model in rocmlms:
         if model.ml_model_training_error:
             error_count += 1
-
     if error_count > 0:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print(f"Total RocMLMs with errors: {error_count}")
@@ -2779,6 +2797,7 @@ def train_rocmlms(gfem_models, ml_models=["DT", "KN", "NN1", "NN2", "NN3"],
 def main():
     """
     """
+    from gfem import get_sampleids, build_gfem_models
     try:
         # Build GFEM models
         gfems = {}
@@ -2791,10 +2810,10 @@ def main():
             gfems[name] = build_gfem_models(source, sids)
 
         # Combine synthetic models for RocMLM training
-        rocmlms = {}
         training_data = {"b": gfems["b"], "s": gfems["m"] + gfems["r"]}
 
         # Train RocMLMs
+        rocmlms = {}
         for name, models in training_data.items():
             rocmlms[name] = train_rocmlms(models)
 
@@ -2802,9 +2821,8 @@ def main():
         visualize_rocmlm_performance()
 
         for name, models in rocmlms.items():
-            if name == "b":
-                for model in models:
-                    compose_rocmlm_plots(model)
+            for model in models:
+                compose_rocmlm_plots(model)
 
     except Exception as e:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
