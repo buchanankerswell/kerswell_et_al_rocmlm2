@@ -436,7 +436,6 @@ class HyMaTZ():
                             a, b, c = i.Vp_Vs(Pressure[number] * 1e5, Temperature[number])
                             c *= 1000
                             i.Store_Vp_Vs(a, b, c, phase[1], phase[num])
-
                 KGRho = Velocity_calculator(K, G, Rho, V)
                 self.K[number], self.G[number], self.Rho[number] = KGRho.Voigt_Reuss_Hill()
                 self.Vp[number] = (np.sqrt((self.K[number] + 4. * self.G[number] / 3.) /

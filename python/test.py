@@ -8,7 +8,7 @@ def main():
 #    model = GFEMModel("koma06", "sm000-loi000", "assets/data/synth-mids.csv")
     model = GFEMModel("hp633", "sm000-loi000", "assets/data/synth-mids.csv")
 #    model = GFEMModel("koma06", "sm000-loi010", "assets/data/synth-mids.csv")
-#    model = GFEMModel("hp633", "sm000-loi010", "assets/data/synth-mids.csv")
+    model = GFEMModel("hp633", "sm000-loi010", "assets/data/synth-mids.csv")
 #    model.visualize_model()
 
 #    gfems = {}

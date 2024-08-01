@@ -2895,34 +2895,36 @@ class GFEMModel:
                 if target in ["rho", "Vp", "Vs"]:
                     P_gfem, target_gfem, _, _, _, _ = self._crop_1d_profile(
                         P_gfem, target_gfem, P_prem, target_prem)
-                    P_hy, _, target_hy = self._get_1d_profile(
-                        target, 1173, hymatz_input=["Pyrolite", 50])
-                    P_hy, target_hy, _, _, _, _ = self._crop_1d_profile(
-                        P_hy, target_hy, P_prem, target_prem)
             if "mid" in geotherms:
                 P_gfem2, _, target_gfem2 = self._get_1d_profile(target, 1573)
                 if target in ["rho", "Vp", "Vs"]:
                     P_gfem2, target_gfem2, _, _, rmse, r2 = self._crop_1d_profile(
                         P_gfem2, target_gfem2, P_prem, target_prem)
-                    P_hy2, _, target_hy2 = self._get_1d_profile(
-                        target, 1573, hymatz_input=["Pyrolite", 50])
-                    P_hy2, target_hy2, _, _, _, _ = self._crop_1d_profile(
-                        P_hy2, target_hy2, P_prem, target_prem)
             if "high" in geotherms:
                 P_gfem3, _, target_gfem3 = self._get_1d_profile(target, 1773)
                 if target in ["rho", "Vp", "Vs"]:
                     P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
                         P_gfem3, target_gfem3, P_prem, target_prem)
-                    P_hy3, _, target_hy3 = self._get_1d_profile(
-                        target, 1773, hymatz_input=["Pyrolite", 50])
-                    P_hy3, target_hy3, _, _, _, _ = self._crop_1d_profile(
-                        P_hy3, target_hy3, P_prem, target_prem)
 
             if target in ["rho", "Vp", "Vs"]:
                 _, _, P_prem, target_prem, _, _ = self._crop_1d_profile(
                     P_gfem2, target_gfem2, P_prem, target_prem)
                 _, _, P_stw105, target_stw105, _, _ = self._crop_1d_profile(
                     P_gfem2, target_gfem2, P_stw105, target_stw105)
+
+            if target in ["rho", "Vp", "Vs"]:
+                P_hy, _, target_hy = self._get_1d_profile(
+                    target, 1573, hymatz_input=["Pyrolite", 0])
+                P_hy, target_hy, _, _, _, _ = self._crop_1d_profile(
+                    P_hy, target_hy, P_prem, target_prem)
+                P_hy2, _, target_hy2 = self._get_1d_profile(
+                    target, 1573, hymatz_input=["Pyrolite", 50])
+                P_hy2, target_hy2, _, _, _, _ = self._crop_1d_profile(
+                    P_hy2, target_hy2, P_prem, target_prem)
+                P_hy3, _, target_hy3 = self._get_1d_profile(
+                    target, 1573, hymatz_input=["Pyrolite", 100])
+                P_hy3, target_hy3, _, _, _, _ = self._crop_1d_profile(
+                    P_hy3, target_hy3, P_prem, target_prem)
 
             # Change endmember sampleids
             if sid == tend:
@@ -2956,29 +2958,29 @@ class GFEMModel:
                 ax1.fill_betweenx(
                     P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
                     color=colormap(0), alpha=0.2)
-                ax1.plot(target_hy, P_hy, "-", linewidth=3, color=colormap(3),
-                         label=f"1173 K")
             if "mid" in geotherms:
                 ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
                          label=f"1573 K")
                 ax1.fill_betweenx(
                     P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
                     color=colormap(2), alpha=0.2)
-                ax1.plot(target_hy2, P_hy2, "-", linewidth=3, color=colormap(4),
-                         label=f"1573 K")
             if "high" in geotherms:
                 ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
                          label=f"1773 K")
                 ax1.fill_betweenx(
                     P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
                     color=colormap(1), alpha=0.3)
-                ax1.plot(target_hy3, P_hy3, "-", linewidth=3, color=colormap(5),
-                         label=f"1773 K")
 
-            # Plot reference models
             if target in ["rho", "Vp", "Vs"]:
+                # Plot reference models
                 ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
                 ax1.plot(target_stw105, P_stw105, ":", linewidth=2, color="black")
+
+            if target in ["rho", "Vp", "Vs"]:
+                # Plot HyMaTZ profiles for dry and 100% WSC Pyrolite
+                ax1.fill_betweenx(P_hy, target_hy, target_hy3, color=colormap(4), alpha=0.2)
+                ax1.plot(target_hy, P_hy, "-", linewidth=2, color=colormap(4))
+                ax1.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(4))
 
             if target == "rho":
                 target_label = "Density"
