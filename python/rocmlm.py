@@ -163,8 +163,8 @@ class RocMLM:
         # Set np array printing option
         np.set_printoptions(precision=3, suppress=True)
 
-        # Check for existing pretrained model
-        self._check_pretrained_model()
+        # Check for existing model
+        self._check_existing_model()
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.0.           Helper Functions              !!! ++
@@ -206,23 +206,23 @@ class RocMLM:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check pretrained model !!
+    # check existing model !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_pretrained_model(self):
+    def _check_existing_model(self):
         """
         """
         # Check for existing model build
         if os.path.exists(self.model_out_dir):
             if os.path.exists(self.rocmlm_path):
                 if self.verbose >= 1:
-                    print(f"Found pretrained model {self.rocmlm_path}!")
+                    print(f"Found pretrained model {self.rocmlm_path} !")
                 try:
                     self.ml_model_trained = True
                     rocmlm = joblib.load(self.rocmlm_path)
                     rocmlm.visualize_model()
                 except Exception as e:
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    print(f"!!! ERROR in RocMLM() !!!")
+                    print(f"!!! ERROR in _check_existing_model() !!!")
                     print(f"{e}")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     traceback.print_exc()

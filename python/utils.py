@@ -7,6 +7,7 @@
 import os
 import sys
 import yaml
+import shutil
 import zipfile
 import datetime
 import platform
@@ -91,15 +92,15 @@ def download_and_unzip(url, filename, destination):
                         target_found = True
                         break
                 if not target_found:
-                    raise Exception(f"{filename} not found in zip archive!")
+                    raise Exception(f"{filename} not found in zip archive !")
         # Remove the temporary zip file
         os.remove("temp.zip")
     except urllib.error.URLError as e:
-        raise Exception(f"Unable to download from {url}!")
+        raise Exception(f"Unable to download from {url} !")
     except zipfile.BadZipFile as e:
-        raise Exception(f"The downloaded file is not a valid zip file!")
+        raise Exception(f"The downloaded file is not a valid zip file !")
     except Exception as e:
-        raise Exception(f"An unexpected error occurred: {e}!")
+        raise Exception(f"An unexpected error occurred: {e} !")
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -134,9 +135,28 @@ def compile_perplex():
         print("Installing Perple_X from:")
         print(f"  {url}")
         download_and_unzip(url, "dynamic.zip", "Perple_X")
-        print("Perple_X install successful!")
+        print("Perple_X install successful !")
     except Exception as e:
         print(f"!!! ERROR in compile_perplex() !!!")
+        print(f"{e}")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        traceback.print_exc()
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compile hymatz !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compile_hymatz():
+    """
+    """
+    try:
+        url = "https://github.com/wangyefei/HyMaTZ.git"
+        download_github_submodule(url, "pytyon/tmp", "411a378")
+        shutil.move("python/tmp/HyMaTZ", "python/HyMaTZ")
+        shutil.rmtree("python/tmp")
+        print("HyMaTZ install successful !")
+    except Exception as e:
+        print(f"!!! ERROR in compile_hymatz() !!!")
         print(f"{e}")
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         traceback.print_exc()
@@ -159,12 +179,15 @@ def main():
         print("Data assets found !")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     # Compile HyMaTZ
-    download_github_submodule("https://github.com/wangyefei/HyMaTZ.git", "tmp", "411a378")
+    if not os.path.exists("python/HyMaTZ"):
+        compile_hymatz()
+    else:
+        print("HyMaTZ programs found !")
     # Compile Perple_X
     if not os.path.exists("Perple_X"):
         compile_perplex()
     else:
-        print("GFEM programs found !")
+        print("Perple_X programs found !")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     # Print session info
     print_session_info("python/conda-environment.yaml")

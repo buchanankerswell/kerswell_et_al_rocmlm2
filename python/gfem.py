@@ -15,8 +15,10 @@ import traceback
 import subprocess
 import numpy as np
 import pandas as pd
+from hymatz import HyMaTZ
 import multiprocessing as mp
 from contextlib import redirect_stdout
+np.set_printoptions(precision=3, suppress=True)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
@@ -133,34 +135,7 @@ class GFEMModel:
         self.model_build_error = False
 
         # Check for existing model build
-        if os.path.exists(self.model_out_dir):
-            if (os.path.exists(f"{self.model_out_dir}/results.csv") and
-                os.path.exists(f"{self.model_out_dir}/assemblages.csv")):
-                if verbose >= 1:
-                    print(f"  Found {self.perplex_db} GFEM model for sample {self.sid} !")
-                try:
-                    self.model_built = True
-                    self._get_sample_comp()
-                    self._normalize_sample_comp()
-                    self._get_sample_features()
-                    self._summarize_gfem_model_results()
-                except Exception as e:
-                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    print(f"!!! ERROR in GFEMModel() !!!")
-                    print(f"{e}")
-                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    traceback.print_exc()
-                    return None
-                self.visualize_model()
-                return None
-            else:
-                shutil.rmtree(self.model_out_dir)
-                os.makedirs(self.model_out_dir, exist_ok=True)
-        else:
-            os.makedirs(self.model_out_dir, exist_ok=True)
-
-        # Set np array printing option
-        np.set_printoptions(precision=3, suppress=True)
+        self._check_existing_model()
 
         return None
 
@@ -168,9 +143,9 @@ class GFEMModel:
     #+ .1.0.           Helper Functions              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # print gfem model info !!
+    # print gfem info !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _print_gfem_model_info(self):
+    def _print_gfem_info(self):
         """
         """
         # Get self attributes
@@ -203,6 +178,43 @@ class GFEMModel:
         print(f"  Model out dir:  {model_out_dir}")
         print("  --------------------")
 
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # print gfem model info !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _check_existing_model(self):
+        # Get self attributes
+        sid = self.sid
+        verbose = self.verbose
+        perplex_db = self.perplex_db
+        model_out_dir = self.model_out_dir
+
+        if os.path.exists(model_out_dir):
+            if (os.path.exists(f"{model_out_dir}/results.csv") and
+                os.path.exists(f"{model_out_dir}/assemblages.csv")):
+                if verbose >= 1:
+                    print(f"  Found {perplex_db} GFEM model for sample {sid} !")
+                try:
+                    self.model_built = True
+                    self._get_sample_comp()
+                    self._normalize_sample_comp()
+                    self._get_sample_features()
+                    self._summarize_gfem_model_results()
+                except Exception as e:
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    print(f"!!! ERROR in _check_existing_model() !!!")
+                    print(f"{e}")
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    traceback.print_exc()
+                    return None
+                self.visualize_model()
+                return None
+            else:
+                shutil.rmtree(model_out_dir)
+                os.makedirs(model_out_dir, exist_ok=True)
+        else:
+            os.makedirs(model_out_dir, exist_ok=True)
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -534,24 +546,45 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_1d_profile(self, target=None, mantle_potential=1573, Qs=250e-3, Ts=273,
                         A1=2.2e-8, A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35,
-                        litho_thickness=1):
+                        litho_thickness=1, hymatz_input=None):
         """
         """
         # Get model attributes
-        res = self.res
         P_min = self.P_min
         P_max = self.P_max
         T_min = self.T_min
         T_max = self.T_max
-        results = self.results
         geothresh = self.geothresh
-        model_built = self.model_built
         model_out_dir = self.model_out_dir
         perplex_geotherm = f"{model_out_dir}/geotherm-{mantle_potential}"
+        if not hymatz_input:
+            res = self.res
+            results = self.results
+            model_built = self.model_built
+            if not model_built:
+                raise Exception("No GFEM model! Call build_model() first ...")
+        else:
+            if hymatz_input[0] not in ["Pyrolite"]:
+                raise Exception("Unrecognized hymatz input !")
+            if hymatz_input[1] not in np.linspace(0, 100, 11, dtype=int):
+                raise Exception("Unrecognized hymatz input !")
+            if target is not None and target not in ["rho", "Vp", "Vs"]:
+                raise Exception("Unrecognized hymatz target !")
+            model = HyMaTZ(mantle_potential, hymatz_input[0], hymatz_input[1])
+            res = model.res
+            results = model.results
+            P_values = results["P"]
+            T_values = results["T"]
+            targets = results[target]
 
-        # Check for model
-        if not model_built:
-            raise Exception("No GFEM model! Call build_model() first ...")
+            # Cropping profile to same length as GFEMs
+            mask = (P_values >= P_min) & (P_values <= P_max)
+            P_values, T_values, targets = P_values[mask], T_values[mask], targets[mask]
+
+            if target:
+                return P_values, T_values, targets
+            else:
+                return P_values, T_values
 
         # Check for results
         if not results:
@@ -644,12 +677,12 @@ class GFEMModel:
     def _crop_1d_profile(self, P_gfem, target_gfem, P_ref, target_ref):
         """
         """
+        # Get self attributes
+        P_min = self.P_min
+        P_max = self.P_max
         try:
             # Initialize interpolators
             interp_ref = interp1d(P_ref, target_ref, fill_value="extrapolate")
-
-            # Get min and max P
-            P_min, P_max = np.nanmin(P_gfem), np.nanmax(P_gfem)
 
             # New x values for interpolation
             x_new = np.linspace(P_min, P_max, len(P_gfem))
@@ -2623,6 +2656,7 @@ class GFEMModel:
             if color_discrete:
                 # Discrete color palette
                 num_colors = vmax - vmin + 1
+                num_colors = max(num_colors, num_colors // 4)
 
                 if palette == "viridis":
                     if color_reverse:
@@ -2679,7 +2713,7 @@ class GFEMModel:
                 ax.set_box_aspect((1.5, 1.5, 1), zoom=1)
                 ax.set_facecolor("white")
                 cbar = fig.colorbar(surf, ax=ax, label="", shrink=0.6,
-                                    ticks=np.arange(vmin, vmax, num_colors // 4))
+                                    ticks=np.arange(vmin, vmax, num_colors))
                 cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                 cbar.ax.set_ylim(vmax, vmin)
 
@@ -2861,16 +2895,28 @@ class GFEMModel:
                 if target in ["rho", "Vp", "Vs"]:
                     P_gfem, target_gfem, _, _, _, _ = self._crop_1d_profile(
                         P_gfem, target_gfem, P_prem, target_prem)
+                    P_hy, _, target_hy = self._get_1d_profile(
+                        target, 1173, hymatz_input=["Pyrolite", 50])
+                    P_hy, target_hy, _, _, _, _ = self._crop_1d_profile(
+                        P_hy, target_hy, P_prem, target_prem)
             if "mid" in geotherms:
                 P_gfem2, _, target_gfem2 = self._get_1d_profile(target, 1573)
                 if target in ["rho", "Vp", "Vs"]:
                     P_gfem2, target_gfem2, _, _, rmse, r2 = self._crop_1d_profile(
                         P_gfem2, target_gfem2, P_prem, target_prem)
+                    P_hy2, _, target_hy2 = self._get_1d_profile(
+                        target, 1573, hymatz_input=["Pyrolite", 50])
+                    P_hy2, target_hy2, _, _, _, _ = self._crop_1d_profile(
+                        P_hy2, target_hy2, P_prem, target_prem)
             if "high" in geotherms:
                 P_gfem3, _, target_gfem3 = self._get_1d_profile(target, 1773)
                 if target in ["rho", "Vp", "Vs"]:
                     P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
                         P_gfem3, target_gfem3, P_prem, target_prem)
+                    P_hy3, _, target_hy3 = self._get_1d_profile(
+                        target, 1773, hymatz_input=["Pyrolite", 50])
+                    P_hy3, target_hy3, _, _, _, _ = self._crop_1d_profile(
+                        P_hy3, target_hy3, P_prem, target_prem)
 
             if target in ["rho", "Vp", "Vs"]:
                 _, _, P_prem, target_prem, _, _ = self._crop_1d_profile(
@@ -2910,18 +2956,24 @@ class GFEMModel:
                 ax1.fill_betweenx(
                     P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
                     color=colormap(0), alpha=0.2)
+                ax1.plot(target_hy, P_hy, "-", linewidth=3, color=colormap(3),
+                         label=f"1173 K")
             if "mid" in geotherms:
                 ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
                          label=f"1573 K")
                 ax1.fill_betweenx(
                     P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
                     color=colormap(2), alpha=0.2)
+                ax1.plot(target_hy2, P_hy2, "-", linewidth=3, color=colormap(4),
+                         label=f"1573 K")
             if "high" in geotherms:
                 ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
                          label=f"1773 K")
                 ax1.fill_betweenx(
                     P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
                     color=colormap(1), alpha=0.3)
+                ax1.plot(target_hy3, P_hy3, "-", linewidth=3, color=colormap(5),
+                         label=f"1773 K")
 
             # Plot reference models
             if target in ["rho", "Vp", "Vs"]:
@@ -3109,11 +3161,11 @@ class GFEMModel:
             ax_stack.set_xticks([])
             ax_stack.set_ylabel("Cumulative %")
             ax_stack.set_title(
-                f"Sample: {sid[2:5]} ({xi:.2f} $\\xi$, {loi:.2f} wt.% H$_2$O)")
+                f"Sample composition: ({xi:.2f} $\\xi$, {loi:.2f} wt.% H$_2$O)")
 
             ax_line = axes[1]
-            ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
-            ax_line.plot(Pp, rhop, color="black", linewidth=2, linestyle="--",
+            ax_line.plot(Pg, rhog, color="black", linewidth=3, label=f"GFEM $\\rho$")
+            ax_line.plot(Pp, rhop, color="black", linewidth=3, linestyle="--",
                          label=f"PREM $\\rho$")
             ax_line.set_xlim(1, 28)
             ax_line.set_xlabel("Pressure (GPa)")
@@ -3121,7 +3173,7 @@ class GFEMModel:
             lines1, labels1 = ax_line.get_legend_handles_labels()
 
             ax_line_sec = ax_line.twinx()
-            ax_line_sec.plot(Pg, h2og, color="blue", linewidth=2, label="GFEM H$_2$O")
+            ax_line_sec.plot(Pg, h2og, color="blue", linewidth=3, label="GFEM H$_2$O")
             ax_line_sec.set_ylabel("H$_2$O (wt.%)")
             ax_line_sec.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
             if perplex_db == "stx21" or np.all(h2og == 0):
@@ -3202,7 +3254,7 @@ class GFEMModel:
     def build_model(self):
         """
         """
-        self._print_gfem_model_info()
+        self._print_gfem_info()
         max_retries = 3
         for retry in range(max_retries):
             # Check for built model

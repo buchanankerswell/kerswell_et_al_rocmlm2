@@ -1,22 +1,53 @@
+#######################################################
+## .0.              Load Libraries               !!! ##
+#######################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# utilities !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import os
 import re
+import sys
 import traceback
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from GUI_cal_MP import Phase_diagram
 from scipy.odr import ODR, Model, RealData,Data
-from Mineral_Physics.Velocity_calculator import Velocity_calculator
-from Mineral_Physics.Stix2011data import (ab, an, sp, hc, fo, fa, mgwa, fewa, mgri, feri, en,
-                                          fs, mgts, odi, di, he, cen, cats, jd, hpcen, hpcfs,
-                                          mgpv, fepv, alpv, capv, mgil, feil, co, py, al, gr,
-                                          mgmj, jdmj, qtz, coes, st, mppv, fppv, appv, pe, wu,
-                                          mgcf, fecf, nacf, ky, neph, OL_, WA_, RI_)
-from Mineral_Physics.Solidsolution import (c2c, CF, Cpx, Gt, Aki, Wus, O, Opx, Pl, Ppv, ppv, Pv,
-                                           Ring, Sp, Wad, OLwater, WAwater, RIwater)
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# set sys paths to call HyMaTZ submodules !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
+sys.path.insert(0, parent_dir)
+hymatz_dir = os.path.join(current_dir, 'HyMaTZ')
+sys.path.insert(0, hymatz_dir)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# HyMaTZ !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+from HyMaTZ.GUI_cal_MP import Phase_diagram
+from HyMaTZ.Mineral_Physics.Velocity_calculator import Velocity_calculator
+from HyMaTZ.Mineral_Physics.Stix2011data import (ab, an, sp, hc, fo, fa, mgwa, fewa, mgri,
+                                                 feri, en, fs, mgts, odi, di, he, cen, cats,
+                                                 jd, hpcen, hpcfs, mgpv, fepv, alpv, capv,
+                                                 mgil, feil, co, py, al, gr, mgmj, jdmj, qtz,
+                                                 coes, st, mppv, fppv, appv, pe, wu, mgcf,
+                                                 fecf, nacf, ky, neph, OL_, WA_, RI_)
+from HyMaTZ.Mineral_Physics.Solidsolution import (c2c, CF, Cpx, Gt, Aki, Wus, O, Opx, Pl, Ppv,
+                                                  ppv, Pv, Ring, Sp, Wad, OLwater, WAwater,
+                                                  RIwater)
+
+#######################################################
+## .1.          HyMaTZ Regression class          !!! ##
+#######################################################
 class Regression(object):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # init !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, name=None):
+        """
+        """
         self.name = name
         self.key, self.content = self._read_data()
         if self.name == "olivine":
@@ -25,8 +56,14 @@ class Regression(object):
             self.pressure_deri = [4.322, 1.444]
         if self.name == "ringwoodite":
             self.pressure_deri = [4.22, 1.354]
+        return None
 
-    def Regression_Plane(self, x, x_error, y, y_error, z, z_error):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # regression plane !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _regression_plane(self, x, x_error, y, y_error, z, z_error):
+        """
+        """
         X = []
         Y = []
         Z = []
@@ -55,7 +92,12 @@ class Regression(object):
         res = odr.run()
         return res.beta, res.sd_beta
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # read data !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _read_data(self):
+        """
+        """
         def Stinglist_float(string_list):
             number_list = []
             def average(array):
@@ -97,14 +139,12 @@ class Regression(object):
                     aa[:, 1][i] = ave
             return aa[:,0],aa[:,1]
         try:
-            address = os.path.join(os.path.dirname(__file__), "EXPDATA", self.name + ".txt")
+            address = os.path.join(os.path.dirname(__file__), "HyMaTZ", "Mineral_Physics",
+                                   "EXPDATA", self.name + ".txt")
             self.address = address
             file = open(address, "r+")
         except:
-            address = os.path.join(os.path.dirname(__file__), "Mineral_Physics", "EXPDATA",
-                                   self.name + ".txt")
-            self.address=address
-            file=open(address,"r+")
+            raise Exception(f"No file found at {self.address} !")
         for i in file:
             name=i.split(",")
             break
@@ -133,24 +173,54 @@ class Regression(object):
         self.Rho_error = b
         return name, dictionary
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # function K !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def function_K(self):
-        return self.Regression_Plane(self.water_content,self.water_content_error,
-                                     self.iron_content, self.iron_content_error, self.K,
-                                     self.K_error)
-    def function_G(self):
-        return self.Regression_Plane(self.water_content,self.water_content_error,
-                                     self.iron_content, self.iron_content_error, self.G,
-                                     self.G_error)
-    def function_Rho(self):
-        return self.Regression_Plane(self.water_content,self.water_content_error,
-                                     self.iron_content, self.iron_content_error, self.Rho,
-                                     self.Rho_error)
+        """
+        """
+        return self._regression_plane(self.water_content,self.water_content_error,
+                                      self.iron_content, self.iron_content_error, self.K,
+                                      self.K_error)
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # function G !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def function_G(self):
+        """
+        """
+        return self._regression_plane(self.water_content,self.water_content_error,
+                                      self.iron_content, self.iron_content_error, self.G,
+                                      self.G_error)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # function Rho !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def function_Rho(self):
+        """
+        """
+        return self._regression_plane(self.water_content,self.water_content_error,
+                                      self.iron_content, self.iron_content_error, self.Rho,
+                                      self.Rho_error)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # function Return !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def Return(self):
+        """
+        """
         return self.function_K(), self.function_G(), self.function_Rho()
 
+#######################################################
+## .2.         HyMaTZ WaterProfile class         !!! ##
+#######################################################
 class WaterProfile():
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # init !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, Depth=None, Pressure=None, Temperature=None, usercontrol=None):
+        """
+        """
         self.usercontrol=usercontrol
         self.Depth = np.array(Depth)
         self.Pressure = np.array(Pressure)
@@ -167,8 +237,14 @@ class WaterProfile():
         self.editor_OL()
         self.editor_WA()
         self.editor_RI()
+        return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # editor OL !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def editor_OL(self):
+        """
+        """
         D = self.Depth
         P = self.Pressure
         T = self.Temperature
@@ -176,8 +252,14 @@ class WaterProfile():
         for i in range(len(D)):
             if self.OL_water[i] >= 1.1:
                 self.OL_water[i] = 1.1
+        return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # editor WA !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def editor_WA(self):
+        """
+        """
         D = self.Depth
         P = self.Pressure
         T = self.Temperature
@@ -185,8 +267,14 @@ class WaterProfile():
         for i in range(len(D)):
             if self.WA_water[i] >= 3.3:
                 self.WA_water[i] = 3.3
+        return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # editor RI !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def editor_RI(self):
+        """
+        """
         D = self.Depth
         P = self.Pressure
         T = self.Temperature
@@ -194,10 +282,23 @@ class WaterProfile():
         for i in range(len(D)):
             if self.RI_water[i] >= 2.7:
                 self.RI_water[i] = 2.7
+        return None
 
+#######################################################
+## .3.               HyMaTZ class                !!! ##
+#######################################################
 class HyMaTZ():
-    def __init__(self, res=300):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # init !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def __init__(self, mantle_potential=1573, sid="Pyrolite", water_capacity=50, res=300,
+                 verbose=1):
+        """
+        """
         self.res = res
+        self.sid = sid
+        self.results = {}
+        self.verbose = verbose
         self.K = np.zeros(res)
         self.G = np.zeros(res)
         self.Vp = np.zeros(res)
@@ -207,15 +308,66 @@ class HyMaTZ():
         self.Rho = np.zeros(res)
         self.mgwa = np.zeros(res)
         self.mgri = np.zeros(res)
-        self.waterusercontorl = {"OL_function": "4.0*1e-6*D*D", "WA_function": "3.3",
-                                 "RI_function": "1.7", "OLcoefficient": 50, "WAcoefficient": 50,
-                                 "RIcoefficient": 50}
+        self.Phase_diagram = None
+        self.fig_dir = "figs/hymatz"
+        self.data_dir = "assets/data"
+        self.h2o_profile = np.zeros(res)
+        self.water_capacity = water_capacity
+        self.mantle_potential = mantle_potential
+        self.profile_prefix = f"hymatz-{mantle_potential}K-{self.sid}-{water_capacity}H2O"
+        self.profile_out_path = f"{self.data_dir}/{self.profile_prefix}"
+        self.waterusercontorl = {"OL_function": "4.0*1e-6*D*D",
+                                 "WA_function": "3.3",
+                                 "RI_function": "1.7",
+                                 "OLcoefficient": water_capacity,
+                                 "WAcoefficient": water_capacity,
+                                 "RIcoefficient": water_capacity}
+        if sid == "Pyrolite":
+            self.comp = np.array([3.14, 2.23, 0.33, 49.94, 5.48, 38.85])
+        else:
+            raise Exception("Unrecognized sid !")
+        self.existing_profile = False
+        self._check_existing_model()
+        return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # check existing model !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _check_existing_model(self):
+        """
+        """
+        # Get self attributes
+        if os.path.exists(self.profile_out_path):
+            if self.verbose >= 1:
+                print(f"  Found HyMaTZ profile {self.profile_out_path} !")
+            try:
+                self.existing_profile = True
+                df = pd.read_csv(self.profile_out_path, sep="\t")
+                self.results = {col: df[col].to_numpy() for col in df.columns}
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in _check_existing_model() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
+                return None
+        else:
+            self.build_profile()
+        return None
 
-    def _configure_model(self, mantle_potential=1573, sid="Pyrolite",
-                         comp=np.array([3.14, 2.23, 0.33, 49.94, 5.48, 38.85])):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # configure model !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _configure_model(self):
+        """
+        """
+        # Get self attributes
+        res = self.res
+        sid = self.sid
+        comp = self.comp
+        mantle_potential = self.mantle_potential
         try:
-            self.sys = Phase_diagram(num=self.res, Model=sid, Model_composition=comp)
+            self.sys = Phase_diagram(num=res, Model=sid, Model_composition=comp)
             self.sys.Phase_diagram_first_pinciple(mantle_potential)
             for number, phase in enumerate(self.sys.Phase_diagram):
                 self.fo[number] = phase[24] / (phase[24] + phase[25] + 1e-11)
@@ -234,7 +386,17 @@ class HyMaTZ():
             traceback.print_exc()
         return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # compute elastic properties !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _compute_elastic_properties(self):
+        """
+        """
+        # Get self attributes
+        Pressure = self.sys.Pressure
+        h2o_profile = self.h2o_profile
+        Temperature = self.sys.Temperature
+        Phase_diagram = self.Phase_diagram
         try:
             ol = Regression("olivine")
             wad = Regression("wadsleyite")
@@ -248,7 +410,7 @@ class HyMaTZ():
                             nacf, pe, wu, qtz, coes, st, an, ky, neph, OL, WA, RI]
             for i in mineral_list:
                 i.Clear_Vp_Vs()
-            for number, phase in enumerate(self.Phase_diagram):
+            for number, phase in enumerate(Phase_diagram):
                 K = []
                 G = []
                 V = []
@@ -256,24 +418,22 @@ class HyMaTZ():
                 phase[53] = 0
                 phase[54] = 0
                 OL.Set_Water_Iron_Condition(
-                    self.h2o_profile.OL_water[number], 1-self.fo[number])
+                    h2o_profile.OL_water[number], 1 - self.fo[number])
                 WA.Set_Water_Iron_Condition(
-                    self.h2o_profile.WA_water[number], 1-self.mgwa[number])
+                    h2o_profile.WA_water[number], 1 - self.mgwa[number])
                 RI.Set_Water_Iron_Condition(
-                    self.h2o_profile.RI_water[number], 1-self.mgri[number])
-                for num, i in enumerate(mineral_list,start=3):
+                    h2o_profile.RI_water[number], 1 - self.mgri[number])
+                for num, i in enumerate(mineral_list, start=3):
                     if phase[num] != 0:
                         if num==24 or num==25 or num==26 or num==27 or num==28 or num==29:
                             pass
                         else:
-                            r, k, g, v, rho = i.EOS(self.sys.Pressure[number] * 1e5,
-                                                    self.sys.Temperature[number])
+                            r, k, g, v, rho = i.EOS(Pressure[number]*1e5, Temperature[number])
                             K.append(k)
                             G.append(g)
                             Rho.append(rho)
                             V.append(phase[num])
-                            a, b, c = i.Vp_Vs(self.sys.Pressure[number] * 1e5,
-                                              self.sys.Temperature[number])
+                            a, b, c = i.Vp_Vs(Pressure[number] * 1e5, Temperature[number])
                             c *= 1000
                             i.Store_Vp_Vs(a, b, c, phase[1], phase[num])
 
@@ -282,11 +442,8 @@ class HyMaTZ():
                 self.Vp[number] = (np.sqrt((self.K[number] + 4. * self.G[number] / 3.) /
                                            self.Rho[number]) / 1000.)
                 self.Vs[number] = np.sqrt(self.G[number]/self.Rho[number]) / 1000.
-            self.lnVp = np.log(self.Vp)
-            self.lnVs = np.log(self.Vs)
-            self.dD = self.sys.Depth[10] - self.sys.Depth[9]
-            self.dlnVp = np.gradient(self.lnVp) / self.dD
-            self.dlnVs = np.gradient(self.lnVs) / self.dD
+            self.results = {"T": self.sys.Temperature, "P": self.sys.Pressure / 1e4,
+                            "rho": self.Rho / 1e3, "Vp": self.Vp, "Vs": self.Vs}
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in _compute_elastic_properties() !!!")
@@ -295,10 +452,39 @@ class HyMaTZ():
             traceback.print_exc()
         return None
 
-    def build_profile(self):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # save results !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _save_results(self):
+        """
+        """
+        # Get self attributes
+        results = self.results
+        profile_out_path = self.profile_out_path
         try:
+            df_to_save = pd.DataFrame(self.results)
+            df_to_save.to_csv(profile_out_path, sep="\t", index=False)
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _save_results() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # build profile !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def build_profile(self):
+        """
+        """
+        # Get self attributes
+        profile_prefix = self.profile_prefix
+        try:
+            print(f"  Building HyMaTZ profile {profile_prefix} ...")
             self._configure_model()
             self._compute_elastic_properties()
+            self._save_results()
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in build_profile() !!!")
@@ -307,12 +493,18 @@ class HyMaTZ():
             traceback.print_exc()
         return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # plot profile !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot_profile(self, target="rho", figwidth=6.3, figheight=5.8, fontsize=28):
+        """
+        """
+        # Get self attributes
+        sid = self.sid
+        fig_dir = self.fig_dir
         P_hymatz = self.sys.Pressure / 1e4
         P_min = np.nanmin(P_hymatz)
         P_max = np.nanmax(P_hymatz)
-        sid = "Pyrolite"
-        fig_dir = "figs"
         os.makedirs(fig_dir, exist_ok=True)
 
         if target == "rho":
@@ -373,10 +565,21 @@ class HyMaTZ():
 
         return None
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# main !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
-    model = HyMaTZ()
-    model.build_profile()
-    model.plot_profile()
+    """
+    """
+    try:
+        for w in np.linspace(0, 100, 11, dtype=int):
+            model = HyMaTZ(water_capacity=w)
+    except Exception as e:
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        print(f"!!! ERROR in main() !!!")
+        print(f"{e}")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        traceback.print_exc()
     return None
 
 if __name__ == "__main__":

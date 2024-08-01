@@ -10,7 +10,9 @@ dependencies:
   - scikit-learn
   - seaborn
   - matplotlib
+  - gitpython
   - pyyaml
+  - pyqt
   - tqdm
   - opencv
   - tabulate
