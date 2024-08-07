@@ -37,17 +37,17 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, res=16, res_loi=8, verbose=1):
+    def __init__(self, res=14, res_loi=8, verbose=1):
         # Input
         self.res = res + 1
-        self.res_loi = res_loi + 1
+        self.res_loi = res_loi
         self.verbose = verbose
 
         # Mixing array sampling
         self.k = 1.5
         self.seed = 42
         self.digits = 3
-        self.max_loi = 5
+        self.max_loi = 2
         self.D_tio2 = 5e-2
         self.mc_sample = 1
         self.weighted_random = True

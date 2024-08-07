@@ -151,7 +151,7 @@ def compile_hymatz():
     """
     try:
         url = "https://github.com/wangyefei/HyMaTZ.git"
-        download_github_submodule(url, "pytyon/tmp", "411a378")
+        download_github_submodule(url, "python/tmp", "411a378")
         shutil.move("python/tmp/HyMaTZ", "python/HyMaTZ")
         shutil.rmtree("python/tmp")
         print("HyMaTZ install successful !")
