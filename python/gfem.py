@@ -561,7 +561,7 @@ class GFEMModel:
             res = self.res
             results = self.results
             model_built = self.model_built
-            if not model_built:
+            if target and not model_built:
                 raise Exception("No GFEM model! Call build_model() first ...")
         else:
             if hymatz_input[0] not in ["Pyrolite"]:
@@ -587,7 +587,7 @@ class GFEMModel:
                 return P_values, T_values
 
         # Check for results
-        if not results:
+        if target and not results:
             raise Exception("No GFEM model results! Call get_results() first ...")
 
         # Define PT (target)
