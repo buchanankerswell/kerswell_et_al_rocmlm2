@@ -26,7 +26,7 @@ DATAPURGE = log \
 						$(DATADIR)/lut-efficiency.csv \
 						$(DATADIR)/earthchem-counts.csv \
 						$(DATADIR)/gfem-model-results-summary.csv
-DATACLEAN = assets MAGEMin Perple_X gfems rocmlms
+DATACLEAN = assets Perple_X gfems rocmlms python/HyMaTZ
 FIGSPURGE =
 FIGSCLEAN = figs
 
