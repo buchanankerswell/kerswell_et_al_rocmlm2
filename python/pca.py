@@ -37,16 +37,17 @@ class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, res=8, res_loi=16, verbose=1):
+    def __init__(self, res=16, res_loi=8, verbose=1):
         # Input
         self.res = res + 1
-        self.res_loi = res_loi
+        self.res_loi = res_loi + 1
         self.verbose = verbose
 
         # Mixing array sampling
         self.k = 1.5
         self.seed = 42
         self.digits = 3
+        self.max_loi = 5
         self.D_tio2 = 5e-2
         self.mc_sample = 1
         self.weighted_random = True
@@ -66,7 +67,6 @@ class MixingArray:
 
         # PCA results
         self.scaler = None
-        self.max_loi = None
         self.pca_model = None
         self.n_pca_components = 2
         self.pca_results = np.array([])
@@ -437,7 +437,6 @@ class MixingArray:
 
         # Normalize to volatile free basis
 #        self.max_loi = data["LOI"].max()
-        self.max_loi = 5
         data = self._normalize_volatile_free(data)
 
         # Convert all Fe oxides to FEOT
@@ -787,11 +786,11 @@ class MixingArray:
         ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
 
         # Create linear array of ad hoc loi
-        loi = np.linspace(0.0, max_loi, res_loi + 1).round(digits)
+        loi = np.linspace(0.0, max_loi, res_loi).round(digits)
         sid_append = np.arange(0, len(loi))
 
         # Duplicate each sampleid
-        df = df.reindex(df.index.repeat(res_loi + 1))
+        df = df.reindex(df.index.repeat(res_loi))
 
         # Add loi to each sampleid
         df["LOI"] = np.tile(loi, len(df) // len(loi))

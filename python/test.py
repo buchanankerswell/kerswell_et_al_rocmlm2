@@ -1,15 +1,18 @@
 from hymatz import HyMaTZ
-from gfem import GFEMModel, get_sampleids, build_gfem_models
+from gfem import GFEMModel, get_sampleids, build_gfem_models, compose_gfem_plots
 from rocmlm import RocMLM, train_rocmlms, visualize_rocmlm_performance, compose_rocmlm_plots
 
 def main():
     """
     """
-#    model = GFEMModel("koma06", "sm000-loi000", "assets/data/synth-mids.csv")
-    model = GFEMModel("hp633", "sm000-loi000", "assets/data/synth-mids.csv")
-#    model = GFEMModel("koma06", "sm000-loi010", "assets/data/synth-mids.csv")
-    model = GFEMModel("hp633", "sm000-loi010", "assets/data/synth-mids.csv")
-#    model.visualize_model()
+#    model = HyMaTZ(1573, "Pyrolite", 50)
+
+    models = []
+    for i in range(0, 8):
+        models.append(GFEMModel("hp633", f"sm000-loi00{i}", "assets/data/synth-mids.csv"))
+        models.append(GFEMModel("koma06", f"sm000-loi00{i}", "assets/data/synth-mids.csv"))
+        models.append(GFEMModel("stx21", f"sm000-loi00{i}", "assets/data/synth-mids.csv"))
+    compose_gfem_plots(models)
 
 #    gfems = {}
 #    sources = {"m": "assets/data/synth-mids.csv", "r": "assets/data/synth-rnds.csv"}

@@ -568,7 +568,7 @@ class GFEMModel:
                 raise Exception("Unrecognized hymatz input !")
             if hymatz_input[1] not in np.linspace(0, 100, 11, dtype=int):
                 raise Exception("Unrecognized hymatz input !")
-            if target is not None and target not in ["rho", "Vp", "Vs"]:
+            if target is not None and target not in ["rho", "Vp", "Vs", "h2o"]:
                 raise Exception("Unrecognized hymatz target !")
             model = HyMaTZ(mantle_potential, hymatz_input[0], hymatz_input[1])
             res = model.res
@@ -2226,7 +2226,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize array image  !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, palette="bone", geotherms=True, gradient=False,
+    def _visualize_array_image(self, palette="bone", geotherms=["mid"], gradient=False,
                                figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
@@ -2408,22 +2408,24 @@ class GFEMModel:
 
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if geotherms:
-                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white",
-                            linewidth=3)
-                    ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="white",
-                            linewidth=3)
-                    ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="white",
-                            linewidth=3)
+                if "low" in geotherms:
+                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="black",
+                            linewidth=2)
                     plt.text(1163 + (6 * 0.5 * 35), 6, "1173 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="white")
+                             rotation=67, color="black")
+                if "mid" in geotherms:
+                    ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="black",
+                            linewidth=2)
                     plt.text(1563 + (6 * 0.5 * 35), 6, "1573 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="white")
+                             rotation=67, color="black")
+                if "high" in geotherms:
+                    ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="black",
+                            linewidth=2)
                     plt.text(1763 + (6 * 0.5 * 35), 6, "1773 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="white")
+                             rotation=67, color="black")
                 ax.set_xlabel("T (K)")
                 ax.set_ylabel("P (GPa)")
                 plt.colorbar(im, ax=ax, label="", ticks=np.arange(vmin, vmax, num_colors))
@@ -2488,22 +2490,24 @@ class GFEMModel:
 
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if geotherms:
-                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="white",
-                            linewidth=3)
-                    ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="white",
-                            linewidth=3)
-                    ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="white",
-                            linewidth=3)
+                if "low" in geotherms:
+                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="black",
+                            linewidth=2)
                     plt.text(1163 + (6 * 0.5 * 35), 6, "1173 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="white")
+                             rotation=67, color="black")
+                if "mid" in geotherms:
+                    ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="black",
+                            linewidth=2)
                     plt.text(1563 + (6 * 0.5 * 35), 6, "1573 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="white")
+                             rotation=67, color="black")
+                if "high" in geotherms:
+                    ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="black",
+                            linewidth=2)
                     plt.text(1763 + (6 * 0.5 * 35), 6, "1773 K", fontsize=fontsize * 0.833,
                              horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="white")
+                             rotation=67, color="black")
                 ax.set_xlabel("T (K)")
                 ax.set_ylabel("P (GPa)")
 
@@ -2526,7 +2530,7 @@ class GFEMModel:
                 elif target == "melt":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                 elif target == "h2o":
-                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
                 elif target == "assemblage":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                 elif target == "variance":
@@ -2812,6 +2816,9 @@ class GFEMModel:
                 elif target == "melt":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                     ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
+                elif target == "h2o":
+                    cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+                    ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
                 elif target == "assemblage":
                     cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
                     ax.zaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
@@ -2832,7 +2839,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize prem !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_prem(self, geotherms=["low", "mid", "high"], figwidth=6.3,
+    def _visualize_prem(self, geotherms=["mid"], figwidth=6.3,
                         figheight=4.725, fontsize=22):
         """
         """
@@ -2912,19 +2919,31 @@ class GFEMModel:
                 _, _, P_stw105, target_stw105, _, _ = self._crop_1d_profile(
                     P_gfem2, target_gfem2, P_stw105, target_stw105)
 
-            if target in ["rho", "Vp", "Vs"]:
+            if target in ["rho", "Vp", "Vs", "h2o"]:
                 P_hy, _, target_hy = self._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 0])
+                    target, 1173, hymatz_input=["Pyrolite", 0])
                 P_hy, target_hy, _, _, _, _ = self._crop_1d_profile(
                     P_hy, target_hy, P_prem, target_prem)
                 P_hy2, _, target_hy2 = self._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 50])
+                    target, 1173, hymatz_input=["Pyrolite", 100])
                 P_hy2, target_hy2, _, _, _, _ = self._crop_1d_profile(
                     P_hy2, target_hy2, P_prem, target_prem)
                 P_hy3, _, target_hy3 = self._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 100])
+                    target, 1573, hymatz_input=["Pyrolite", 0])
                 P_hy3, target_hy3, _, _, _, _ = self._crop_1d_profile(
                     P_hy3, target_hy3, P_prem, target_prem)
+                P_hy4, _, target_hy4 = self._get_1d_profile(
+                    target, 1573, hymatz_input=["Pyrolite", 100])
+                P_hy4, target_hy4, _, _, _, _ = self._crop_1d_profile(
+                    P_hy4, target_hy4, P_prem, target_prem)
+                P_hy5, _, target_hy5 = self._get_1d_profile(
+                    target, 1773, hymatz_input=["Pyrolite", 0])
+                P_hy5, target_hy5, _, _, _, _ = self._crop_1d_profile(
+                    P_hy5, target_hy5, P_prem, target_prem)
+                P_hy6, _, target_hy6 = self._get_1d_profile(
+                    target, 1773, hymatz_input=["Pyrolite", 100])
+                P_hy6, target_hy6, _, _, _, _ = self._crop_1d_profile(
+                    P_hy6, target_hy6, P_prem, target_prem)
 
             # Change endmember sampleids
             if sid == tend:
@@ -2951,36 +2970,48 @@ class GFEMModel:
             # Plotting
             fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
 
-            # Plot GFEM model profiles
-            if "low" in geotherms:
-                ax1.plot(target_gfem, P_gfem, "-", linewidth=3, color=colormap(0),
-                         label=f"1173 K")
-                ax1.fill_betweenx(
-                    P_gfem, target_gfem * (1 - 0.05), target_gfem * (1 + 0.05),
-                    color=colormap(0), alpha=0.2)
-            if "mid" in geotherms:
-                ax1.plot(target_gfem2, P_gfem2, "-", linewidth=3, color=colormap(2),
-                         label=f"1573 K")
-                ax1.fill_betweenx(
-                    P_gfem2, target_gfem2 * (1 - 0.05), target_gfem2 * (1 + 0.05),
-                    color=colormap(2), alpha=0.2)
-            if "high" in geotherms:
-                ax1.plot(target_gfem3, P_gfem3, "-", linewidth=3, color=colormap(1),
-                         label=f"1773 K")
-                ax1.fill_betweenx(
-                    P_gfem3, target_gfem3 * (1 - 0.05), target_gfem3 * (1 + 0.05),
-                    color=colormap(1), alpha=0.3)
-
             if target in ["rho", "Vp", "Vs"]:
                 # Plot reference models
                 ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
                 ax1.plot(target_stw105, P_stw105, ":", linewidth=2, color="black")
 
-            if target in ["rho", "Vp", "Vs"]:
+            if target in ["rho", "Vp", "Vs", "h2o"]:
                 # Plot HyMaTZ profiles for dry and 100% WSC Pyrolite
-                ax1.fill_betweenx(P_hy, target_hy, target_hy3, color=colormap(4), alpha=0.2)
-                ax1.plot(target_hy, P_hy, "-", linewidth=2, color=colormap(4))
-                ax1.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(4))
+                if "low" in geotherms:
+                    ax1.fill_betweenx(P_hy, target_hy, target_hy2, color=colormap(2),
+                                      alpha=0.2)
+                    ax1.plot(target_hy, P_hy, "-", linewidth=2, color=colormap(2),
+                             label="HyMaTZ 1173")
+                    ax1.plot(target_hy2, P_hy2, "-", linewidth=2, color=colormap(2))
+                if "mid" in geotherms:
+                    ax1.fill_betweenx(P_hy3, target_hy3, target_hy4, color=colormap(0),
+                                      alpha=0.2)
+                    ax1.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(0),
+                             label="HyMaTZ 1573")
+                    ax1.plot(target_hy4, P_hy4, "-", linewidth=2, color=colormap(0))
+                if "high" in geotherms:
+                    ax1.fill_betweenx(P_hy5, target_hy5, target_hy6, color=colormap(4),
+                                      alpha=0.2)
+                    ax1.plot(target_hy5, P_hy5, "-", linewidth=2, color=colormap(4),
+                             label="HyMaTZ 1773")
+                    ax1.plot(target_hy6, P_hy6, "-", linewidth=2, color=colormap(4))
+
+            # Plot GFEM model profiles
+            if "low" in geotherms:
+                ax1.plot(target_gfem, P_gfem, "-", linewidth=2, color=colormap(3),
+                         label=f"Perple_X 1173")
+                ax1.fill_betweenx(P_gfem, target_gfem * (1 - 0.05),
+                                  target_gfem * (1 + 0.05), color=colormap(3), alpha=0.2)
+            if "mid" in geotherms:
+                ax1.plot(target_gfem2, P_gfem2, "-", linewidth=2, color=colormap(1),
+                         label=f"Perple_X 1573")
+                ax1.fill_betweenx(P_gfem2, target_gfem2 * (1 - 0.05),
+                                  target_gfem2 * (1 + 0.05), color=colormap(1), alpha=0.2)
+            if "high" in geotherms:
+                ax1.plot(target_gfem3, P_gfem3, "-", linewidth=2, color=colormap(5),
+                         label=f"Perple_X 1773")
+                ax1.fill_betweenx(P_gfem3, target_gfem3 * (1 - 0.05),
+                                  target_gfem3 * (1 + 0.05), color=colormap(5), alpha=0.3)
 
             if target == "rho":
                 target_label = "Density"
@@ -3019,7 +3050,12 @@ class GFEMModel:
 
             # Convert the primary y-axis data (pressure) to depth
             depth_conversion = lambda P: P * 30
-            depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
+            if "low" in geotherms:
+                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
+            if "mid" in geotherms:
+                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem2)))
+            if "high" in geotherms:
+                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem3)))
 
             # Create the secondary y-axis and plot depth on it
             ax2 = ax1.secondary_yaxis(
@@ -3045,7 +3081,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize geotherm assemblages !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_geotherm_assemblages(self, geotherms=[1173, 1573, 1773], modal_thresh=5,
+    def _visualize_geotherm_assemblages(self, geotherms=[1573], modal_thresh=5,
                                         figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
@@ -3166,8 +3202,8 @@ class GFEMModel:
                 f"Sample composition: ({xi:.2f} $\\xi$, {loi:.2f} wt.% H$_2$O)")
 
             ax_line = axes[1]
-            ax_line.plot(Pg, rhog, color="black", linewidth=3, label=f"GFEM $\\rho$")
-            ax_line.plot(Pp, rhop, color="black", linewidth=3, linestyle="--",
+            ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
+            ax_line.plot(Pp, rhop, color="black", linewidth=2, linestyle="--",
                          label=f"PREM $\\rho$")
             ax_line.set_xlim(1, 28)
             ax_line.set_xlabel("Pressure (GPa)")
@@ -3175,7 +3211,7 @@ class GFEMModel:
             lines1, labels1 = ax_line.get_legend_handles_labels()
 
             ax_line_sec = ax_line.twinx()
-            ax_line_sec.plot(Pg, h2og, color="blue", linewidth=3, label="GFEM H$_2$O")
+            ax_line_sec.plot(Pg, h2og, color="blue", linewidth=2, label="GFEM H$_2$O")
             ax_line_sec.set_ylabel("H$_2$O (wt.%)")
             ax_line_sec.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
             if perplex_db == "stx21" or np.all(h2og == 0):
@@ -3722,16 +3758,16 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.8, fontsize=28):
             if j == 0:
                 if target in ["rho", "Vp", "Vs"]:
                     # Plot reference models
-                    ax.plot(target_prem, P_prem, "-", linewidth=3.5, color="forestgreen",
+                    ax.plot(target_prem, P_prem, "-", linewidth=2, color="forestgreen",
                             label="PREM", zorder=7)
-                    ax.plot(target_stw105, P_stw105, ":", linewidth=3.5, color="forestgreen",
+                    ax.plot(target_stw105, P_stw105, ":", linewidth=2, color="forestgreen",
                             label="STW105", zorder=7)
 
             if sid == bend:
-                ax.plot(target_gfem, P_gfem, "-", linewidth=3.5, color=sm.to_rgba(xi),
+                ax.plot(target_gfem, P_gfem, "-", linewidth=2, color=sm.to_rgba(xi),
                         label="PSUM", zorder=6)
             if sid == tend:
-                ax.plot(target_gfem, P_gfem, "-", linewidth=3.5, color=sm.to_rgba(xi),
+                ax.plot(target_gfem, P_gfem, "-", linewidth=2, color=sm.to_rgba(xi),
                         label="DSUM", zorder=6)
 
             # Plot GFEM and RocMLM profiles

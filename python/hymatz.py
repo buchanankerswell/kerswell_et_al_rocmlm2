@@ -398,16 +398,19 @@ class HyMaTZ():
         Temperature = self.sys.Temperature
         Phase_diagram = self.Phase_diagram
         try:
+            V_OL = []
+            V_WA = []
+            V_RI = []
             ol = Regression("olivine")
             wad = Regression("wadsleyite")
             ring = Regression("ringwoodite")
             OL = OL_(ol)
             WA = WA_(wad)
             RI = RI_(ring)
-            mineral_list = [an, ab, sp, hc, en, fs, mgts, odi, hpcen, hpcfs, di, he, cen, cats,
-                            jd, py, al, gr, mgmj, jdmj, capv, fo, fa, mgwa, fewa, mgri, feri,
-                            mgil, feil, co, mgpv, fepv, alpv, mppv, fppv, appv, mgcf, fecf,
-                            nacf, pe, wu, qtz, coes, st, an, ky, neph, OL, WA, RI]
+            mineral_list = [an, ab, sp, hc, en, fs, mgts, odi, hpcen, hpcfs, di, he, cen,
+                            cats, jd, py, al, gr, mgmj, jdmj, capv, fo, fa, mgwa, fewa, mgri,
+                            feri, mgil, feil, co, mgpv, fepv, alpv, mppv, fppv, appv, mgcf,
+                            fecf, nacf, pe, wu, qtz, coes, st, an, ky, neph, OL, WA, RI]
             for i in mineral_list:
                 i.Clear_Vp_Vs()
             for number, phase in enumerate(Phase_diagram):
@@ -417,6 +420,9 @@ class HyMaTZ():
                 Rho = []
                 phase[53] = 0
                 phase[54] = 0
+                V_OL.append(0.)
+                V_WA.append(0.)
+                V_RI.append(0.)
                 OL.Set_Water_Iron_Condition(
                     h2o_profile.OL_water[number], 1 - self.fo[number])
                 WA.Set_Water_Iron_Condition(
@@ -433,6 +439,12 @@ class HyMaTZ():
                             G.append(g)
                             Rho.append(rho)
                             V.append(phase[num])
+                            if i.name == "Olivine":
+                                V_OL[number] = phase[num]
+                            if i.name == "Wadsleyite":
+                                V_WA[number] = phase[num]
+                            if i.name == "Ringwoodite":
+                                V_RI[number] = phase[num]
                             a, b, c = i.Vp_Vs(Pressure[number] * 1e5, Temperature[number])
                             c *= 1000
                             i.Store_Vp_Vs(a, b, c, phase[1], phase[num])
@@ -441,8 +453,25 @@ class HyMaTZ():
                 self.Vp[number] = (np.sqrt((self.K[number] + 4. * self.G[number] / 3.) /
                                            self.Rho[number]) / 1000.)
                 self.Vs[number] = np.sqrt(self.G[number]/self.Rho[number]) / 1000.
-            self.results = {"T": self.sys.Temperature, "P": self.sys.Pressure / 1e4,
-                            "rho": self.Rho / 1e3, "Vp": self.Vp, "Vs": self.Vs}
+            V_OL = np.array(V_OL)
+            V_WA = np.array(V_WA)
+            V_RI = np.array(V_RI)
+            OL_water = self.h2o_profile.OL_water
+            WA_water = self.h2o_profile.WA_water
+            RI_water = self.h2o_profile.RI_water
+            h2o = (V_OL * OL_water) + (V_WA * WA_water) + (V_RI * RI_water)
+            self.results = {"T": np.round(self.sys.Temperature, 3),
+                            "P": np.round(self.sys.Pressure / 1e4, 3),
+                            "rho": np.round(self.Rho / 1e3, 3),
+                            "Vp": self.Vp.round(3),
+                            "Vs": self.Vs.round(3),
+                            "h2o": h2o.round(3),
+                            "OL_mode": V_OL.round(3),
+                            "WA_mode": V_WA.round(3),
+                            "RI_mode": V_RI.round(3),
+                            "OL_water": OL_water.round(3),
+                            "WA_water": WA_water.round(3),
+                            "RI_water": RI_water.round(3)}
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in _compute_elastic_properties() !!!")
