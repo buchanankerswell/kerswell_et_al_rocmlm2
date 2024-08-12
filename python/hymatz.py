@@ -338,8 +338,6 @@ class HyMaTZ():
         """
         # Get self attributes
         if os.path.exists(self.profile_out_path):
-            if self.verbose >= 1:
-                print(f"  Found HyMaTZ profile {self.profile_out_path} !")
             try:
                 self.existing_profile = True
                 df = pd.read_csv(self.profile_out_path, sep="\t")
