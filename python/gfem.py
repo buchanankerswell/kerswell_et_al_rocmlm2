@@ -93,21 +93,23 @@ class GFEMModel:
             self.target_units = [self.target_units[i] for i in t_ind]
 
         # Check perplex db
-        if perplex_db not in ["hp02", "hp633", "stx21", "koma06"]:
-            self.perplex_db = "hp633"
+        if perplex_db not in ["hp02", "hp622", "hp633", "stx21", "koma06"]:
+            self.perplex_db = "hp622"
         else:
             self.perplex_db = perplex_db
 
         # System oxide components
-        self.ox_exclude = ["FE2O3", "P2O5", "NIO", "MNO", "H2O", "CO2"]
-        self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2",
-                        "CR2O3", "LOI"]
+        if self.perplex_db == "hp633":
+            self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
+        if self.perplex_db == "hp622":
+            self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
         if self.perplex_db == "hp02":
-            self.ox_gfem = [ox for ox in self.ox_gfem if ox != "CR2O3"]
+            self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
         if self.perplex_db == "stx21":
             self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O"]
         if self.perplex_db == "koma06":
             self.ox_gfem = ["SIO2", "MGO", "LOI"]
+        self.ox_exclude = ["FE2O3", "P2O5", "NIO", "MNO", "H2O", "CO2"]
 
         # Perplex dirs and filepaths
         self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
@@ -761,7 +763,7 @@ class GFEMModel:
                  f"explicit_bulk_modulus  T\n"
                  f"melt_is_fluid          T\n"
                  f"poisson_test           F\n"
-                 f"poisson_ratio          on 0.35\n"
+                 f"poisson_ratio          on 0.31\n"
                  f"seismic_output         some\n"
                  f"auto_refine_file       F\n"
                  f"seismic_data_file      F\n")
@@ -803,7 +805,7 @@ class GFEMModel:
         with open(f"{model_out_dir}/pssect-draw", "w") as file:
             file.write(f"{sid}\nN")
 
-        if perplex_db == "hp633":
+        if perplex_db == "hp622":
             # Build
             b = (f"{sid}\n"            # Proj name
                  f"td-data\n"          # Thermodynamic data file
@@ -818,10 +820,7 @@ class GFEMModel:
                  f"CaO\n"              # Select components (1 per line)
                  f"MgO\n"              # Select components (1 per line)
                  f"FeO\n"              # Select components (1 per line)
-                 f"K2O\n"              # Select components (1 per line)
                  f"Na2O\n"             # Select components (1 per line)
-                 f"TiO2\n"             # Select components (1 per line)
-                 f"Cr2O3\n"            # Select components (1 per line)
                  f"H2O\n"              # Select components (1 per line)
                  f"\n"                 # Enter to finish
                  f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
@@ -834,43 +833,136 @@ class GFEMModel:
                  f"N\n"                # Print output file ?
                  f"Y\n"                # Exclude pure and/or endmember phases ?
                  f"N\n"                # Prompt for phases ?
-                 f"anL\n"              # Enter names (1 per line)
+                 f"fbr\n"              # Enter names (1 per line)
+                 f"br\n"              # Enter names (1 per line)
+                 f"prl\n"              # Enter names (1 per line)
+                 f"grun\n"             # Enter names (1 per line)
+                 f"cumm\n"             # Enter names (1 per line)
+                 f"gl\n"               # Enter names (1 per line)
+                 f"ts\n"               # Enter names (1 per line)
+                 f"parg\n"             # Enter names (1 per line)
                  f"perL\n"             # Enter names (1 per line)
                  f"enL\n"              # Enter names (1 per line)
-                 f"hemL\n"             # Enter names (1 per line)
-                 f"hmL\n"              # Enter names (1 per line)
-                 f"hmWL\n"             # Enter names (1 per line)
-                 f"hmTHL\n"            # Enter names (1 per line)
-                 f"tiL\n"              # Enter names (1 per line)
-                 f"tiWL\n"             # Enter names (1 per line)
-                 f"tiTHL\n"            # Enter names (1 per line)
-                 f"ruL\n"              # Enter names (1 per line)
-                 f"faTL\n"             # Enter names (1 per line)
-                 f"fa8L\n"             # Enter names (1 per line)
-                 f"foTHL\n"            # Enter names (1 per line)
-                 f"kWL\n"              # Enter names (1 per line)
-                 f"kjL\n"              # Enter names (1 per line)
-                 f"kjTHL\n"            # Enter names (1 per line)
-                 f"kspL\n"             # Enter names (1 per line)
-                 f"lcL\n"              # Enter names (1 per line)
-                 f"fbi\n"              # Enter names (1 per line)
-                 f"tbi\n"              # Enter names (1 per line)
-                 f"lc\n"               # Enter names (1 per line)
-                 f"kjd\n"              # Enter names (1 per line)
-                 f"kls\n"              # Enter names (1 per line)
-                 f"hol\n"              # Enter names (1 per line)
-                 f"wa\n"               # Enter names (1 per line)
                  f"cen\n"              # Enter names (1 per line)
                  f"naph\n"             # Enter names (1 per line)
+                 f"nagt\n"             # Enter names (1 per line)
+                 f"wu\n"               # Enter names (1 per line)
+                 f"cz\n"               # Enter names (1 per line)
+                 f"h2oL\n"             # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"Y\n"                # Include solution models ?
+                 f"solution-models\n"  # Solution model file
+                 f"O(JH)\n"            # Enter names (1 per line)
+                 f"Wad\n"              # Enter names (1 per line)
+                 f"Ring\n"             # Enter names (1 per line)
+                 f"Aki\n"              # Enter names (1 per line)
+                 f"Cpx(JH)\n"          # Enter names (1 per line)
+                 f"Omph(GHP)\n"        # Enter names (1 per line)
+                 f"Hpx(H)\n"           # Enter names (1 per line)
+                 f"Opx(JH)\n"          # Enter names (1 per line)
+                 f"Sp(JH)\n"           # Enter names (1 per line)
+                 f"Grt(JH)\n"          # Enter names (1 per line)
+                 f"Maj\n"              # Enter names (1 per line)
+                 f"feldspar\n"         # Enter names (1 per line)
+                 f"Chum\n"             # Enter names (1 per line)
+                 f"Anth\n"             # Enter names (1 per line)
+                 f"cAmph(DP)\n"        # Enter names (1 per line)
+                 f"Wus\n"              # Enter names (1 per line)
+                 f"Pv\n"               # Enter names (1 per line)
+                 f"Fper(H)\n"          # Enter names (1 per line)
+                 f"Mpv(H)\n"           # Enter names (1 per line)
+                 f"Cpv(H)\n"           # Enter names (1 per line)
+                 f"CFer(H)\n"          # Enter names (1 per line)
+                 f"Chl(W)\n"           # Enter names (1 per line)
+                 f"Atg(PN)\n"          # Enter names (1 per line)
+                 f"A-phase\n"          # Enter names (1 per line)
+                 f"T\n"                # Enter names (1 per line)
+                 f"Melt(JH)\n"       # Enter names (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"{sid}\n"            # Calculation title
+                 )
+            # Werami targets
+            w = (f"{sid}\n"            # Proj name
+                 f"2\n"                # Operational mode (2: properties on 2D grid)
+                 f"2\n"                # Select a property (2: Density kg/m3)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"13\n"               # Select a property (13: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"14\n"               # Select a property (14: P-wave velocity m/s)
+                 f"N\n"                # Calculate individual phase properties ?
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"24\n"               # Select a property (24: Assemblage index)
+                 f"7\n"                # Select a property (7: Mode % of phase)
+                 f"Melt(JH)\n"         # Enter solution or compound
+                 f"6\n"                # Select a property (6: Composition of system)
+                 f"1\n"                # Enter a component (1: H2O)
+                 f"N\n"                # Include fluid in computation of properties ?
+                 f"0\n"                # Zero to finish
+                 f"N\n"                # Change default variable range ?
+                 f"\n"                 # Select the grid resolution (enter to continue)
+                 f"5\n"                # Dummy
+                 f"0\n"                # Zero to exit
+                 )
+            # Copy thermodynamic data
+            shutil.copy(f"{data_dir}/hp622-td", f"{model_out_dir}/td-data")
+            shutil.copy(f"{data_dir}/hp-sl", f"{model_out_dir}/solution-models")
+        elif perplex_db == "hp633":
+            # Build
+            b = (f"{sid}\n"            # Proj name
+                 f"td-data\n"          # Thermodynamic data file
+                 f"build-options\n"    # Build options file
+                 f"N\n"                # Transform components ?
+                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
+                 f"N\n"                # Calculations with saturated fluid ?
+                 f"N\n"                # Calculations with saturated components ?
+                 f"N\n"                # Use chemical potentials as independent variables ?
+                 f"SiO2\n"             # Select components (1 per line)
+                 f"Al2O3\n"            # Select components (1 per line)
+                 f"CaO\n"              # Select components (1 per line)
+                 f"MgO\n"              # Select components (1 per line)
+                 f"FeO\n"              # Select components (1 per line)
+                 f"Na2O\n"             # Select components (1 per line)
+                 f"H2O\n"              # Select components (1 per line)
+                 f"\n"                 # Enter to finish
+                 f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
+                 f"N\n"                # Calculate along a geotherm ?
+                 f"2\n"                # X-axis variable (2: T(K))
+                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
+                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
+                 f"Y\n"                # Specify component amounts by mass ?
+                 f"{norm_comp}\n"      # Enter mass amounts of components
+                 f"N\n"                # Print output file ?
+                 f"Y\n"                # Exclude pure and/or endmember phases ?
+                 f"N\n"                # Prompt for phases ?
+                 f"fbr\n"              # Enter names (1 per line)
+                 f"br\n"              # Enter names (1 per line)
+                 f"prl\n"              # Enter names (1 per line)
+                 f"grun\n"             # Enter names (1 per line)
+                 f"cumm\n"             # Enter names (1 per line)
+                 f"gl\n"               # Enter names (1 per line)
+                 f"ts\n"               # Enter names (1 per line)
+                 f"parg\n"             # Enter names (1 per line)
+                 f"perL\n"             # Enter names (1 per line)
+                 f"faTL\n"             # Enter names (1 per line)
+                 f"foTL\n"             # Enter names (1 per line)
+                 f"fa8L\n"             # Enter names (1 per line)
+                 f"fo8L\n"             # Enter names (1 per line)
+                 f"enL\n"              # Enter names (1 per line)
+                 f"cen\n"              # Enter names (1 per line)
+                 f"naph\n"             # Enter names (1 per line)
+                 f"nagt\n"             # Enter names (1 per line)
+                 f"wu\n"               # Enter names (1 per line)
                  f"cz\n"               # Enter names (1 per line)
                  f"h2oL\n"             # Enter names (1 per line)
                  f"\n"                 # Enter to finish
                  f"Y\n"                # Include solution models ?
                  f"solution-models\n"  # Solution model file
                  f"O(HGP)\n"           # Enter names (1 per line)
-                 f"Wad(H)\n"           # Enter names (1 per line)
-                 f"Ring(H)\n"          # Enter names (1 per line)
-                 f"Aki(H)\n"           # Enter names (1 per line)
+                 f"Wad\n"              # Enter names (1 per line)
+                 f"Ring\n"             # Enter names (1 per line)
+                 f"Aki\n"              # Enter names (1 per line)
                  f"Cpx(HGP)\n"         # Enter names (1 per line)
                  f"Omph(GHP)\n"        # Enter names (1 per line)
                  f"Hpx(H)\n"           # Enter names (1 per line)
@@ -881,6 +973,7 @@ class GFEMModel:
                  f"feldspar\n"         # Enter names (1 per line)
                  f"Chum\n"             # Enter names (1 per line)
                  f"Anth\n"             # Enter names (1 per line)
+                 f"cAmph(DP)\n"        # Enter names (1 per line)
                  f"Wus\n"              # Enter names (1 per line)
                  f"Pv\n"               # Enter names (1 per line)
                  f"Fper(H)\n"          # Enter names (1 per line)
@@ -890,7 +983,6 @@ class GFEMModel:
                  f"Chl(W)\n"           # Enter names (1 per line)
                  f"Atg(PN)\n"          # Enter names (1 per line)
                  f"A-phase\n"          # Enter names (1 per line)
-                 f"B\n"                # Enter names (1 per line)
                  f"T\n"                # Enter names (1 per line)
                  f"melt(HGPH)\n"       # Enter names (1 per line)
                  f"\n"                 # Enter to finish
@@ -922,7 +1014,7 @@ class GFEMModel:
                  )
             # Copy thermodynamic data
             shutil.copy(f"{data_dir}/hp633-td", f"{model_out_dir}/td-data")
-            shutil.copy(f"{data_dir}/hp633-sl", f"{model_out_dir}/solution-models")
+            shutil.copy(f"{data_dir}/hp-sl", f"{model_out_dir}/solution-models")
         elif perplex_db == "hp02":
             # Build
             b = (f"{sid}\n"            # Proj name
@@ -938,9 +1030,7 @@ class GFEMModel:
                  f"CAO\n"              # Select components (1 per line)
                  f"MGO\n"              # Select components (1 per line)
                  f"FEO\n"              # Select components (1 per line)
-                 f"K2O\n"              # Select components (1 per line)
                  f"NA2O\n"             # Select components (1 per line)
-                 f"TIO2\n"             # Select components (1 per line)
                  f"H2O\n"              # Select components (1 per line)
                  f"\n"                 # Enter to finish
                  f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
@@ -953,21 +1043,19 @@ class GFEMModel:
                  f"N\n"                # Print output file ?
                  f"Y\n"                # Exclude pure and/or endmember phases ?
                  f"N\n"                # Prompt for phases ?
-                 f"anL\n"              # Enter names (1 per line)
-                 f"enL\n"              # Enter names (1 per line)
-                 f"fa8L\n"             # Enter names (1 per line)
-                 f"faL\n"              # Enter names (1 per line)
-                 f"faGL\n"             # Enter names (1 per line)
-                 f"foGL\n"             # Enter names (1 per line)
-                 f"kalGL\n"            # Enter names (1 per line)
-                 f"woGL\n"             # Enter names (1 per line)
-                 f"tiGL\n"             # Enter names (1 per line)
-                 f"nasGL\n"            # Enter names (1 per line)
-                 f"kspL\n"             # Enter names (1 per line)
-                 f"diL\n"              # Enter names (1 per line)
-                 f"ilm_nol\n"          # Enter names (1 per line)
-                 f"musp\n"             # Enter names (1 per line)
+                 f"fbr\n"              # Enter names (1 per line)
+                 f"br\n"              # Enter names (1 per line)
+                 f"prl\n"              # Enter names (1 per line)
+                 f"grun\n"             # Enter names (1 per line)
+                 f"cumm\n"             # Enter names (1 per line)
+                 f"gl\n"               # Enter names (1 per line)
+                 f"ts\n"               # Enter names (1 per line)
+                 f"parg\n"             # Enter names (1 per line)
+                 f"perL\n"             # Enter names (1 per line)
+                 f"cen\n"              # Enter names (1 per line)
                  f"naph\n"             # Enter names (1 per line)
+                 f"nagt\n"             # Enter names (1 per line)
+                 f"wu\n"               # Enter names (1 per line)
                  f"cz\n"               # Enter names (1 per line)
                  f"h2oL\n"             # Enter names (1 per line)
                  f"\n"                 # Enter to finish
@@ -981,13 +1069,14 @@ class GFEMModel:
                  f"Gt(HGP)\n"          # Enter names (1 per line)
                  f"Maj\n"              # Enter names (1 per line)
                  f"feldspar\n"         # Enter names (1 per line)
+                 f"Chum\n"             # Enter names (1 per line)
                  f"Anth\n"             # Enter names (1 per line)
+                 f"cAmph(DP)\n"        # Enter names (1 per line)
                  f"Wus\n"              # Enter names (1 per line)
                  f"Fper(H)\n"          # Enter names (1 per line)
                  f"Chl(W)\n"           # Enter names (1 per line)
                  f"Atg(PN)\n"          # Enter names (1 per line)
                  f"A-phase\n"          # Enter names (1 per line)
-                 f"B\n"                # Enter names (1 per line)
                  f"T\n"                # Enter names (1 per line)
                  f"melt(HP)\n"         # Enter names (1 per line)
                  f"\n"                 # Enter to finish
@@ -1019,7 +1108,7 @@ class GFEMModel:
                  )
             # Copy thermodynamic data
             shutil.copy(f"{data_dir}/hp02-td", f"{model_out_dir}/td-data")
-            shutil.copy(f"{data_dir}/hp02-sl", f"{model_out_dir}/solution-models")
+            shutil.copy(f"{data_dir}/hp-sl", f"{model_out_dir}/solution-models")
         elif perplex_db == "stx21":
             # Build
             b = (f"{sid}\n"            # Proj name
@@ -1176,7 +1265,7 @@ class GFEMModel:
         for temp in mantle_potential_temps:
             self._get_1d_profile(mantle_potential=temp)
 
-        if perplex_db in ["hp633", "hp02", "koma06"]:
+        if perplex_db in ["hp633", "hp622", "hp02", "koma06"]:
             # Werami phase
             f = (f"{sid}\n"            # Proj name
                  f"2\n"                # Operational mode (2: properties on 2D grid)
@@ -1578,7 +1667,11 @@ class GFEMModel:
         # Convert numeric point results into numpy arrays
         for key, value in results.items():
             if key in point_params:
-                results[key] = np.array(value)
+                # Add correction for Vs
+                if perplex_db in ["hp633", "hp622"] and key == "Vs":
+                    results[key] = np.array(value) + 0.15
+                else:
+                    results[key] = np.array(value)
 
         # Save as pandas df
         df = pd.DataFrame.from_dict(results)
@@ -2218,7 +2311,7 @@ class GFEMModel:
                     if target == "melt": vmin, vmax = 0, 100
 
                     # Set h2o fraction to 0–100 wt.%
-                    if target == "h2o": vmin, vmax = 0, 5
+                    if target == "h2o": vmin, vmax = 0, 2
 
                 # Set nan color
                 cmap = plt.colormaps[cmap]
@@ -2509,7 +2602,7 @@ class GFEMModel:
                     if target == "melt": vmin, vmax = 0, 100
 
                     # Set h2o fraction to 0–100 wt.%
-                    if target == "h2o": vmin, vmax = 0, 5
+                    if target == "h2o": vmin, vmax = 0, 2
 
                 # Set nan color
                 cmap = plt.get_cmap(cmap)
@@ -2726,7 +2819,7 @@ class GFEMModel:
                     ax1.fill_betweenx(P_hy3, target_hy3, target_hy4, color=colormap(0),
                                       alpha=0.2)
                     ax1.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(0),
-                             label="HyMaTZ 1573")
+                             label="HyMaTZ")
                     ax1.plot(target_hy4, P_hy4, "-", linewidth=2, color=colormap(0))
                 if "high" in geotherms:
                     ax1.fill_betweenx(P_hy5, target_hy5, target_hy6, color=colormap(4),
@@ -2743,7 +2836,7 @@ class GFEMModel:
                                   target_gfem * (1 + 0.05), color=colormap(3), alpha=0.2)
             if "mid" in geotherms:
                 ax1.plot(target_gfem2, P_gfem2, "-", linewidth=2, color=colormap(1),
-                         label=f"Perple_X 1573")
+                         label=f"Perple_X")
                 ax1.fill_betweenx(P_gfem2, target_gfem2 * (1 - 0.05),
                                   target_gfem2 * (1 + 0.05), color=colormap(1), alpha=0.2)
             if "high" in geotherms:
@@ -2860,12 +2953,16 @@ class GFEMModel:
         plt.rcParams["figure.autolayout"] = "True"
 
         # Get unique phases
-        if perplex_db in ["hp02", "hp633"]:
-            phase_names = ["O(HGP)", "O(HP)", "Wad(H)", "Ring(H)", "Aki(H)", "Cpx(HGP)",
-                           "Omph(GHP)", "Hpx(H)", "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj",
-                           "feldspar", "Chum", "Anth", "Wus", "Pv", "Fper(H)", "Mpv(H)",
-                           "Cpv(H)", "CFer(H)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                           "melt(HGPH)", "stv", "parg", "chdr"]
+        if perplex_db == "hp02":
+            phase_names = ["O(HP)", "cAmph(DP)", "Cpx(HGP)", "Opx(HGP)", "Maj", "Wus",
+                           "stv", "chdr"]
+        if perplex_db == "hp633":
+            phase_names = ["O(HGP)", "Wad", "Ring", "Aki", "cAmph(DP)", "Cpx(HGP)",
+                           "Opx(HGP)", "Hpx(H)", "Maj", "Wus", "Mpv(H)", "CFer(H)", "stv",
+                           "chdr"]
+        elif perplex_db == "hp622":
+            phase_names = ["O(JH)", "Wad", "Ring", "cAmph(DP)", "Cpx(JH)", "Opx(JH)",
+                           "Hpx(H)", "Maj", "Wus", "Mpv(H)", "CFer(H)", "stv", "chdr"]
         elif perplex_db == "koma06":
             phase_names = ["chum", "phA", "phE", "phD", "phB", "hwd", "hrg", "br", "fo",
                            "hen", "wd", "rg", "aki", "pv", "per", "stv"]
@@ -2876,11 +2973,9 @@ class GFEMModel:
         # Sort unique phases and assign unique colors
         sorted_column_names = sorted(phase_names, key=lambda x: x[:2])
         num_colors = len(sorted_column_names)
-#        cmap = plt.get_cmap("tab20b", num_colors)
-#        colors = [cmap(i) for i in range(num_colors)]
         colors = sns.color_palette("husl", num_colors)
         color_map = {col_name: colors[idx % num_colors] for idx, col_name in
-                     enumerate(sorted_column_names)}
+                     enumerate(phase_names)}
 
         # Get 1D reference models
         ref_models = self._get_1d_reference_models()
@@ -2900,10 +2995,21 @@ class GFEMModel:
             with open(tabfile, "w") as file:
                 file.write(content)
 
-            # Read wearmi file and drop minor phases
+            # Read wearmi file
             df = pd.read_csv(tabfile, sep="\\s+", skiprows=8)
             df = df.dropna(axis=1, how="all")
             df = df.fillna(0)
+
+            # Combine duplicate columns
+            normalized_columns = df.columns.str.replace(r'\.\d+$', '', regex=True)
+            duplicate_columns = normalized_columns[normalized_columns.duplicated()].unique()
+            for base_name in duplicate_columns:
+                cols_to_combine = df.loc[:, normalized_columns == base_name]
+                combined_col = cols_to_combine.sum(axis=1)
+                df[base_name] = combined_col
+                df = df.drop(cols_to_combine.columns[1:], axis=1)
+
+            # Drop minor phases
             df = df.drop(columns=[col for col in df.columns if
                                   (df[col] < modal_thresh).all()])
 
@@ -2957,14 +3063,14 @@ class GFEMModel:
                 ax_line_sec.set_ylim(-0.04, 1)
                 ax_line_sec.set_yticks([0])
             else:
-                ax_line_sec.set_ylim(None, 5)
+                ax_line_sec.set_ylim(None, 2)
             lines2, labels2 = ax_line_sec.get_legend_handles_labels()
             ax_line.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
             ax_line.set_title(f"Mantle potential: {g} K")
 
             handles, labels = ax_stack.get_legend_handles_labels()
             sorted_handles_labels = sorted(zip(handles, labels),
-                                           key=lambda x: sorted_column_names.index(x[1]))
+                                           key=lambda x: phase_names.index(x[1]))
             handles, labels = zip(*sorted_handles_labels)
             labels = [label.split("(")[0].strip() for label in labels]
 
@@ -3154,29 +3260,6 @@ def combine_plots_vertically(image1_path, image2_path, output_path, caption1, ca
     combined_image.save(output_path, dpi=(dpi, dpi))
 
     return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# compose gfem plots !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compose_gfem_plots(gfem_models, clean=False, nprocs=os.cpu_count() - 2):
-    """
-    """
-    # Iterate through all models
-    print("Composing GFEM plots ...")
-    with mp.Pool(processes=nprocs) as pool:
-        results = [pool.apply_async(compose_itr, args=(m, clean)) for m in gfem_models]
-        for result in results:
-            try:
-                result.get()
-            except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in compose_gfem_plots() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                traceback.print_exc()
-
-    return None
-
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # compose itr !!
@@ -3397,6 +3480,28 @@ def compose_itr(gfem_model, clean=False):
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compose gfem plots !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compose_gfem_plots(gfem_models, clean=False, nprocs=os.cpu_count() - 2):
+    """
+    """
+    # Iterate through all models
+    print("Composing GFEM plots ...")
+    with mp.Pool(processes=nprocs) as pool:
+        results = [pool.apply_async(compose_itr, args=(m, clean)) for m in gfem_models]
+        for result in results:
+            try:
+                result.get()
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in compose_gfem_plots() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
+
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # visualize prem comps !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
@@ -3520,30 +3625,18 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
 
             ax = axes[i]
 
-            # Plot GFEM and RocMLM profiles
-#            if sid == bend:
-#                ax.plot(target_gfem, P_gfem, "-", linewidth=3, color=sm.to_rgba(xi),
-#                        label="PSUM", zorder=6)
-#            if sid == tend:
-#                ax.plot(target_gfem, P_gfem, "-", linewidth=3, color=sm.to_rgba(xi),
-#                        label="DSUM", zorder=6)
+            # Plot GFEM profiles
             ax.plot(target_gfem, P_gfem, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.2)
-            if target == "Vp":
-                ax.plot(target_gfem + 0.4, P_gfem, "-", linewidth=1, color="black",
-                        alpha=0.2)
-            if target == "Vs":
-                ax.plot(target_gfem + 0.75, P_gfem, "-", linewidth=1, color="black",
-                        alpha=0.2)
 
+            # Plot reference models
             if (j == 0) and (target in ["rho", "Vp", "Vs"]):
-                # Plot reference models
                 ax.plot(target_prem, P_prem, "-", linewidth=2, color="forestgreen",
                         label="PREM", zorder=999)
                 ax.plot(target_stw105, P_stw105, ":", linewidth=2, color="forestgreen",
                         label="STW105", zorder=999)
 
+            # Plot HyMaTZ profiles for dry and 100% WSC Pyrolite
             if (j == 0) and (target in ["rho", "Vp", "Vs", "h2o"]):
-                # Plot HyMaTZ profiles for dry and 100% WSC Pyrolite
                 ax.fill_betweenx(P_hy3, target_hy3, target_hy4, color=colormap(0),
                                   alpha=0.2, zorder=998)
                 ax.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(0),
@@ -3591,8 +3684,8 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
             depth_conversion = lambda P: P * 30
             depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
 
+            # Create the secondary y-axis and plot depth on it
             if (i == 1) or (i == 3):
-                # Create the secondary y-axis and plot depth on it
                 ax2 = ax.secondary_yaxis(
                     "right", functions=(depth_conversion, depth_conversion))
                 ax2.set_yticks([410, 670])
@@ -3763,7 +3856,7 @@ def main():
 
         for name, source in sources.items():
             sids = get_sampleids(source)
-            gfems[name] = build_gfem_models(source, sids)
+            gfems[name] = build_gfem_models(source, sids, res=64)
 
         # Compose plots
         for name, models in gfems.items():
