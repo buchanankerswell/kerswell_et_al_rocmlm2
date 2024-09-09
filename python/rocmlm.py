@@ -52,9 +52,9 @@ class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, gfem_models, ml_model, X_step=1, PT_step=1,
                  training_features=["XI_FRAC", "LOI"],
-                 training_targets=["rho", "h2o", "melt"], tune=True,
-                 epochs=100, batchprop=0.2, kfolds=5, nprocs=os.cpu_count() - 2,
-                 seed=42, verbose=1):
+                 training_targets=["rho", "Vp", "Vs", "h2o", "melt"],
+                 tune=True, epochs=int(1e2), batchprop=0.2, kfolds=5,
+                 nprocs=os.cpu_count() - 2, seed=42, verbose=1):
         """
         """
         # Input
@@ -1425,6 +1425,14 @@ class RocMLM:
         if type not in {"targets", "predictions", "diff", "prem"}:
             raise ValueError("Unrecognized array image type!")
 
+        # Only visualize dry and max hydrated samples
+        if any(s in sids for s in ["PUM", "DMM", "PYR"]):
+            pass
+        else:
+            sids = [sid for sid in sids if
+                    re.search(r"sm.*loi001", sid) or
+                    re.search(r"sm.*loi007", sid)]
+
         missing_sids = []
 
         # Check for existing plots
@@ -1767,7 +1775,7 @@ class RocMLM:
                             if target == "rho": vmin, vmax = 1.8, 4.6
 
                             # Set h2o fraction to 0–100 wt.%
-                            if target == "h2o": vmin, vmax = 0, 5
+                            if target == "h2o": vmin, vmax = 0, 2
 
                             # Set melt fraction to 0–100 vol.%
                             if target == "melt": vmin, vmax = 0, 100
@@ -2048,7 +2056,7 @@ class RocMLM:
                         ax1.set_xlabel(f"{target_label}")
                     ax1.set_ylabel("P (GPa)")
                     if target == "h2o":
-                        ax1.set_xlim(None, 5)
+                        ax1.set_xlim(None, 2)
                     ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
                     ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
@@ -2111,8 +2119,10 @@ class RocMLM:
         W = self.shape_feature_square[1]
 
         # Only visualize largets models
-        if ((S == 323 and W == 129) or
-            (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+#        if ((S == 323 and W == 129) or
+#            (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+        if ((S == 248 and W == 65) or
+            (S == 3 and W == 65 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
             try:
                 sids = self._check_rocmlm_images(type="targets")
                 if sids: self._visualize_array_image(sids, type="targets")
@@ -2338,7 +2348,6 @@ def compose_rocmlm_img9_itr(args):
     verbose = rocmlm.verbose
     model_prefix = rocmlm.model_prefix
     ml_model_label = rocmlm.ml_model_label
-    training_targets = rocmlm.training_targets
 
     # Unique pid
     pid = os.getpid()
@@ -2363,7 +2372,7 @@ def compose_rocmlm_img9_itr(args):
 
     # Image9 diff
     captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-    for i, target in enumerate(training_targets):
+    for i, target in enumerate(["rho", "h2o", "melt"]):
         if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
         fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
         fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
@@ -2379,7 +2388,7 @@ def compose_rocmlm_img9_itr(args):
     combine_plots_vertically(temp_rho, temp_h2o, temp, caption1="", caption2="")
     combine_plots_vertically(temp, temp_melt, img9_diff, caption1="", caption2="")
 
-    for i, target in enumerate(training_targets):
+    for i, target in enumerate(["rho", "h2o", "melt"]):
         if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
         fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
         fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
@@ -2402,6 +2411,87 @@ def compose_rocmlm_img9_itr(args):
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# compose rocmlm img15 itr !!
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def compose_rocmlm_img15_itr(args):
+    # Unpack args
+    sid, rocmlm = args
+
+    # Get rocmlm attributes
+    fig_dir = rocmlm.fig_dir
+    verbose = rocmlm.verbose
+    model_prefix = rocmlm.model_prefix
+    ml_model_label = rocmlm.ml_model_label
+
+    # Unique pid
+    pid = os.getpid()
+
+    # Define temp paths
+    temp = f"{fig_dir}/temp-{pid}-{sid}.png"
+    temp_rho = f"{fig_dir}/temp-rho-{pid}-{sid}.png"
+    temp_vp = f"{fig_dir}/temp-vp-{pid}-{sid}.png"
+    temp_vs = f"{fig_dir}/temp-vs-{pid}-{sid}.png"
+    temp_h2o = f"{fig_dir}/temp-h2o-{pid}-{sid}.png"
+    temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
+
+    # Define composition paths
+    img15_diff = f"{fig_dir}/image15-{sid}-{ml_model_label}-diff.png"
+    img15_prof = f"{fig_dir}/image15-{sid}-{ml_model_label}-profile.png"
+
+    # Check for existing plots
+    fig_1 = f"{fig_dir}/image15-{sid}-{ml_model_label}-diff.png"
+    fig_2 = f"{fig_dir}/image15-{sid}-{ml_model_label}-profile.png"
+    if (os.path.exists(fig_1) and os.path.exists(fig_2)):
+        for file in [temp, temp_rho, temp_h2o, temp_melt]:
+            if os.path.exists(file): os.remove(file)
+        return None
+
+    # Image15 diff
+    captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)"),
+                ("j)", "k)", "l)"), ("m)", "n)", "o)")]
+    for i, target in enumerate(["rho", "vp", "vs", "h2o", "melt"]):
+        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
+        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
+        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
+        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
+        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
+        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
+        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
+        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
+                                   caption2=captions[i][1])
+        combine_plots_horizontally(temp1, fig_diff, temp2, caption1="",
+                                   caption2=captions[i][2])
+
+    combine_plots_vertically(temp_rho, temp_vp, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_vs, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_h2o, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_melt, img15_diff, caption1="", caption2="")
+
+    for i, target in enumerate(["rho", "vp", "vs", "h2o", "melt"]):
+        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
+        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
+        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
+        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
+        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
+        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
+        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
+        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
+                                   caption2=captions[i][1])
+        combine_plots_horizontally(temp1, fig_prem, temp2, caption1="",
+                                   caption2=captions[i][2])
+
+    combine_plots_vertically(temp_rho, temp_vp, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_vs, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_h2o, temp, caption1="", caption2="")
+    combine_plots_vertically(temp, temp_melt, img15_prof, caption1="", caption2="")
+
+    # Clean up temporary files created by this worker
+    for file in [temp, temp1, temp2, temp_rho, temp_vp, temp_vs, temp_h2o, temp_melt]:
+        if os.path.exists(file): os.remove(file)
+
+    return None
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # compose rocmlm plots !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def compose_rocmlm_plots(rocmlm):
@@ -2416,11 +2506,23 @@ def compose_rocmlm_plots(rocmlm):
     training_targets = rocmlm.training_targets
 
     # Only visualize largets models
-    if ((S == 323 and W == 129) or
-        (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+#    if ((S == 323 and W == 129) or
+#        (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+    if ((S == 248 and W == 65) or
+        (S == 3 and W == 65 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
+
+        # Only visualize dry and max hydrated samples
+        if any(s in sids for s in ["PUM", "DMM", "PYR"]):
+            pass
+        else:
+            sids = [sid for sid in sids if
+                    re.search(r"sm.*loi001", sid) or
+                    re.search(r"sm.*loi007", sid)]
+
         # Create list of args for mp pooling
         args_img3 = [(sid, target, rocmlm) for sid in sids for target in training_targets]
         args_img9 = [(sid, rocmlm) for sid in sids]
+        args_img15 = [(sid, rocmlm) for sid in sids]
 
         print(f"Composing RocMLM plots for {len(sids)} samples:")
         print(sids)
@@ -2436,6 +2538,14 @@ def compose_rocmlm_plots(rocmlm):
         # Create a multiprocessing pool
         with mp.Pool(processes=nprocs) as pool:
             pool.map(compose_rocmlm_img9_itr, args_img9)
+
+            # Wait for all processes
+            pool.close()
+            pool.join()
+
+        # Create a multiprocessing pool
+        with mp.Pool(processes=nprocs) as pool:
+            pool.map(compose_rocmlm_img15_itr, args_img15)
 
             # Wait for all processes
             pool.close()
@@ -2530,8 +2640,8 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
                                        data_rocmlm["model_size_mb"])
 
     # Select columns
-    data_rocmlm = data_rocmlm[["sample", "model", "size", "time",
-                               "model_size_mb", "model_efficiency", "rmse_test_mean_rho",
+    data_rocmlm = data_rocmlm[["sample", "model", "size", "time", "model_size_mb",
+                               "model_efficiency", "rmse_test_mean_rho",
                                "rmse_test_mean_h2o", "rmse_test_mean_melt"]]
 
     # Combine data
@@ -2549,8 +2659,10 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     data["model"] = data.apply(label_models, axis=1)
 
     # Filter samples and models
-    data = data[data["sample"].isin(["SYNTH323", "SYNTH162", "SYNTH81", "SYNTH41",
-                                     "SYNTH21"])]
+    data = data[data["sample"].isin(["SYNTH248", "SYNTH124", "SYNTH62", "SYNTH31",
+                                     "SYNTH16"])]
+#    data = data[data["sample"].isin(["SYNTH323", "SYNTH162", "SYNTH81", "SYNTH41",
+#                                     "SYNTH21"])]
     data = data[data["model"].isin(["Lookup Table", "RocMLM (DT)", "RocMLM (KN)",
                                     "RocMLM (NN1)", "RocMLM (NN3)"])]
 
@@ -2565,17 +2677,18 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
         else:
             return None
 
+    # Calculate model size (capacity)
     data["x_res"] = data.apply(get_x_res, axis=1)
     data["size"] = np.log2(data["size"] * data["x_res"]).astype(int)
 
     # Arrange data by resolution and sample
     data.sort_values(by=["size", "sample", "model"], inplace=True)
 
-#    # Group by size and select min time
-#    grouped_data = data.groupby(["model", "size"])
-#    min_time_indices = grouped_data["time"].idxmin()
-#    data = data.loc[min_time_indices]
-#    data.reset_index(drop=True, inplace=True)
+    # Group by size and select min time
+    grouped_data = data.groupby(["model", "size"])
+    min_time_indices = grouped_data["time"].idxmin()
+    data = data.loc[min_time_indices]
+    data.reset_index(drop=True, inplace=True)
 
     # Compute summary statistics
     summary_stats = data.groupby(["model"]).agg({
@@ -2638,9 +2751,9 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     ax.fill_between(data["size"], data_gfem["time"].min() * 1e3,
                     data_gfem["time"].max() * 1e3, facecolor="white", edgecolor="black")
 
-    plt.text(data["size"].min(), data_gfem["time"].max() * 1e3 * 0.9,
-             " GFEM [Perple_X]", fontsize=fontsize * 0.833,
-             horizontalalignment="left", verticalalignment="top")
+#    plt.text(data["size"].min(), data_gfem["time"].max() * 1e3 * 0.9,
+#             " GFEM [Perple_X]", fontsize=fontsize * 0.833,
+#             horizontalalignment="left", verticalalignment="top")
 
     # Plot rocmlm efficiency
     for model, group in data.groupby("model"):
@@ -2659,7 +2772,8 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     plt.ylabel("Elapsed Time (ms)")
     plt.title("Execution Speed")
     plt.yscale("log")
-    plt.xticks(np.arange(10, 23, 2))
+    plt.xticks(np.arange(7, 19, 2))
+#    plt.xticks(np.arange(10, 23, 2))
 
     ax2 = fig.add_subplot(122)
 
@@ -2711,7 +2825,8 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     plt.ylabel("Size (Mb)")
     plt.title("Model Size")
     plt.yscale("log")
-    plt.xticks(np.arange(10, 23, 2))
+    plt.xticks(np.arange(7, 19, 2))
+#    plt.xticks(np.arange(10, 23, 2))
 
     # Add captions
     fig.text(0.025, 0.92, "a)", fontsize=fontsize * 1.3)
@@ -2807,7 +2922,7 @@ def main():
 
         for name, source in sources.items():
             sids = get_sampleids(source, "all")
-            gfems[name] = build_gfem_models(source, sids)
+            gfems[name] = build_gfem_models(source, sids, res=64)
 
         # Combine synthetic models for RocMLM training
         training_data = {"b": gfems["b"], "s": gfems["m"] + gfems["r"]}
