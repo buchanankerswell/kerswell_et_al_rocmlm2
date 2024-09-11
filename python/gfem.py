@@ -548,7 +548,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_1d_profile(self, target=None, mantle_potential=1573, Qs=250e-3, Ts=273,
                         A1=2.2e-8, A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35,
-                        litho_thickness=1, hymatz_input=None):
+                        litho_thickness=1, hymatz_input=None, iwamori=False):
         """
         """
         # Get model attributes
@@ -560,11 +560,18 @@ class GFEMModel:
         model_out_dir = self.model_out_dir
         perplex_geotherm = f"{model_out_dir}/geotherm-{mantle_potential}"
         if not hymatz_input:
-            res = self.res
-            results = self.results
-            model_built = self.model_built
-            if target and not model_built:
-                raise Exception("No GFEM model! Call build_model() first ...")
+            if not iwamori:
+                res = self.res
+                results = self.results
+                model_built = self.model_built
+                if target and not model_built:
+                    raise Exception("No GFEM model! Call build_model() first ...")
+            else:
+                res = self.res
+                target = "h2o"
+                results = pd.read_csv("assets/data/iwamoriH2O.csv")
+                results["h2o"] = results["h2o"] / 0.3
+                results = results.to_dict(orient="list")
         else:
             if hymatz_input[0] not in ["Pyrolite"]:
                 raise Exception("Unrecognized hymatz input !")

@@ -170,6 +170,27 @@ class RocMLM:
     #+ .1.0.           Helper Functions              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # load pretrained model
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def load_pretrained_model(file_path):
+        """
+        """
+        if os.path.exists(file_path):
+            try:
+                print(f"  Loading RocMLM object from {file_path} ...")
+                rocmlm = joblib.load(file_path)
+                return rocmlm
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in load_pretrained_model() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
+        else:
+            print(f"File {file_path} does not exist !")
+            return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # print rocmlm info !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _print_rocmlm_info(self):
@@ -243,7 +264,7 @@ class RocMLM:
         unique_value = input_list[0]
         for item in input_list[1:]:
             if item != unique_value:
-                raise ValueError("Not all values are the same!")
+                raise ValueError("Not all values are the same !")
 
         return unique_value
 
@@ -258,7 +279,7 @@ class RocMLM:
 
         # Check for gfem models
         if not gfem_models:
-            raise Exception("No GFEM models to compile!")
+            raise Exception("No GFEM models to compile !")
 
         try:
             # Get model metadata
@@ -329,6 +350,10 @@ class RocMLM:
         gfem_models = self.gfem_models
         training_targets = self.training_targets
         training_features = self.training_features
+
+        # Check for gfem models
+        if not gfem_models:
+            raise Exception("No GFEM models to compile !")
 
         try:
             # Get all PT arrays
@@ -725,7 +750,7 @@ class RocMLM:
 
         # Check for gfem models
         if not gfem_models:
-            raise Exception("No GFEM models to compile!")
+            raise Exception("No GFEM models to compile !")
 
         try:
             # Get feature (PTX) arrays
@@ -839,11 +864,11 @@ class RocMLM:
 
         # Check for training features
         if feature_train.size == 0:
-            raise Exception("No training features!")
+            raise Exception("No training features !")
 
         # Check for training targets
         if target_train.size == 0:
-            raise Exception("No training targets!")
+            raise Exception("No training targets !")
 
         # Scale training dataset
         X_train, y_train, scaler_X_train, scaler_y_train, X_scaled_train, y_scaled_train = \
@@ -1002,11 +1027,11 @@ class RocMLM:
 
         # Check for training features
         if feature_train.size == 0:
-            raise Exception("No training features!")
+            raise Exception("No training features !")
 
         # Check for training targets
         if target_train.size == 0:
-            raise Exception("No training targets!")
+            raise Exception("No training targets !")
 
         # Scale training dataset
         X_train, y_train, scaler_X_train, scaler_y_train, X_scaled_train, y_scaled_train = \
@@ -1230,11 +1255,11 @@ class RocMLM:
 
         # Check for training features
         if feature_train.size == 0:
-            raise Exception("No training features!")
+            raise Exception("No training features !")
 
         # Check for training targets
         if target_train.size == 0:
-            raise Exception("No training targets!")
+            raise Exception("No training targets !")
 
         # Scale training dataset
         X_train, y_train, scaler_X_train, scaler_y_train, X_scaled_train, y_scaled_train = \
@@ -1297,11 +1322,11 @@ class RocMLM:
 
         # Check for training features
         if feature_array.size == 0:
-            raise Exception("No training features!")
+            raise Exception("No training features !")
 
         # Check for training targets
         if target_array.size == 0:
-            raise Exception("No training targets!")
+            raise Exception("No training targets !")
 
         print(f"Retraining model {model_prefix} ...")
 
@@ -1423,7 +1448,7 @@ class RocMLM:
         training_targets = self.training_targets
 
         if type not in {"targets", "predictions", "diff", "prem"}:
-            raise ValueError("Unrecognized array image type!")
+            raise ValueError("Unrecognized array image type !")
 
         # Only visualize dry and max hydrated samples
         if any(s in sids for s in ["PUM", "DMM", "PYR"]):
@@ -1589,7 +1614,7 @@ class RocMLM:
                         palette = "seismic"
                         filename = f"{model_prefix}-{sid}-{target}-diff.png"
                     else:
-                        raise ValueError("Unrecognized array image type!")
+                        raise ValueError("Unrecognized array image type !")
 
                     # Target labels
                     if target == "rho":
@@ -1957,7 +1982,7 @@ class RocMLM:
                     elif type == "predictions":
                         square_array = p
                     else:
-                        raise ValueError("Unrecognized array image type!")
+                        raise ValueError("Unrecognized array image type !")
 
                     # Check for all nans
                     if np.all(np.isnan(square_array)):
@@ -2195,6 +2220,133 @@ class RocMLM:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 traceback.print_exc()
         return None
+
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.6.           RocMLM Inference              !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # predict !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def predict(self, xi, h2o, P, T):
+        """
+        """
+        # Get self attributes
+        model = self.ml_model
+        scaler_X = self.ml_model_scaler_X
+        scaler_y = self.ml_model_scaler_y
+        ml_model_trained = self.ml_model_trained
+
+        # Check for pretrained model
+        if not ml_model_trained:
+            raise Exception("No RocMLM model! Call train_rocmlm() first ...")
+
+        try:
+            for var in [xi, h2o, P, T]:
+                if not isinstance(var, (list, np.ndarray)):
+                    raise TypeError(f"Inputs must be lists or numpy arrays !")
+
+            # Create feature array
+            if all(var is not None for var in [xi, h2o, P, T]):
+                xi_array = np.asarray(xi)
+                h2o_array = np.asarray(h2o)
+                P_array = np.asarray(P)
+                T_array = np.asarray(T)
+
+                if (xi_array.shape[0] == h2o_array.shape[0] == P_array.shape[0] ==
+                    T_array.shape[0]):
+                    xi_array = xi_array.reshape(-1, 1)
+                    h2o_array = h2o_array.reshape(-1, 1)
+                    P_array = P_array.reshape(-1, 1)
+                    T_array = T_array.reshape(-1, 1)
+
+                    X = np.concatenate((xi_array, h2o_array, P_array, T_array), axis=1)
+                else:
+                    raise ValueError("The arrays xi, h2o, P, and T are not the same size !")
+            else:
+                raise ValueError("One or more of xi, h2o, P, T does not exist !")
+
+            # Scale features array
+            X_scaled = scaler_X.transform(X)
+
+            # Make predictions on features
+            inference_start_time = time.time()
+            pred_scaled = model.predict(X_scaled)
+            inference_end_time = time.time()
+            inference_time = inference_end_time - inference_start_time
+            print(inference_time * 1e3)
+
+            # Inverse transform predictions
+            pred_original = scaler_y.inverse_transform(pred_scaled)
+
+            return pred_original
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in predict() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+
+            return None
+
+    def predict_old(self, xi, P, T):
+        """
+        """
+        # Get self attributes
+        model = self.ml_model
+        scaler_X = self.ml_model_scaler_X
+        scaler_y = self.ml_model_scaler_y
+        ml_model_trained = self.ml_model_trained
+
+        # Check for pretrained model
+        if not ml_model_trained:
+            raise Exception("No RocMLM model! Call train_rocmlm() first ...")
+
+        try:
+            for var in [xi, P, T]:
+                if not isinstance(var, (list, np.ndarray)):
+                    raise TypeError(f"Inputs must be lists or numpy arrays !")
+
+            # Create feature array
+            if all(var is not None for var in [xi, P, T]):
+                xi_array = np.asarray(xi)
+                P_array = np.asarray(P)
+                T_array = np.asarray(T)
+
+                if (xi_array.shape[0] == P_array.shape[0] == T_array.shape[0]):
+                    xi_array = xi_array.reshape(-1, 1)
+                    P_array = P_array.reshape(-1, 1)
+                    T_array = T_array.reshape(-1, 1)
+
+                    X = np.concatenate((xi_array, P_array, T_array), axis=1)
+                else:
+                    raise ValueError("The arrays xi, P, and T are not the same size !")
+            else:
+                raise ValueError("One or more of xi, P, T does not exist !")
+
+            # Scale features array
+            X_scaled = scaler_X.transform(X)
+
+            # Make predictions on features
+            inference_start_time = time.time()
+            pred_scaled = model.predict(X_scaled)
+            inference_end_time = time.time()
+            inference_time = inference_end_time - inference_start_time
+            print(inference_time * 1e3)
+
+            # Inverse transform predictions
+            pred_original = scaler_y.inverse_transform(pred_scaled)
+
+            return pred_original
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in predict() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+
+            return None
 
 #######################################################
 ## .2.                Visualize                  !!! ##
@@ -2856,7 +3008,7 @@ def train_rocmlms(gfem_models, ml_models=["DT", "KN", "NN1", "NN2", "NN3"],
     """
     # Check for gfem models
     if not gfem_models:
-        raise Exception("No GFEM models to compile!")
+        raise Exception("No GFEM models to compile !")
 
     # Single X step for benchmark models
     sids = [m.sid for m in gfem_models]
