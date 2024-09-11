@@ -115,7 +115,7 @@ class GFEMModel:
         self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
 
         # Output file paths
-        self.data_dir = "assets/data"
+        self.data_dir = "assets"
         self.fig_dir = f"figs/{self.model_out_dir}"
         self.log_file = f"{self.model_out_dir}/log-{self.sid}"
 
@@ -569,7 +569,7 @@ class GFEMModel:
             else:
                 res = self.res
                 target = "h2o"
-                results = pd.read_csv("assets/data/iwamoriH2O.csv")
+                results = pd.read_csv("assets/iwamoriH2O.csv")
                 results["h2o"] = results["h2o"] / 0.3
                 results = results.to_dict(orient="list")
         else:
@@ -2721,7 +2721,7 @@ class GFEMModel:
 
         # Get synthetic endmember compositions
         sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
-        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_mids = pd.read_csv("assets/synth-mids.csv")
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
 
         # Mixing array endmembers
@@ -3517,7 +3517,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
     warnings.simplefilter("ignore", category=UserWarning)
 
     # Data asset dir
-    data_dir = "assets/data"
+    data_dir = "assets"
     fig_dir = "figs/other"
 
     # Check for data dir
@@ -3570,7 +3570,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
         ref_models = model._get_1d_reference_models()
 
         # Get dry synthetic endmember compositions
-        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_mids = pd.read_csv("assets/synth-mids.csv")
         df_dry = df_mids[df_mids["LOI"] == 0]
         sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
@@ -3857,9 +3857,9 @@ def main():
     try:
         # Build GFEM models
         gfems = {}
-        sources = {"b": "assets/data/bench-pca.csv",
-                   "m": "assets/data/synth-mids.csv",
-                   "r": "assets/data/synth-rnds.csv"}
+        sources = {"b": "assets/bench-pca.csv",
+                   "m": "assets/synth-mids.csv",
+                   "r": "assets/synth-rnds.csv"}
 
         for name, source in sources.items():
             sids = get_sampleids(source)

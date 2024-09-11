@@ -170,7 +170,7 @@ def main():
     """
     # Get assets from OSF
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    if not os.path.exists("assets/data"):
+    if not os.path.exists("assets"):
         url = ("https://files.osf.io/v1/resources/erdcz/providers/osfstorage/"
                "665d7b3dd835c427734cdd2d/?zip=")
         print(f"Downloading assets from OSF:\n  {url}")

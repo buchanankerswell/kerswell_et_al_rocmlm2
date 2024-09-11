@@ -19,7 +19,7 @@ import pandas as pd
 def main():
     """
     """
-    data_dir = "assets/data"
+    data_dir = "assets"
     df_path = f"{data_dir}/benchmark-samples-pca.csv"
     df_synth_path = f"{data_dir}/synthetic-samples-benchmarks.csv"
 

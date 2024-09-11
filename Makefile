@@ -9,7 +9,7 @@ CONDASPECSFILE = python/conda-environment.yaml
 CONDAPYTHON = $$(conda run -n $(CONDAENVNAME) which python)
 CONDAPYTHON = $$(conda run -n $(CONDAENVNAME) which python)
 # Directories with data and perplex configs
-DATADIR = assets/data
+DATADIR = assets
 # Python scripts
 PYTHON = python/pca.py \
 				 python/gfem.py \

@@ -118,7 +118,7 @@ class MixingArray:
         print("Reading Earthchem data ...")
 
         # Read data
-        data = pd.read_csv(f"assets/data/{filename}", delimiter="\t")
+        data = pd.read_csv(f"assets/{filename}", delimiter="\t")
 
         # Rename columns
         data.columns = [col.replace(" ", "") for col in data.columns]
@@ -494,7 +494,7 @@ class MixingArray:
                              data[column].quantile(0.25), digits)
             })
         info_df = pd.DataFrame(numeric_info)
-        info_df.to_csv("assets/data/earthchem-counts.csv", index=False)
+        info_df.to_csv("assets/earthchem-counts.csv", index=False)
 
         if verbose >= 1:
             # Print info
@@ -610,11 +610,11 @@ class MixingArray:
         other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
                       "F_MELT_FRAC", "XI_FRAC"]
 
-        df_bench_path = "assets/data/benchmark-samples.csv"
-        df_bench_pca_path = "assets/data/bench-pca.csv"
+        df_bench_path = "assets/benchmark-samples.csv"
+        df_bench_pca_path = "assets/bench-pca.csv"
 
         # Get dry synthetic endmember compositions
-        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_mids = pd.read_csv("assets/synth-mids.csv")
         df_dry = df_mids[df_mids["LOI"] == 0]
         sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
@@ -1048,7 +1048,7 @@ class MixingArray:
             self.earthchem_pca = data.copy()
 
             # Write csv file
-            data.to_csv(f"assets/data/earthchem-pca.csv", index=False)
+            data.to_csv(f"assets/earthchem-pca.csv", index=False)
 
             # Calculate F melt
             all_mixs["R_TIO2"] = round(all_mixs["TIO2"] / ti_init, digits)
@@ -1094,9 +1094,9 @@ class MixingArray:
             all_bots = all_bots[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
 
             # Write to csv
-            all_mixs.to_csv("assets/data/synth-mids.csv", index=False)
-            all_tops.to_csv("assets/data/synth-tops.csv", index=False)
-            all_bots.to_csv("assets/data/synth-bots.csv", index=False)
+            all_mixs.to_csv("assets/synth-mids.csv", index=False)
+            all_tops.to_csv("assets/synth-tops.csv", index=False)
+            all_bots.to_csv("assets/synth-bots.csv", index=False)
 
             # Define bounding box around top and bottom mixing arrays
             min_x = min(mixing_array_tops[:, 0].min(), mixing_array_bots[:, 0].min())
@@ -1196,7 +1196,7 @@ class MixingArray:
             all_rnds = all_rnds[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
 
             # Write to csv
-            all_rnds.to_csv("assets/data/synth-rnds.csv", index=False)
+            all_rnds.to_csv("assets/synth-rnds.csv", index=False)
 
             # Process benchmark samples
             self._process_benchmark_samples_pca()
@@ -1238,12 +1238,12 @@ class MixingArray:
         XI_col = "XI_FRAC"
 
         # Check for benchmark samples
-        df_bench_pca_path = "assets/data/bench-pca.csv"
-        df_synth_mids_path = "assets/data/synth-mids.csv"
-        df_synth_random_path = "assets/data/synth-rnds.csv"
+        df_bench_pca_path = "assets/bench-pca.csv"
+        df_synth_mids_path = "assets/synth-mids.csv"
+        df_synth_random_path = "assets/synth-rnds.csv"
 
         # Get dry synthetic endmember compositions
-        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_mids = pd.read_csv("assets/synth-mids.csv")
         df_dry = df_mids[df_mids["LOI"] == 0]
         sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
@@ -1495,14 +1495,14 @@ class MixingArray:
         data = self.earthchem_filtered
         oxides = [ox for ox in self.ox_pca if ox not in ["SIO2", "FE2O3", "K2O"]] + ["LOI"]
 
-        df_bench_path = "assets/data/benchmark-samples.csv"
+        df_bench_path = "assets/benchmark-samples.csv"
 
         # Check for benchmark samples
         if os.path.exists(df_bench_path):
             df_bench = pd.read_csv(df_bench_path)
 
         # Get dry synthetic endmember compositions
-        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_mids = pd.read_csv("assets/synth-mids.csv")
         df_dry = df_mids[df_mids["LOI"] == 0]
         sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
@@ -1512,7 +1512,7 @@ class MixingArray:
         tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         # Initialize synthetic datasets
-        synthetic_samples = pd.read_csv(f"assets/data/synth-rnds.csv")
+        synthetic_samples = pd.read_csv(f"assets/synth-rnds.csv")
 
         # Check for figs directory
         if not os.path.exists(fig_dir):
@@ -1648,7 +1648,7 @@ class MixingArray:
 def main():
     """
     """
-    if not os.path.exists("assets/data/bench-pca.csv"):
+    if not os.path.exists("assets/bench-pca.csv"):
         try:
             # Create mixing array
             mixing_array = MixingArray()

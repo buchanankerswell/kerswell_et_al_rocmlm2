@@ -310,7 +310,7 @@ class HyMaTZ():
         self.mgri = np.zeros(res)
         self.Phase_diagram = None
         self.fig_dir = "figs/hymatz"
-        self.data_dir = "assets/data"
+        self.data_dir = "assets"
         self.h2o_profile = np.zeros(res)
         self.water_capacity = water_capacity
         self.mantle_potential = mantle_potential

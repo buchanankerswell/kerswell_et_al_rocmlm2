@@ -115,7 +115,7 @@ class RocMLM:
         self._process_training_data()
 
         # Output filepaths
-        self.data_dir = "assets/data"
+        self.data_dir = "assets"
         self.model_out_dir = f"rocmlms"
         if any(s in self.sids for s in ["PUM", "DMM", "PYR"]):
             self.model_prefix = (f"benchmark-{self.ml_model_label}-"
@@ -709,7 +709,7 @@ class RocMLM:
         """
         """
         # CSV filepath
-        filepath = f"assets/data/lut-efficiency.csv"
+        filepath = f"assets/lut-efficiency.csv"
 
         # Check if the CSV file already exists
         if not pd.io.common.file_exists(filepath):
@@ -1417,7 +1417,7 @@ class RocMLM:
             raise Exception("No cross validation! Call _kfold_cv() first ...")
 
         # CSV filepath
-        filepath = f"assets/data/rocmlm-performance.csv"
+        filepath = f"assets/rocmlm-performance.csv"
 
         # Check if the CSV file already exists
         if not pd.io.common.file_exists(filepath):
@@ -1943,7 +1943,7 @@ class RocMLM:
 
         # Get synthetic endmember compositions
         sids_end = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
-        df_mids = pd.read_csv("assets/data/synth-mids.csv")
+        df_mids = pd.read_csv("assets/synth-mids.csv")
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids_end) & (df_mids["LOI"] == 0)]
 
         # Mixing array endmembers
@@ -2718,7 +2718,7 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     """
     """
     # Data assets dir
-    data_dir = "assets/data"
+    data_dir = "assets"
 
     # Check for figs directory
     if not os.path.exists(fig_dir):
@@ -3068,9 +3068,9 @@ def main():
     try:
         # Build GFEM models
         gfems = {}
-        sources = {"b": "assets/data/bench-pca.csv",
-                   "m": "assets/data/synth-mids.csv",
-                   "r": "assets/data/synth-rnds.csv"}
+        sources = {"b": "assets/bench-pca.csv",
+                   "m": "assets/synth-mids.csv",
+                   "r": "assets/synth-rnds.csv"}
 
         for name, source in sources.items():
             sids = get_sampleids(source, "all")
