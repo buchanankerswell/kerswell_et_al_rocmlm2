@@ -1,10 +1,11 @@
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from hymatz import HyMaTZ
 from rocmlm import RocMLM, train_rocmlms, visualize_rocmlm_performance, compose_rocmlm_plots
 from gfem import (GFEMModel, get_sampleids, build_gfem_models, compose_gfem_plots,
-                  visualize_prem_comps)
+                  visualize_depth_profiles_comps)
 
 def main():
     """
@@ -14,7 +15,10 @@ def main():
 #    ####################################################################################
 #    Building and training rocmlms
 #    ####################################################################################
-    model = GFEMModel("hp633", f"sm005-loi005", "assets/synth-mids.csv", res=32, P_min=0, P_max=10, T_min=298, T_max=1273)
+    res, P_min, P_max, T_min, T_max = 128, 0.1, 8.1, 273, 1373
+    db, samp, source = "hp02", "sm005-loi005", "assets/synth-mids.csv"
+    model = GFEMModel(db, samp, source, res, P_min, P_max, T_min, T_max)
+    model.build_model()
 #    model = GFEMModel("hp633", f"sm014-loi001", "assets/synth-mids.csv", res=32)
 #    model.build_model()
 #
@@ -30,7 +34,7 @@ def main():
 #    for name, source in sources.items():
 #        sids = get_sampleids(source)[:24]
 #        gfems[name] = build_gfem_models(source, sids, perplex_db="hp633", res=64)
-#    visualize_prem_comps(gfems["m"])
+#    visualize_profiles_comps(gfems["m"])
 #
 #    gfems = {}
 #    sources = {"m": "assets/synth-mids.csv", "r": "assets/synth-rnds.csv"}

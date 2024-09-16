@@ -47,7 +47,7 @@ class MixingArray:
         self.k = 1.5
         self.seed = 42
         self.digits = 3
-        self.max_loi = 2
+        self.max_loi = 14
         self.D_tio2 = 5e-2
         self.mc_sample = 1
         self.weighted_random = True

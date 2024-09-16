@@ -62,6 +62,9 @@ class GFEMModel:
         self.source = source
         self.verbose = verbose
 
+        # Syracuse 2010 subduction segments for creating depth profiles
+        self.segs = ["Central_Cascadia", "Kamchatka"]
+
         # Set geotherm threshold for depth profiles
         if res <= 8:
             self.geothresh = 40
@@ -81,34 +84,27 @@ class GFEMModel:
         self.target_units = ["g/cm$^3$", "km/s", "km/s", "vol.%", "wt.%", "", ""]
         self.targets = ["rho", "Vp", "Vs", "melt", "h2o", "assemblage", "variance"]
 
-        # Filter targets for stx21 and koma06
+        # Filter targets for stx21
         if perplex_db == "stx21":
             t_ind = [i for i, t in enumerate(self.targets) if t not in ["melt", "h2o"]]
             self.targets = [self.targets[i] for i in t_ind]
             self.target_units = [self.target_units[i] for i in t_ind]
             self.features = [f for f in self.features if f not in ["LOI"]]
-        elif perplex_db == "koma06":
-            t_ind = [i for i, t in enumerate(self.targets) if t not in ["melt"]]
-            self.targets = [self.targets[i] for i in t_ind]
-            self.target_units = [self.target_units[i] for i in t_ind]
 
         # Check perplex db
-        if perplex_db not in ["hp02", "hp622", "hp633", "stx21", "koma06"]:
-            self.perplex_db = "hp622"
+        if perplex_db not in ["hp02", "hp633", "stx21"]:
+            print("Unrecognized thermodynamic dataset ! Defaulting to hp633 ...")
+            self.perplex_db = "hp633"
         else:
             self.perplex_db = perplex_db
 
         # System oxide components
         if self.perplex_db == "hp633":
             self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
-        if self.perplex_db == "hp622":
-            self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
         if self.perplex_db == "hp02":
             self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
         if self.perplex_db == "stx21":
             self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O"]
-        if self.perplex_db == "koma06":
-            self.ox_gfem = ["SIO2", "MGO", "LOI"]
         self.ox_exclude = ["FE2O3", "P2O5", "NIO", "MNO", "H2O", "CO2"]
 
         # Perplex dirs and filepaths
@@ -122,7 +118,6 @@ class GFEMModel:
         # Results
         self.loi = None
         self.results = {}
-        self.comp_time = None
         self.sample_comp = []
         self.model_built = False
         self.sample_features = []
@@ -197,6 +192,7 @@ class GFEMModel:
                 os.path.exists(f"{model_out_dir}/assemblages.csv")):
                 if verbose >= 1:
                     print(f"  Found {perplex_db} GFEM model for sample {sid} !")
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 try:
                     self.model_built = True
                     self._get_sample_comp()
@@ -210,7 +206,6 @@ class GFEMModel:
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     traceback.print_exc()
                     return None
-                self.visualize_model()
                 return None
             else:
                 shutil.rmtree(model_out_dir)
@@ -358,34 +353,6 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get comp time !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_comp_time(self):
-        """
-        """
-        # Get self attributes
-        sid = self.sid
-        res = self.res
-        ox_gfem = self.ox_gfem
-        log_file = self.log_file
-
-        if os.path.exists(log_file):
-            with open(log_file, "r") as log:
-                lines = log.readlines()
-
-            for line in reversed(lines):
-                if "Total elapsed time" in line:
-                    match = re.search(r"\s+([\d.]+)", line)
-                    if match:
-                        time_m = float(match.group(1))
-                        time_s = time_m * 60
-                    break
-
-            self.comp_time = round(time_s, 3)
-
-        return round(time_s, 3)
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # encode assemblages !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _encode_assemblages(self, assemblages):
@@ -481,7 +448,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get 1d reference models !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_1d_reference_models(self):
+    def _get_1d_reference_models(self, ref_model="prem"):
         """
         """
         # Get self attributes
@@ -491,142 +458,163 @@ class GFEMModel:
         if not os.path.exists(data_dir):
             raise Exception(f"Data not found at {data_dir} !")
 
-        # Reference model paths
-        ref_paths = {"prem": f"{data_dir}/PREM_1s.csv", "stw105": f"{data_dir}/STW105.csv"}
+        # Check for ref models
+        if ref_model not in ["prem", "stw105"]:
+            raise Exception(f"Unrecognized reference model {ref_model} !")
 
-        # Define column headers
-        prem_cols = ["radius", "depth", "rho", "Vp", "Vph", "Vs", "Vsh", "eta", "Q_mu",
-                     "Q_kappa"]
-        stw105_cols = ["radius", "rho", "Vp", "Vs", "unk1", "unk2", "Vph", "Vsh", "eta"]
+        # Reference model paths and headers
+        if ref_model == "prem":
+            ref_path = f"{data_dir}/PREM_1s.csv"
+            ref_cols = ["radius", "depth", "rho", "Vp", "Vph", "Vs", "Vsh", "eta", "Q_mu",
+                        "Q_kappa"]
+        else:
+            ref_path = f"{data_dir}/STW105.csv"
+            ref_cols = ["radius", "rho", "Vp", "Vs", "unk1", "unk2", "Vph", "Vsh", "eta"]
 
-        ref_cols = {"prem": prem_cols, "stw105": stw105_cols}
         columns_to_keep = ["depth", "P", "rho", "Vp", "Vs"]
 
-        # Initialize reference models
-        ref_models = {}
+        # Load reference model
+        if not os.path.exists(ref_path):
+            raise Exception(f"Refernce model {ref_model} not found at {ref_path} !")
 
-        # Load reference models
-        for name, path in ref_paths.items():
-            if not os.path.exists(path):
-                raise Exception(f"Refernce model {name} not found at {path} !")
+        # Read reference model
+        model = pd.read_csv(ref_path, header=None, names=ref_cols)
 
-            # Read reference model
-            model = pd.read_csv(path, header=None, names=ref_cols[name])
+        # Transform units
+        if ref_model == "stw105":
+            model["depth"] = (model["radius"].max() - model["radius"]) / 1e3
+            model["rho"] = model["rho"] / 1e3
+            model["Vp"] = model["Vp"] / 1e3
+            model["Vs"] = model["Vs"] / 1e3
+            model.sort_values(by=["depth"], inplace=True)
 
-            # Transform units
-            if name == "stw105":
-                model["depth"] = (model["radius"].max() - model["radius"]) / 1e3
-                model["rho"] = model["rho"] / 1e3
-                model["Vp"] = model["Vp"] / 1e3
-                model["Vs"] = model["Vs"] / 1e3
-                model.sort_values(by=["depth"], inplace=True)
+        def calculate_pressure(row):
+            z = row["depth"]
+            depths = model[model["depth"] <= z]["depth"] * 1e3
+            rhos = model[model["depth"] <= z]["rho"] * 1e3
+            rho_integral = np.trapz(rhos, x=depths)
+            pressure = 9.81 * rho_integral / 1e9
+            return pressure
 
-            def calculate_pressure(row):
-                z = row["depth"]
-                depths = model[model["depth"] <= z]["depth"] * 1e3
-                rhos = model[model["depth"] <= z]["rho"] * 1e3
-                rho_integral = np.trapz(rhos, x=depths)
-                pressure = 9.81 * rho_integral / 1e9
-                return pressure
+        model["P"] = model.apply(calculate_pressure, axis=1)
 
-            model["P"] = model.apply(calculate_pressure, axis=1)
-
-            # Clean up df
-            model = model[columns_to_keep]
-            model = model.round(3)
-
-            # Save model
-            ref_models[name] = model
+        # Clean up df
+        model = model[columns_to_keep]
+        model = model.round(3)
 
         # Invert STW105
-        ref_models["stw105"] = ref_models["stw105"].sort_values(by="depth", ascending=True)
+        if ref_model == "stw105":
+            model = model.sort_values(by="depth", ascending=True)
 
-        return ref_models
+        return model
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get 1d profile !!
+    # get 1d subduction geotherm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_1d_profile(self, target=None, mantle_potential=1573, Qs=250e-3, Ts=273,
-                        A1=2.2e-8, A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35,
-                        litho_thickness=1, hymatz_input=None, iwamori=False):
+    def _get_subduction_geotherm(self, segment="Central_Cascadia", position="moho"):
         """
         """
-        # Get model attributes
+        # Get self attributes
         P_min = self.P_min
         P_max = self.P_max
         T_min = self.T_min
         T_max = self.T_max
-        geothresh = self.geothresh
-        model_out_dir = self.model_out_dir
-        perplex_geotherm = f"{model_out_dir}/geotherm-{mantle_potential}"
-        if not hymatz_input:
-            if not iwamori:
-                res = self.res
-                results = self.results
-                model_built = self.model_built
-                if target and not model_built:
-                    raise Exception("No GFEM model! Call build_model() first ...")
-            else:
-                res = self.res
-                target = "h2o"
-                results = pd.read_csv("assets/iwamoriH2O.csv")
-                results["h2o"] = results["h2o"] / 0.3
-                results = results.to_dict(orient="list")
+        data_dir = f"{self.data_dir}/D80"
+        litho_P_gradient = 35 # Lithostatic P gradient (km/GPa)
+
+        # Check for data dir
+        if not os.path.exists(data_dir):
+            raise Exception(f"Data not found at {data_dir} !")
+
+        # Reference geotherm paths
+        path = f"{data_dir}/{segment}.txt"
+
+        # Define column headers
+        ref_cols = ["slab_depth", "unk", "depth", "T"]
+        columns_to_keep = ["P", "T"]
+
+        # Load reference geotherm
+        if not os.path.exists(path):
+            raise Exception(f"Subduction geotherm {segment} not found at {path} !")
+
+        # Read reference geotherm
+        geotherm = pd.read_csv(path, header=None, names=ref_cols, sep=r"\s+")
+
+        if position == "moho":
+            geotherm = geotherm[geotherm["slab_depth"] == 7]
+        elif position == "top":
+            geotherm = geotherm[geotherm["slab_depth"] == 0]
         else:
-            if hymatz_input[0] not in ["Pyrolite"]:
-                raise Exception("Unrecognized hymatz input !")
-            if hymatz_input[1] not in np.linspace(0, 100, 11, dtype=int):
-                raise Exception("Unrecognized hymatz input !")
-            if target is not None and target not in ["rho", "Vp", "Vs", "h2o"]:
-                raise Exception("Unrecognized hymatz target !")
-            model = HyMaTZ(mantle_potential, hymatz_input[0], hymatz_input[1])
-            res = model.res
-            results = model.results
-            P_values = results["P"]
-            T_values = results["T"]
-            targets = results[target]
+            raise Exception(f"Unrecognized position argument '{position}' !")
 
-            # Cropping profile to same length as GFEMs
-            mask = (P_values >= P_min) & (P_values <= P_max)
-            P_values, T_values, targets = P_values[mask], T_values[mask], targets[mask]
+        # Truncate top of geotherm
+        geotherm = geotherm[geotherm["depth"] < 240]
 
-            if target:
-                return P_values, T_values, targets
-            else:
-                return P_values, T_values
+        # Calculate P from depth
+        geotherm["P"] = geotherm["depth"] / litho_P_gradient
 
-        # Check for results
-        if target and not results:
-            raise Exception("No GFEM model results! Call get_results() first ...")
+        # Transform units
+        geotherm["T"] = geotherm["T"] + 273
+        geotherm.sort_values(by=["P"], inplace=True)
 
-        # Define PT (target)
-        if not target:
-            P_array = np.linspace(P_min, P_max, res + 1)
-            T_array = np.linspace(T_min, T_max, res + 1)
-            P_grid, T_grid = np.meshgrid(P_array, T_array)
-            P, T = P_grid.flatten(), T_grid.flatten()
-            df = pd.DataFrame({"P": P, "T": T}).sort_values(by=["P", "T"])
-        else:
-            P = results["P"]
-            T = results["T"]
-            trg = results[target]
-            df = pd.DataFrame({"P": P, "T": T, target: trg}).sort_values(by=["P", "T"])
+        # Cropping profile to same length as GFEM
+        geotherm = geotherm[(geotherm["P"] >= P_min) & (geotherm["P"] <= P_max)]
+        geotherm = geotherm[(geotherm["T"] >= T_min) & (geotherm["T"] <= T_max)]
 
-        # Geotherm Parameters
-        Z_min = np.min(P) * 35e3
-        Z_max = np.max(P) * 35e3
+        # Clean up df
+        geotherm = geotherm[columns_to_keep]
+        geotherm = geotherm.round(3)
+
+        return geotherm
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # get 1d mantle geotherm !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_mantle_geotherm(self, mantle_potential=1573, Qs=250e-3, Ts=273, A1=2.2e-8,
+                             A2=2.2e-8, k1=3.0, k2=3.0, mantle_adiabat=0.5e-3,
+                             crust_thickness=35e3, litho_thickness=1e3):
+        """
+        """
+        # Get self attributes
+        res = self.res
+        P_min = self.P_min
+        P_max = self.P_max
+        T_min = self.T_min
+        T_max = self.T_max
+
+        # Define PT
+        P_array = np.linspace(P_min, P_max, res + 1)
+        T_array = np.linspace(T_min, T_max, res + 1)
+        P_grid, T_grid = np.meshgrid(P_array, T_array)
+        P, T = P_grid.flatten(), T_grid.flatten()
+
+        # 1D layered lithospheric cooling model parameters
+        # Qs:                                  Surface heat flux (W/m2)
+        # Ts:                                  Surface T (K)
+        # A1:                                  Layer 1 heat production (W/m3)
+        # A2:                                  Layer 2 heat production (W/m3)
+        # k1:                                  Layer 1 thermal conductivity (W/mK)
+        # k2:                                  Layer 2 thermal conductivity (W/mK)
+        # mantle_adiabat:                      Mantle adiabatic gradient (K/m)
+        # crust_thickness:                     Crustal thickness (m)
+        # litho_thickness:                     Lithoshperic thickness (m)
+        litho_P_gradient = 35e3              # Lithostatic P gradient (m/GPa)
+        Z_min = np.min(P) * litho_P_gradient # Min depth (m)
+        Z_max = np.max(P) * litho_P_gradient # Max depth (m)
+
+        # Initialize depth and temperature arrays
         z = np.linspace(Z_min, Z_max, len(P))
         T_geotherm = np.zeros(len(P))
 
         # Layer1 (crust)
         # A1 Radiogenic heat production (W/m^3)
         # k1 Thermal conductivity (W/mK)
-        D1 = crust_thickness * 1e3 # Thickness (m)
+        D1 = crust_thickness
 
         # Layer2 (lithospheric mantle)
         # A2 Radiogenic heat production (W/m^3)
         # k2 Thermal conductivity (W/mK)
-        D2 = litho_thickness * 1e3
+        D2 = litho_thickness
 
         # Calculate heat flow at the top of each layer
         Qt2 = Qs - (A1 * D1)
@@ -639,7 +627,7 @@ class GFEMModel:
 
         # Calculate T within each layer
         for j in range(len(P)):
-            potential_temp = mantle_potential + 0.5e-3 * z[j]
+            potential_temp = mantle_potential + mantle_adiabat * z[j]
             if z[j] <= D1:
                 T_geotherm[j] = Tt1 + (Qt1 / k1 * z[j]) - (A1 / (2 * k1) * z[j]**2)
                 if T_geotherm[j] >= potential_temp:
@@ -654,31 +642,82 @@ class GFEMModel:
                 if T_geotherm[j] >= potential_temp:
                     T_geotherm[j] = potential_temp
 
-        P_geotherm = np.round(z / 35e3, 1)
+        P_geotherm = np.round(z / litho_P_gradient, 1)
         T_geotherm = np.round(T_geotherm, 2)
 
-        df["geotherm_P"] = P_geotherm
-        df["geotherm_T"] = T_geotherm
+        geotherm = pd.DataFrame({"P": P_geotherm, "T": T_geotherm}).sort_values(by=["P", "T"])
 
-        # Subset df along geotherm
-        df = df[abs(df["T"] - df["geotherm_T"]) < geothresh]
+        return geotherm
 
-        # Get PT values
-        P_values = np.nan_to_num(df["P"].values)
-        T_values = np.nan_to_num(df["T"].values)
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # extract target along 1d geotherm !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _extract_target_along_1d_geotherm(self, target, geotherm):
+        """
+        """
+        # Get self attributes
+        results = self.results
+        geothresh = self.geothresh
 
-        # Write to tsv file
-        if not os.path.exists(perplex_geotherm):
-            df_to_save = pd.DataFrame({"T": T_values, "P": P_values * 1e4})
-            df_to_save.to_csv(perplex_geotherm, sep="\t", index=False, header=False,
-                              float_format="%.6E")
+        # Define PT (target)
+        P = results["P"]
+        T = results["T"]
+        trg = results[target]
+        df = pd.DataFrame({"P": P, "T": T, target: trg}).sort_values(by=["P", "T"])
 
-        # Get target values
-        if target:
-            targets = np.nan_to_num(df[target].values)
-            return P_values, T_values, targets
-        else:
-            return P_values, T_values
+        # Create a DataFrame to hold the closest geotherm points for each result PT
+        geotherm_P = geotherm["P"].values
+        geotherm_T = geotherm["T"].values
+
+        # Initialize lists for storing matched values
+        P_values = []
+        T_values = []
+        target_values = []
+
+        # Loop through each point in the geotherm DataFrame
+        for idx, row in geotherm.iterrows():
+            geo_P, geo_T = row["P"], row["T"]
+            distances = np.sqrt((P - geo_P)**2 + (T - geo_T)**2)
+            closest_idx = distances.argmin()
+            if distances[closest_idx] < geothresh:
+                P_values.append(P[closest_idx])
+                T_values.append(T[closest_idx])
+                target_values.append(trg[closest_idx])
+
+        # Convert to numpy arrays and handle NaNs
+        P_values = np.nan_to_num(np.array(P_values))
+        T_values = np.nan_to_num(np.array(T_values))
+        target_values = np.nan_to_num(np.array(target_values))
+
+        return P_values, T_values, target_values
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # get hymatz profile !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_hymatz_profile(self, target=None, mantle_potential=1573, composition="Pyrolite",
+                            water_capacity=100):
+        """
+        """
+        # Get self attributes
+        P_min = self.P_min
+        P_max = self.P_max
+
+        # Check HyMaTZ inputs
+        if composition not in ["Pyrolite"]:
+            raise Exception(f"Unrecognized HyMaTZ composition '{composition}' !")
+        if water_capacity not in np.linspace(0, 100, 11, dtype=int):
+            raise Exception(f"HyMaTZ water capacity must be between 0 and 100 !")
+        if target is not None and target not in ["rho", "Vp", "Vs", "h2o"]:
+            raise Exception(f"Unrecognized HyMaTZ target '{target}'!")
+        model = HyMaTZ(mantle_potential, hymatz_input[0], hymatz_input[1])
+        results = model.results
+        P_values, T_values, targets = results["P"], results["T"], results[target]
+
+        # Cropping profile to same length as GFEM
+        mask = (P_values >= P_min) & (P_values <= P_max)
+        P_values, T_values, targets = P_values[mask], T_values[mask], targets[mask]
+
+        return P_values, T_values, targets
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # crop 1d profile !!
@@ -728,7 +767,7 @@ class GFEMModel:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
 
-            return None
+            return P_gfem, target_gfem, P_ref, target_ref, None, None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.1.          Perple_X Functions             !!! ++
@@ -742,7 +781,7 @@ class GFEMModel:
         # Get self attributes
         sid = self.sid
         res = self.res
-        geotherms = []
+        segs = self.segs
         data_dir = self.data_dir
         perplex_db = self.perplex_db
         model_out_dir = self.model_out_dir
@@ -750,50 +789,29 @@ class GFEMModel:
         T_min, T_max = self.T_min, self.T_max
         norm_comp = self._normalize_sample_comp()
         norm_comp = " ".join(map(str, norm_comp))
-        mantle_potential_temps = [1173, 1573, 1773]
+        subduction_segments = ["Central_Cascadia", "Kamchatka"]
         P_min, P_max = self.P_min * 1e4, self.P_max * 1e4
 
         # Build options
         # https://www.perplex.ethz.ch/perplex_options.html
-        if perplex_db != "koma06":
-            o = (f"composition_system     wt\n"
-                 f"composition_phase      wt\n"
-                 f"intermediate_savdyn    T\n"
-                 f"intermediate_savrpc    T\n"
-                 f"warn_no_limit          F\n"
-                 f"grid_levels            1 1\n"
-                 f"x_nodes                {int(res / 4)} {res + 1}\n"
-                 f"y_nodes                {int(res / 4)} {res + 1}\n"
-                 f"bounds                 VRH\n"
-                 f"vrh/hs_weighting       0.5\n"
-                 f"Anderson-Gruneisen     F\n"
-                 f"explicit_bulk_modulus  T\n"
-                 f"melt_is_fluid          T\n"
-                 f"poisson_test           F\n"
-                 f"poisson_ratio          on 0.31\n"
-                 f"seismic_output         some\n"
-                 f"auto_refine_file       F\n"
-                 f"seismic_data_file      F\n")
-        else:
-            o = (f"composition_system     wt\n"
-                 f"composition_phase      wt\n"
-                 f"intermediate_savdyn    T\n"
-                 f"intermediate_savrpc    T\n"
-                 f"warn_no_limit          F\n"
-                 f"grid_levels            1 1\n"
-                 f"x_nodes                {int(res / 4)} {res + 1}\n"
-                 f"y_nodes                {int(res / 4)} {res + 1}\n"
-                 f"bounds                 VRH\n"
-                 f"vrh/hs_weighting       0.5\n"
-                 f"Anderson-Gruneisen     F\n"
-                 f"approx_alpha           F\n"
-                 f"explicit_bulk_modulus  T\n"
-                 f"melt_is_fluid          T\n"
-                 f"poisson_test           F\n"
-                 f"poisson_ratio          on 0.35\n"
-                 f"seismic_output         some\n"
-                 f"auto_refine_file       F\n"
-                 f"seismic_data_file      F\n")
+        o = (f"composition_system     wt\n"
+             f"composition_phase      wt\n"
+             f"intermediate_savdyn    T\n"
+             f"intermediate_savrpc    T\n"
+             f"warn_no_limit          F\n"
+             f"grid_levels            1 1\n"
+             f"x_nodes                {int(res / 4)} {res + 1}\n"
+             f"y_nodes                {int(res / 4)} {res + 1}\n"
+             f"bounds                 VRH\n"
+             f"vrh/hs_weighting       0.5\n"
+             f"Anderson-Gruneisen     F\n"
+             f"explicit_bulk_modulus  T\n"
+             f"melt_is_fluid          T\n"
+             f"poisson_test           F\n"
+             f"poisson_ratio          on 0.31\n"
+             f"seismic_output         some\n"
+             f"auto_refine_file       F\n"
+             f"seismic_data_file      F\n")
 
         # Write build options
         with open(f"{model_out_dir}/build-options", "w") as file:
@@ -812,7 +830,7 @@ class GFEMModel:
         with open(f"{model_out_dir}/pssect-draw", "w") as file:
             file.write(f"{sid}\nN")
 
-        if perplex_db == "hp622":
+        if perplex_db == "hp633":
             # Build
             b = (f"{sid}\n"            # Proj name
                  f"td-data\n"          # Thermodynamic data file
@@ -841,110 +859,7 @@ class GFEMModel:
                  f"Y\n"                # Exclude pure and/or endmember phases ?
                  f"N\n"                # Prompt for phases ?
                  f"fbr\n"              # Enter names (1 per line)
-                 f"br\n"              # Enter names (1 per line)
-                 f"prl\n"              # Enter names (1 per line)
-                 f"grun\n"             # Enter names (1 per line)
-                 f"cumm\n"             # Enter names (1 per line)
-                 f"gl\n"               # Enter names (1 per line)
-                 f"ts\n"               # Enter names (1 per line)
-                 f"parg\n"             # Enter names (1 per line)
-                 f"perL\n"             # Enter names (1 per line)
-                 f"enL\n"              # Enter names (1 per line)
-                 f"cen\n"              # Enter names (1 per line)
-                 f"naph\n"             # Enter names (1 per line)
-                 f"nagt\n"             # Enter names (1 per line)
-                 f"wu\n"               # Enter names (1 per line)
-                 f"cz\n"               # Enter names (1 per line)
-                 f"h2oL\n"             # Enter names (1 per line)
-                 f"\n"                 # Enter to finish
-                 f"Y\n"                # Include solution models ?
-                 f"solution-models\n"  # Solution model file
-                 f"O(JH)\n"            # Enter names (1 per line)
-                 f"Wad\n"              # Enter names (1 per line)
-                 f"Ring\n"             # Enter names (1 per line)
-                 f"Aki\n"              # Enter names (1 per line)
-                 f"Cpx(JH)\n"          # Enter names (1 per line)
-                 f"Omph(GHP)\n"        # Enter names (1 per line)
-                 f"Hpx(H)\n"           # Enter names (1 per line)
-                 f"Opx(JH)\n"          # Enter names (1 per line)
-                 f"Sp(JH)\n"           # Enter names (1 per line)
-                 f"Grt(JH)\n"          # Enter names (1 per line)
-                 f"Maj\n"              # Enter names (1 per line)
-                 f"feldspar\n"         # Enter names (1 per line)
-                 f"Chum\n"             # Enter names (1 per line)
-                 f"Anth\n"             # Enter names (1 per line)
-                 f"cAmph(DP)\n"        # Enter names (1 per line)
-                 f"Wus\n"              # Enter names (1 per line)
-                 f"Pv\n"               # Enter names (1 per line)
-                 f"Fper(H)\n"          # Enter names (1 per line)
-                 f"Mpv(H)\n"           # Enter names (1 per line)
-                 f"Cpv(H)\n"           # Enter names (1 per line)
-                 f"CFer(H)\n"          # Enter names (1 per line)
-                 f"Chl(W)\n"           # Enter names (1 per line)
-                 f"Atg(PN)\n"          # Enter names (1 per line)
-                 f"A-phase\n"          # Enter names (1 per line)
-                 f"T\n"                # Enter names (1 per line)
-                 f"Melt(JH)\n"       # Enter names (1 per line)
-                 f"\n"                 # Enter to finish
-                 f"{sid}\n"            # Calculation title
-                 )
-            # Werami targets
-            w = (f"{sid}\n"            # Proj name
-                 f"2\n"                # Operational mode (2: properties on 2D grid)
-                 f"2\n"                # Select a property (2: Density kg/m3)
-                 f"N\n"                # Calculate individual phase properties ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"13\n"               # Select a property (13: P-wave velocity m/s)
-                 f"N\n"                # Calculate individual phase properties ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"14\n"               # Select a property (14: P-wave velocity m/s)
-                 f"N\n"                # Calculate individual phase properties ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"24\n"               # Select a property (24: Assemblage index)
-                 f"7\n"                # Select a property (7: Mode % of phase)
-                 f"Melt(JH)\n"         # Enter solution or compound
-                 f"6\n"                # Select a property (6: Composition of system)
-                 f"1\n"                # Enter a component (1: H2O)
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"0\n"                # Zero to finish
-                 f"N\n"                # Change default variable range ?
-                 f"\n"                 # Select the grid resolution (enter to continue)
-                 f"5\n"                # Dummy
-                 f"0\n"                # Zero to exit
-                 )
-            # Copy thermodynamic data
-            shutil.copy(f"{data_dir}/hp622-td", f"{model_out_dir}/td-data")
-            shutil.copy(f"{data_dir}/hp-sl", f"{model_out_dir}/solution-models")
-        elif perplex_db == "hp633":
-            # Build
-            b = (f"{sid}\n"            # Proj name
-                 f"td-data\n"          # Thermodynamic data file
-                 f"build-options\n"    # Build options file
-                 f"N\n"                # Transform components ?
-                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
-                 f"N\n"                # Calculations with saturated fluid ?
-                 f"N\n"                # Calculations with saturated components ?
-                 f"N\n"                # Use chemical potentials as independent variables ?
-                 f"SiO2\n"             # Select components (1 per line)
-                 f"Al2O3\n"            # Select components (1 per line)
-                 f"CaO\n"              # Select components (1 per line)
-                 f"MgO\n"              # Select components (1 per line)
-                 f"FeO\n"              # Select components (1 per line)
-                 f"Na2O\n"             # Select components (1 per line)
-                 f"H2O\n"              # Select components (1 per line)
-                 f"\n"                 # Enter to finish
-                 f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
-                 f"N\n"                # Calculate along a geotherm ?
-                 f"2\n"                # X-axis variable (2: T(K))
-                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
-                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
-                 f"Y\n"                # Specify component amounts by mass ?
-                 f"{norm_comp}\n"      # Enter mass amounts of components
-                 f"N\n"                # Print output file ?
-                 f"Y\n"                # Exclude pure and/or endmember phases ?
-                 f"N\n"                # Prompt for phases ?
-                 f"fbr\n"              # Enter names (1 per line)
-                 f"br\n"              # Enter names (1 per line)
+                 f"br\n"               # Enter names (1 per line)
                  f"prl\n"              # Enter names (1 per line)
                  f"grun\n"             # Enter names (1 per line)
                  f"cumm\n"             # Enter names (1 per line)
@@ -962,17 +877,15 @@ class GFEMModel:
                  f"nagt\n"             # Enter names (1 per line)
                  f"wu\n"               # Enter names (1 per line)
                  f"cz\n"               # Enter names (1 per line)
+                 f"afchl\n"            # Enter names (1 per line)
+                 f"tiGL\n"             # Enter names (1 per line)
                  f"h2oL\n"             # Enter names (1 per line)
                  f"\n"                 # Enter to finish
                  f"Y\n"                # Include solution models ?
                  f"solution-models\n"  # Solution model file
                  f"O(HGP)\n"           # Enter names (1 per line)
-                 f"Wad\n"              # Enter names (1 per line)
-                 f"Ring\n"             # Enter names (1 per line)
-                 f"Aki\n"              # Enter names (1 per line)
                  f"Cpx(HGP)\n"         # Enter names (1 per line)
                  f"Omph(GHP)\n"        # Enter names (1 per line)
-                 f"Hpx(H)\n"           # Enter names (1 per line)
                  f"Opx(HGP)\n"         # Enter names (1 per line)
                  f"Sp(HGP)\n"          # Enter names (1 per line)
                  f"Gt(HGP)\n"          # Enter names (1 per line)
@@ -981,12 +894,6 @@ class GFEMModel:
                  f"Chum\n"             # Enter names (1 per line)
                  f"Anth\n"             # Enter names (1 per line)
                  f"cAmph(DP)\n"        # Enter names (1 per line)
-                 f"Wus\n"              # Enter names (1 per line)
-                 f"Pv\n"               # Enter names (1 per line)
-                 f"Fper(H)\n"          # Enter names (1 per line)
-                 f"Mpv(H)\n"           # Enter names (1 per line)
-                 f"Cpv(H)\n"           # Enter names (1 per line)
-                 f"CFer(H)\n"          # Enter names (1 per line)
                  f"Chl(W)\n"           # Enter names (1 per line)
                  f"Atg(PN)\n"          # Enter names (1 per line)
                  f"A-phase\n"          # Enter names (1 per line)
@@ -1051,7 +958,7 @@ class GFEMModel:
                  f"Y\n"                # Exclude pure and/or endmember phases ?
                  f"N\n"                # Prompt for phases ?
                  f"fbr\n"              # Enter names (1 per line)
-                 f"br\n"              # Enter names (1 per line)
+                 f"br\n"               # Enter names (1 per line)
                  f"prl\n"              # Enter names (1 per line)
                  f"grun\n"             # Enter names (1 per line)
                  f"cumm\n"             # Enter names (1 per line)
@@ -1059,11 +966,18 @@ class GFEMModel:
                  f"ts\n"               # Enter names (1 per line)
                  f"parg\n"             # Enter names (1 per line)
                  f"perL\n"             # Enter names (1 per line)
+                 f"faTL\n"             # Enter names (1 per line)
+                 f"foTL\n"             # Enter names (1 per line)
+                 f"fa8L\n"             # Enter names (1 per line)
+                 f"fo8L\n"             # Enter names (1 per line)
+                 f"enL\n"              # Enter names (1 per line)
                  f"cen\n"              # Enter names (1 per line)
                  f"naph\n"             # Enter names (1 per line)
                  f"nagt\n"             # Enter names (1 per line)
                  f"wu\n"               # Enter names (1 per line)
                  f"cz\n"               # Enter names (1 per line)
+                 f"afchl\n"            # Enter names (1 per line)
+                 f"tiGL\n"             # Enter names (1 per line)
                  f"h2oL\n"             # Enter names (1 per line)
                  f"\n"                 # Enter to finish
                  f"Y\n"                # Include solution models ?
@@ -1079,8 +993,6 @@ class GFEMModel:
                  f"Chum\n"             # Enter names (1 per line)
                  f"Anth\n"             # Enter names (1 per line)
                  f"cAmph(DP)\n"        # Enter names (1 per line)
-                 f"Wus\n"              # Enter names (1 per line)
-                 f"Fper(H)\n"          # Enter names (1 per line)
                  f"Chl(W)\n"           # Enter names (1 per line)
                  f"Atg(PN)\n"          # Enter names (1 per line)
                  f"A-phase\n"          # Enter names (1 per line)
@@ -1207,56 +1119,6 @@ class GFEMModel:
             # Copy thermodynamic data
             shutil.copy(f"{data_dir}/stx21-td", f"{model_out_dir}/td-data")
             shutil.copy(f"{data_dir}/stx21-sl", f"{model_out_dir}/solution-models")
-        elif perplex_db == "koma06":
-            # Build
-            b = (f"{sid}\n"            # Proj name
-                 f"td-data\n"          # Thermodynamic data file
-                 f"build-options\n"    # Build options file
-                 f"N\n"                # Transform components ?
-                 f"2\n"                # Computational mode (2: Constrained Min on 2D grid)
-                 f"N\n"                # Calculations with saturated fluid ?
-                 f"N\n"                # Calculations with saturated components ?
-                 f"N\n"                # Use chemical potentials as independent variables ?
-                 f"SIO2\n"             # Select components (1 per line)
-                 f"MGO\n"              # Select components (1 per line)
-                 f"H2O\n"              # Select components (1 per line)
-                 f"\n"                 # Enter to finish
-                 f"5\n"                # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
-                 f"N\n"                # Calculate along a geotherm ?
-                 f"2\n"                # X-axis variable (2: T(K))
-                 f"{T_min} {T_max}\n"  # Enter min and max T(K)
-                 f"{P_min} {P_max}\n"  # Enter min and max P(bar)
-                 f"Y\n"                # Specify component amounts by mass ?
-                 f"{norm_comp}\n"      # Enter mass amounts of components
-                 f"N\n"                # Print output file ?
-                 f"N\n"                # Exclude pure and/or endmember phases ?
-                 f"N\n"                # Include solution models ?
-                 f"{sid}\n"            # Calculation title
-                 )
-            # Werami targets
-            w = (f"{sid}\n"            # Proj name
-                 f"2\n"                # Operational mode (2: properties on 2D grid)
-                 f"2\n"                # Select a property (2: Density kg/m3)
-                 f"N\n"                # Calculate individual phase properties ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"13\n"               # Select a property (13: P-wave velocity m/s)
-                 f"N\n"                # Calculate individual phase properties ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"14\n"               # Select a property (14: P-wave velocity m/s)
-                 f"N\n"                # Calculate individual phase properties ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"24\n"               # Select a property (24: Assemblage index)
-                 f"6\n"                # Select a property (6: Composition of system)
-                 f"1\n"                # Enter a component (1: H2O)
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"0\n"                # Zero to finish
-                 f"N\n"                # Change default variable range ?
-                 f"\n"                 # Select the grid resolution (enter to continue)
-                 f"5\n"                # Dummy
-                 f"0\n"                # Zero to exit
-                 )
-            # Copy thermodynamic data
-            shutil.copy(f"{data_dir}/koma06-td", f"{model_out_dir}/td-data")
         else:
             raise Exception("Unrecognized thermodynamic dataset !")
 
@@ -1268,11 +1130,20 @@ class GFEMModel:
         with open(f"{model_out_dir}/werami-targets", "w") as file:
             file.write(w)
 
-        # Write geotherms to tsv files
-        for temp in mantle_potential_temps:
-            self._get_1d_profile(mantle_potential=temp)
+        # Write subduction geotherms to tsv files
+        for seg in segs:
+            geotherm = self._get_subduction_geotherm(seg)
+            geotherm["P"] = geotherm["P"] * 1e4
+            geotherm = geotherm[["T", "P"]]
+            if not os.path.exists(f"{model_out_dir}/geotherm-{seg}"):
+                if not geotherm.empty:
+                    geotherm.to_csv(f"{model_out_dir}/geotherm-{seg}", sep="\t",
+                                    index=False, header=False, float_format="%.6E")
 
-        if perplex_db in ["hp633", "hp622", "hp02", "koma06"]:
+        # Initialize werami geotherms
+        werami_geotherms = []
+
+        if perplex_db in ["hp633", "hp02"]:
             # Werami phase
             f = (f"{sid}\n"            # Proj name
                  f"2\n"                # Operational mode (2: properties on 2D grid)
@@ -1284,18 +1155,19 @@ class GFEMModel:
                  f"0\n"                # Zero to exit
                  )
             # Werami geotherm
-            for temp in mantle_potential_temps:
-                g = (f"{sid}\n"            # Proj name
-                     f"4\n"                # Operational mode (4: properties along a 1d path)
-                     f"2\n"                # Path described by (2: a file with T-P points)
-                     f"geotherm-{temp}\n"  # Enter filename
-                     f"1\n"                # How many nth points to plot ?
-                     f"25\n"               # Select a property (25: Modes of all phases)
-                     f"N\n"                # Output cumulative modes ?
-                     f"N\n"                # Include fluid in computation of properties ?
-                     f"0\n"                # Zero to exit
-                     )
-                geotherms.append(g)
+            for seg in subduction_segments:
+                if os.path.exists(f"{model_out_dir}/geotherm-{seg}"):
+                    g = (f"{sid}\n"            # Proj name
+                         f"4\n"                # Op mode (4: properties along a 1d path)
+                         f"2\n"                # Path (2: a file with T-P points)
+                         f"geotherm-{seg}\n"   # Enter filename
+                         f"1\n"                # How many nth points to plot ?
+                         f"25\n"               # Select a property (25: Modes of all phases)
+                         f"N\n"                # Output cumulative modes ?
+                         f"N\n"                # Include fluid in computation of properties ?
+                         f"0\n"                # Zero to exit
+                         )
+                    werami_geotherms.append(g)
         elif perplex_db == "stx21":
             # Werami phase
             f = (f"{sid}\n"            # Proj name
@@ -1307,17 +1179,18 @@ class GFEMModel:
                  f"0\n"                # Zero to exit
                  )
             # Werami geotherm
-            for temp in mantle_potential_temps:
-                g = (f"{sid}\n"            # Proj name
-                     f"4\n"                # Operational mode (4: properties along a 1d path)
-                     f"2\n"                # Path described by (2: a file with T-P points)
-                     f"geotherm-{temp}\n"  # Enter filename
-                     f"1\n"                # How many nth points to plot ?
-                     f"25\n"               # Select a property (25: Modes of all phases)
-                     f"N\n"                # Output cumulative modes ?
-                     f"0\n"                # Zero to exit
-                     )
-                geotherms.append(g)
+            for seg in subduction_segments:
+                if os.path.exists(f"{model_out_dir}/geotherm-{seg}"):
+                    g = (f"{sid}\n"            # Proj name
+                         f"4\n"                # Op mode (4: properties along a 1d path)
+                         f"2\n"                # Path (2: a file with T-P points)
+                         f"geotherm-{seg}\n"   # Enter filename
+                         f"1\n"                # How many nth points to plot ?
+                         f"25\n"               # Select a property (25: Modes of all phases)
+                         f"N\n"                # Output cumulative modes ?
+                         f"0\n"                # Zero to exit
+                         )
+                    werami_geotherms.append(g)
         else:
             raise Exception("Unrecognized thermodynamic dataset !")
 
@@ -1325,9 +1198,9 @@ class GFEMModel:
         with open(f"{model_out_dir}/werami-phase", "w") as file:
             file.write(f)
 
-        # Write werami geotherm
-        for i, g in enumerate(geotherms):
-            with open(f"{model_out_dir}/werami-geotherm{i}", "w") as file:
+        # Write werami geotherms
+        for i, g in enumerate(werami_geotherms):
+            with open(f"{model_out_dir}/werami-geotherm-{segs[i]}", "w") as file:
                 file.write(g)
 
         return None
@@ -1363,6 +1236,7 @@ class GFEMModel:
         """
         # Get self attributes
         sid = self.sid
+        segs = self.segs
         ox_gfem = self.ox_gfem
         timeout = self.timeout
         verbose = self.verbose
@@ -1400,9 +1274,9 @@ class GFEMModel:
             elif program == "werami":
                 config_files.append(f"{model_out_dir}/werami-targets")
                 config_files.append(f"{model_out_dir}/werami-phase")
-                config_files.append(f"{model_out_dir}/werami-geotherm0")
-                config_files.append(f"{model_out_dir}/werami-geotherm1")
-                config_files.append(f"{model_out_dir}/werami-geotherm2")
+                for seg in segs:
+                    if os.path.exists(f"{model_out_dir}/werami-geotherm-{seg}"):
+                        config_files.append(f"{model_out_dir}/werami-geotherm-{seg}")
 
                 self._replace_in_file(f"{model_out_dir}/build-options",
                                       {"Anderson-Gruneisen     F":
@@ -1461,26 +1335,10 @@ class GFEMModel:
                         # Remove old output
                         os.remove(f"{model_out_dir}/{sid}_1.tab")
 
-                    elif program == "werami" and i == 2:
+                    elif program == "werami" and i > 1:
                         # Copy werami mineral assemblage output
                         shutil.copy(f"{model_out_dir}/{sid}_1.tab",
-                                    f"{model_out_dir}/geotherm0.tab")
-
-                        # Remove old output
-                        os.remove(f"{model_out_dir}/{sid}_1.tab")
-
-                    elif program == "werami" and i == 3:
-                        # Copy werami mineral assemblage output
-                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
-                                    f"{model_out_dir}/geotherm1.tab")
-
-                        # Remove old output
-                        os.remove(f"{model_out_dir}/{sid}_1.tab")
-
-                    elif program == "werami" and i == 4:
-                        # Copy werami mineral assemblage output
-                        shutil.copy(f"{model_out_dir}/{sid}_1.tab",
-                                    f"{model_out_dir}/geotherm2.tab")
+                                    f"{model_out_dir}/geotherm-{segs[i - 2]}.tab")
 
                         # Remove old output
                         os.remove(f"{model_out_dir}/{sid}_1.tab")
@@ -1510,26 +1368,16 @@ class GFEMModel:
         model_out_dir = self.model_out_dir
         perplex_targets = f"{model_out_dir}/target-array.tab"
 
-        # Replace P(bars) with P(bar) in koma06 models to be consistent
-        with open(perplex_targets, "r") as file:
-            content = file.read()
-
-        content = content.replace("P(bars)", "P(bar)")
-
-        with open(perplex_targets, "w") as file:
-            file.write(content)
-
         # Initialize results
         if perplex_db == "stx21":
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "assemblage": [], "variance": []}
-        elif perplex_db == "koma06":
-            results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
-                       "assemblage_index": [], "h2o": [], "assemblage": [], "variance": []}
-        else:
+        elif perplex_db in ["hp633", "hp02"]:
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "melt": [], "h2o": [],
                        "assemblage": [], "variance": []}
+        else:
+            raise Exception("Unrecognized thermodynamic dataset !")
 
         # Open file
         with open(perplex_targets, "r") as file:
@@ -1665,8 +1513,6 @@ class GFEMModel:
         # Point results that can be converted to numpy arrays
         if perplex_db == "stx21":
             point_params = ["T", "P", "rho", "Vp", "Vs", "assemblage", "variance"]
-        elif perplex_db == "koma06":
-            point_params = ["T", "P", "rho", "Vp", "Vs", "h2o", "assemblage", "variance"]
         else:
             point_params = ["T", "P", "rho", "Vp", "Vs", "melt", "h2o",
                             "assemblage", "variance"]
@@ -1675,7 +1521,7 @@ class GFEMModel:
         for key, value in results.items():
             if key in point_params:
                 # Add correction for Vs
-                if perplex_db in ["hp633", "hp622"] and key == "Vs":
+                if perplex_db in ["hp633"] and key == "Vs":
                     results[key] = np.array(value) + 0.15
                 else:
                     results[key] = np.array(value)
@@ -1833,105 +1679,6 @@ class GFEMModel:
 
         return None
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # summarize gfem model results !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _summarize_gfem_model_results(self):
-        """
-        """
-        # Get model attributes
-        sid = self.sid
-        res = self.res
-        P_min = self.P_min
-        P_max = self.P_max
-        ox_gfem = self.ox_gfem
-        results = self.results
-        verbose = self.verbose
-        data_dir = self.data_dir
-        perplex_db = self.perplex_db
-        targets = ["rho", "Vp", "Vs"]
-        model_built = self.model_built
-
-        # Check for model
-        if not model_built:
-            raise Exception("No GFEM model! Call build_model() first ...")
-
-        # Post-process results
-        try:
-            self._get_results()
-            self._get_target_array()
-            self._get_feature_array()
-            comp_time = self._get_comp_time()
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _summarize_gfem_model_results() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-
-        # Check for results
-        if not results:
-            raise Exception("No GFEM model results! Call get_results() first ...")
-
-        # Check for data dir
-        if not os.path.exists(data_dir):
-            raise Exception(f"Data not found at {data_dir} !")
-
-        # Get 1D reference models
-        ref_models = self._get_1d_reference_models()
-
-        # Initialize metrics lists
-        smpid, db, ox, sz, trg, tm = [], [], [], [], [], []
-        rmse_prem_profile, r2_prem_profile = [], []
-
-        for target in targets:
-            # Get 1D reference model profile
-            P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
-
-            # Get GFEM model profile
-            P_gfem, _, target_gfem = self._get_1d_profile(
-                target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
-
-            # Crop GFEM profile and compare with PREM
-            _, _, _, _, rmse_prem, r2_prem = (
-                self._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
-
-            # Save other info
-            smpid.append(sid)
-            sz.append(res**2)
-            ox.append(len(ox_gfem))
-            trg.append(target)
-            tm.append(comp_time)
-            db.append(perplex_db)
-
-        # Create dataframe
-        df = pd.DataFrame(
-            {"SAMPLEID": smpid, "DATABASE": db, "N_OX_SYS": ox, "SIZE": sz,
-             "COMP_TIME": tm, "TARGET": trg, "RMSE_PREM": rmse_prem, "R2_PREM": r2_prem})
-
-        # Write csv
-        out_dir = f"{data_dir}/gfem_summaries"
-        filename = f"{out_dir}/{sid}-{perplex_db}-{res}-results-summary.csv"
-
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir, exist_ok=True)
-
-        if os.path.exists(filename):
-            try:
-                df_existing = pd.read_csv(filename)
-                if df_existing.empty:
-                    df.to_csv(filename, index=False)
-            except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in visualize_model() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                traceback.print_exc()
-        else:
-            df.to_csv(filename, index=False)
-
-        return None
-
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.3.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1947,16 +1694,9 @@ class GFEMModel:
         fig_dir = self.fig_dir
         perplex_db = self.perplex_db
 
-        # Filter targets for gradient images
-        if gradient:
-            grad_targets = ["rho", "Vp", "Vs", "melt", "h2o"]
-            t_ind = [i for i, t in enumerate(targets) if t in grad_targets]
-            targets = [targets[i] for i in t_ind]
-
-        # Filter targets for dry samples
-        if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
-            t_ind = [i for i, t in enumerate(targets) if t not in ["h2o"]]
-            targets = [targets[i] for i in t_ind]
+        # Filter targets
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
+        targets = [targets[i] for i in t_ind]
 
         # Check for existing plots
         existing_figs = []
@@ -1988,10 +1728,9 @@ class GFEMModel:
         fig_dir = self.fig_dir
         perplex_db = self.perplex_db
 
-        # Filter targets for dry samples
-        if sid in ["DMM", "PUM", "PYR"] or "loi000" in sid:
-            t_ind = [i for i, t in enumerate(targets) if t not in ["h2o"]]
-            targets = [targets[i] for i in t_ind]
+        # Filter targets
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
+        targets = [targets[i] for i in t_ind]
 
         # Check for existing plots
         existing_figs = []
@@ -2009,9 +1748,9 @@ class GFEMModel:
             return False
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check model prem images !!
+    # check model depth profile images !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_prem_images(self):
+    def _check_model_depth_profile_images(self):
         """
         """
         # Get model data
@@ -2019,14 +1758,14 @@ class GFEMModel:
         targets = self.targets
         fig_dir = self.fig_dir
 
-        # Filter targets for PREM
+        # Filter targets
         t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs"]]
         targets = [targets[i] for i in t_ind]
 
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            path = f"{fig_dir}/{sid}-{target}-prem.png"
+            path = f"{fig_dir}/{sid}-{target}-depth-profile.png"
             check = os.path.exists(path)
 
             if check:
@@ -2045,19 +1784,20 @@ class GFEMModel:
         """
         # Get model data
         sid = self.sid
+        segs = self.segs
         fig_dir = self.fig_dir
-        geotherms = [1573]
 
         # Check for existing plots
         existing_figs = []
-        for i, g in enumerate(geotherms):
-            path = f"{fig_dir}/{sid}-geotherm{g}-assemblages.png"
+        for i, seg in enumerate(segs):
+            seg_lab = seg.replace("_", "-").lower()
+            path = f"{fig_dir}/{sid}-geotherm-{seg_lab}-assemblages.png"
             check = os.path.exists(path)
 
             if check:
                 existing_figs.append(check)
 
-        if len(existing_figs) == len(geotherms):
+        if len(existing_figs) == len(segs):
             return True
         else:
             return False
@@ -2065,13 +1805,14 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize array image  !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, palette="bone", geotherms=["mid"], gradient=False,
-                               figwidth=6.3, figheight=4.725, fontsize=22):
+    def _visualize_array_image(self, palette="bone", gradient=False, figwidth=6.3,
+                               figheight=4.725, fontsize=22):
         """
         """
         # Get self attributes
         sid = self.sid
         res = self.res
+        segs = self.segs
         targets = self.targets
         results = self.results
         fig_dir = self.fig_dir
@@ -2194,10 +1935,12 @@ class GFEMModel:
                 vmin = int(np.nanmin(np.unique(square_target)))
                 vmax = int(np.nanmax(np.unique(square_target)))
 
-            # Get geotherm
-            P_geotherm, T_geotherm, _ = self._get_1d_profile(target, 1173)
-            P_geotherm2, T_geotherm2, _ = self._get_1d_profile(target, 1573)
-            P_geotherm3, T_geotherm3, _ = self._get_1d_profile(target, 1773)
+            # Get subduction geotherms
+            sub_geotherms_top = {}
+            sub_geotherms_moho = {}
+            for seg in segs:
+                sub_geotherms_top[seg] = self._get_subduction_geotherm(seg, position="top")
+                sub_geotherms_moho[seg] = self._get_subduction_geotherm(seg, position="moho")
 
             if color_discrete:
                 # Discrete color palette
@@ -2247,24 +1990,12 @@ class GFEMModel:
 
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if "low" in geotherms:
-                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="black",
-                            linewidth=2)
-                    plt.text(1163 + (6 * 0.5 * 35), 6, "1173 K", fontsize=fontsize * 0.833,
-                             horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="black")
-                if "mid" in geotherms:
-                    ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="black",
-                            linewidth=2)
-                    plt.text(1563 + (6 * 0.5 * 35), 6, "1573 K", fontsize=fontsize * 0.833,
-                             horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="black")
-                if "high" in geotherms:
-                    ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="black",
-                            linewidth=2)
-                    plt.text(1763 + (6 * 0.5 * 35), 6, "1773 K", fontsize=fontsize * 0.833,
-                             horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="black")
+                for seg, geotherm in sub_geotherms_top.items():
+                    ax.plot(geotherm["T"], geotherm["P"], linestyle="-", color="black",
+                            linewidth=2, label=seg)
+                for seg, geotherm in sub_geotherms_moho.items():
+                    ax.plot(geotherm["T"], geotherm["P"], linestyle="--", color="black",
+                            linewidth=2, label=seg)
                 ax.set_xlabel("T (K)")
                 ax.set_ylabel("P (GPa)")
                 plt.colorbar(im, ax=ax, label="", ticks=np.arange(vmin, vmax, num_colors))
@@ -2317,9 +2048,6 @@ class GFEMModel:
                     # Set melt fraction to 0–100 vol.%
                     if target == "melt": vmin, vmax = 0, 100
 
-                    # Set h2o fraction to 0–100 wt.%
-                    if target == "h2o": vmin, vmax = 0, 2
-
                 # Set nan color
                 cmap = plt.colormaps[cmap]
                 cmap.set_bad(color="white")
@@ -2329,24 +2057,12 @@ class GFEMModel:
 
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if "low" in geotherms:
-                    ax.plot(T_geotherm, P_geotherm, linestyle="-", color="black",
-                            linewidth=2)
-                    plt.text(1163 + (6 * 0.5 * 35), 6, "1173 K", fontsize=fontsize * 0.833,
-                             horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="black")
-                if "mid" in geotherms:
-                    ax.plot(T_geotherm2, P_geotherm2, linestyle="--", color="black",
-                            linewidth=2)
-                    plt.text(1563 + (6 * 0.5 * 35), 6, "1573 K", fontsize=fontsize * 0.833,
-                             horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="black")
-                if "high" in geotherms:
-                    ax.plot(T_geotherm3, P_geotherm3, linestyle="-.", color="black",
-                            linewidth=2)
-                    plt.text(1763 + (6 * 0.5 * 35), 6, "1773 K", fontsize=fontsize * 0.833,
-                             horizontalalignment="center", verticalalignment="bottom",
-                             rotation=67, color="black")
+                for seg, geotherm in sub_geotherms_top.items():
+                    ax.plot(geotherm["T"], geotherm["P"], linestyle="-", color="black",
+                            linewidth=2, label=seg)
+                for seg, geotherm in sub_geotherms_moho.items():
+                    ax.plot(geotherm["T"], geotherm["P"], linestyle="--", color="black",
+                            linewidth=2, label=seg)
                 ax.set_xlabel("T (K)")
                 ax.set_ylabel("P (GPa)")
 
@@ -2608,9 +2324,6 @@ class GFEMModel:
                     # Set melt fraction to 0–100 vol.%
                     if target == "melt": vmin, vmax = 0, 100
 
-                    # Set h2o fraction to 0–100 wt.%
-                    if target == "h2o": vmin, vmax = 0, 2
-
                 # Set nan color
                 cmap = plt.get_cmap(cmap)
                 cmap.set_bad(color="white")
@@ -2676,15 +2389,15 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize prem !!
+    # visualize depth profiles !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_prem(self, geotherms=["mid"], figwidth=6.3,
-                        figheight=4.725, fontsize=22):
+    def _visualize_depth_profiles(self, figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
         # Get model data
         sid = self.sid
         res = self.res
+        segs = self.segs
         P_min = self.P_min
         P_max = self.P_max
         targets = self.targets
@@ -2694,6 +2407,7 @@ class GFEMModel:
         perplex_db = self.perplex_db
         model_built = self.model_built
         target_units = self.target_units
+        model_out_dir = self.model_out_dir
 
         # Check for model
         if not model_built:
@@ -2707,17 +2421,10 @@ class GFEMModel:
         if not os.path.exists(fig_dir):
             os.makedirs(fig_dir, exist_ok=True)
 
-        # Check for average geotherm
-        if "mid" not in geotherms:
-            geotherms = geotherms + ["mid"]
-
-        # Filter targets for PREM
+        # Filter targets
         t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "melt", "h2o"]]
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
-
-        # Get 1D reference models
-        ref_models = self._get_1d_reference_models()
 
         # Get synthetic endmember compositions
         sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
@@ -2728,179 +2435,81 @@ class GFEMModel:
         bend = df_synth_bench["SAMPLEID"].iloc[0]
         tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
+        # Set plot style and settings
+        plt.rcParams["figure.dpi"] = 300
+        plt.rcParams["font.size"] = fontsize
+        plt.rcParams["savefig.bbox"] = "tight"
+        plt.rcParams["axes.facecolor"] = "0.9"
+        plt.rcParams["legend.frameon"] = "False"
+        plt.rcParams["legend.facecolor"] = "0.9"
+        plt.rcParams["legend.loc"] = "upper left"
+        plt.rcParams["legend.fontsize"] = "small"
+        plt.rcParams["figure.autolayout"] = "True"
+
+        # Change endmember sampleids
+        if sid == tend:
+            sid_lab = "DSUM"
+        elif sid == bend:
+            sid_lab = "PSUM"
+        else:
+            sid_lab = sid
+
+        # Colormap
+        colormap = plt.colormaps["tab10"]
+
         for i, target in enumerate(targets):
-            if target in ["rho", "Vp", "Vs"]:
-                # Get 1D reference model profiles
-                P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
-                P_stw105, target_stw105 = (ref_models["stw105"]["P"],
-                                           ref_models["stw105"][target])
-
-            # Process GFEM model profiles
-            if "low" in geotherms:
-                P_gfem, _, target_gfem = self._get_1d_profile(target, 1173)
-                if target in ["rho", "Vp", "Vs"]:
-                    P_gfem, target_gfem, _, _, _, _ = self._crop_1d_profile(
-                        P_gfem, target_gfem, P_prem, target_prem)
-            if "mid" in geotherms:
-                P_gfem2, _, target_gfem2 = self._get_1d_profile(target, 1573)
-                if target in ["rho", "Vp", "Vs"]:
-                    P_gfem2, target_gfem2, _, _, rmse, r2 = self._crop_1d_profile(
-                        P_gfem2, target_gfem2, P_prem, target_prem)
-            if "high" in geotherms:
-                P_gfem3, _, target_gfem3 = self._get_1d_profile(target, 1773)
-                if target in ["rho", "Vp", "Vs"]:
-                    P_gfem3, target_gfem3, _, _, _, _ = self._crop_1d_profile(
-                        P_gfem3, target_gfem3, P_prem, target_prem)
-
-            if target in ["rho", "Vp", "Vs"]:
-                _, _, P_prem, target_prem, _, _ = self._crop_1d_profile(
-                    P_gfem2, target_gfem2, P_prem, target_prem)
-                _, _, P_stw105, target_stw105, _, _ = self._crop_1d_profile(
-                    P_gfem2, target_gfem2, P_stw105, target_stw105)
-
-            if target in ["rho", "Vp", "Vs", "h2o"]:
-                P_hy, _, target_hy = self._get_1d_profile(
-                    target, 1173, hymatz_input=["Pyrolite", 0])
-                P_hy, target_hy, _, _, _, _ = self._crop_1d_profile(
-                    P_hy, target_hy, P_prem, target_prem)
-                P_hy2, _, target_hy2 = self._get_1d_profile(
-                    target, 1173, hymatz_input=["Pyrolite", 100])
-                P_hy2, target_hy2, _, _, _, _ = self._crop_1d_profile(
-                    P_hy2, target_hy2, P_prem, target_prem)
-                P_hy3, _, target_hy3 = self._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 0])
-                P_hy3, target_hy3, _, _, _, _ = self._crop_1d_profile(
-                    P_hy3, target_hy3, P_prem, target_prem)
-                P_hy4, _, target_hy4 = self._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 100])
-                P_hy4, target_hy4, _, _, _, _ = self._crop_1d_profile(
-                    P_hy4, target_hy4, P_prem, target_prem)
-                P_hy5, _, target_hy5 = self._get_1d_profile(
-                    target, 1773, hymatz_input=["Pyrolite", 0])
-                P_hy5, target_hy5, _, _, _, _ = self._crop_1d_profile(
-                    P_hy5, target_hy5, P_prem, target_prem)
-                P_hy6, _, target_hy6 = self._get_1d_profile(
-                    target, 1773, hymatz_input=["Pyrolite", 100])
-                P_hy6, target_hy6, _, _, _, _ = self._crop_1d_profile(
-                    P_hy6, target_hy6, P_prem, target_prem)
-
-            # Change endmember sampleids
-            if sid == tend:
-                sid_lab = "DSUM"
-            elif sid == bend:
-                sid_lab = "PSUM"
-            else:
-                sid_lab = sid
-
-            # Set plot style and settings
-            plt.rcParams["figure.dpi"] = 300
-            plt.rcParams["font.size"] = fontsize
-            plt.rcParams["savefig.bbox"] = "tight"
-            plt.rcParams["axes.facecolor"] = "0.9"
-            plt.rcParams["legend.frameon"] = "False"
-            plt.rcParams["legend.facecolor"] = "0.9"
-            plt.rcParams["legend.loc"] = "upper left"
-            plt.rcParams["legend.fontsize"] = "small"
-            plt.rcParams["figure.autolayout"] = "True"
-
-            # Colormap
-            colormap = plt.colormaps["tab10"]
-
             # Plotting
             fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
 
-            if target in ["rho", "Vp", "Vs"]:
-                # Plot reference models
-                ax1.plot(target_prem, P_prem, "-", linewidth=2, color="black")
-                ax1.plot(target_stw105, P_stw105, ":", linewidth=2, color="black")
+            for j, seg in enumerate(segs):
+                gt_top = self._get_subduction_geotherm(seg, position="top")
+                gt_moho = self._get_subduction_geotherm(seg, position="moho")
+                P_gfem_top, _, target_gfem_top = (
+                    self._extract_target_along_1d_geotherm(target, gt_top))
+                P_gfem_moho, _, target_gfem_moho = (
+                    self._extract_target_along_1d_geotherm(target, gt_moho))
 
-            if target in ["rho", "Vp", "Vs", "h2o"]:
-                # Plot HyMaTZ profiles for dry and 100% WSC Pyrolite
-                if "low" in geotherms:
-                    ax1.fill_betweenx(P_hy, target_hy, target_hy2, color=colormap(2),
-                                      alpha=0.2)
-                    ax1.plot(target_hy, P_hy, "-", linewidth=2, color=colormap(2),
-                             label="HyMaTZ 1173")
-                    ax1.plot(target_hy2, P_hy2, "-", linewidth=2, color=colormap(2))
-                if "mid" in geotherms:
-                    ax1.fill_betweenx(P_hy3, target_hy3, target_hy4, color=colormap(0),
-                                      alpha=0.2)
-                    ax1.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(0),
-                             label="HyMaTZ")
-                    ax1.plot(target_hy4, P_hy4, "-", linewidth=2, color=colormap(0))
-                if "high" in geotherms:
-                    ax1.fill_betweenx(P_hy5, target_hy5, target_hy6, color=colormap(4),
-                                      alpha=0.2)
-                    ax1.plot(target_hy5, P_hy5, "-", linewidth=2, color=colormap(4),
-                             label="HyMaTZ 1773")
-                    ax1.plot(target_hy6, P_hy6, "-", linewidth=2, color=colormap(4))
+                # Plot GFEM model profiles
+                ax1.plot(target_gfem_top, P_gfem_top, "-", linewidth=2, color=colormap(j),
+                         label=f"{seg.replace("_", " ")}")
+                ax1.fill_betweenx(P_gfem_top, target_gfem_top * (1 - 0.05),
+                                  target_gfem_top * (1 + 0.05), color=colormap(j), alpha=0.2)
+                ax1.plot(target_gfem_moho, P_gfem_moho, "--", linewidth=2, color=colormap(j))
+                ax1.fill_betweenx(P_gfem_moho, target_gfem_moho * (1 - 0.05),
+                                  target_gfem_moho * (1 + 0.05), color=colormap(j),
+                                  alpha=0.2)
 
-            # Plot GFEM model profiles
-            if "low" in geotherms:
-                ax1.plot(target_gfem, P_gfem, "-", linewidth=2, color=colormap(3),
-                         label=f"Perple_X 1173")
-                ax1.fill_betweenx(P_gfem, target_gfem * (1 - 0.05),
-                                  target_gfem * (1 + 0.05), color=colormap(3), alpha=0.2)
-            if "mid" in geotherms:
-                ax1.plot(target_gfem2, P_gfem2, "-", linewidth=2, color=colormap(1),
-                         label=f"Perple_X")
-                ax1.fill_betweenx(P_gfem2, target_gfem2 * (1 - 0.05),
-                                  target_gfem2 * (1 + 0.05), color=colormap(1), alpha=0.2)
-            if "high" in geotherms:
-                ax1.plot(target_gfem3, P_gfem3, "-", linewidth=2, color=colormap(5),
-                         label=f"Perple_X 1773")
-                ax1.fill_betweenx(P_gfem3, target_gfem3 * (1 - 0.05),
-                                  target_gfem3 * (1 + 0.05), color=colormap(5), alpha=0.3)
+                if target == "rho":
+                    target_label = "Density"
+                elif target == "h2o":
+                    target_label = "H$_2$O"
+                elif target == "melt":
+                    target_label = "Melt"
+                else:
+                    target_label = target
 
-            if target == "rho":
-                target_label = "Density"
-            elif target == "h2o":
-                target_label = "H$_2$O"
-            elif target == "melt":
-                target_label = "Melt"
-            else:
-                target_label = target
+                if target not in ["assemblage", "variance"]:
+                    ax1.set_xlabel(f"{target_label} ({target_units[i]})")
+                else:
+                    ax1.set_xlabel(f"{target_label}")
+                ax1.set_ylabel("P (GPa)")
+                ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+                ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
-            if target not in ["assemblage", "variance"]:
-                ax1.set_xlabel(f"{target_label} ({target_units[i]})")
-            else:
-                ax1.set_xlabel(f"{target_label}")
-            ax1.set_ylabel("P (GPa)")
-            if target == "h2o":
-                ax1.set_xlim(None, 5)
-            ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-            ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                # Vertical text spacing
+                text_margin_x = 0.04
+                text_margin_y = 0.15
+                text_spacing_y = 0.1
 
-            # Vertical text spacing
-            text_margin_x = 0.04
-            text_margin_y = 0.15
-            text_spacing_y = 0.1
+                # Convert the primary y-axis data (pressure) to depth
+                depth_conversion = lambda P: P * 30
+                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem_top)))
 
-            # Add R-squared and RMSE values as text annotations in the plot
-            if target in ["rho", "Vp", "Vs"]:
-                plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
-                         f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
-                         fontsize=fontsize * 0.833, horizontalalignment="left",
-                         verticalalignment="top")
-                plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 1)),
-                         f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
-                         fontsize=fontsize * 0.833, horizontalalignment="left",
-                         verticalalignment="top")
-
-            # Convert the primary y-axis data (pressure) to depth
-            depth_conversion = lambda P: P * 30
-            if "low" in geotherms:
-                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
-            if "mid" in geotherms:
-                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem2)))
-            if "high" in geotherms:
-                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem3)))
-
-            # Create the secondary y-axis and plot depth on it
-            ax2 = ax1.secondary_yaxis(
-                "right", functions=(depth_conversion, depth_conversion))
-            ax2.set_yticks([410, 670])
-            ax2.set_ylabel("Depth (km)")
+                # Create the secondary y-axis and plot depth on it
+                ax2 = ax1.secondary_yaxis(
+                    "right", functions=(depth_conversion, depth_conversion))
+                ax2.set_yticks([410, 670])
+                ax2.set_ylabel("Depth (km)")
 
             plt.legend(loc="lower right", columnspacing=0, handletextpad=0.2,
                        fontsize=fontsize * 0.833)
@@ -2908,7 +2517,7 @@ class GFEMModel:
             plt.title("Depth Profile")
 
             # Save the plot to a file
-            filename = f"{sid}-{target}-prem.png"
+            filename = f"{sid}-{target}-depth-profile.png"
             plt.savefig(f"{fig_dir}/{filename}")
 
             # Close device
@@ -2920,14 +2529,15 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize geotherm assemblages !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_geotherm_assemblages(self, geotherms=[1573], modal_thresh=5,
-                                        figwidth=6.3, figheight=4.725, fontsize=22):
+    def _visualize_geotherm_assemblages(self, modal_thresh=5, figwidth=6.3, figheight=4.725,
+                                        fontsize=22):
         """
         """
         # Get self attributes
         sid = self.sid
         res = self.res
         loi = self.loi
+        segs = self.segs
         fig_dir = self.fig_dir
         xi = self.fertility_index
         perplex_db = self.perplex_db
@@ -2943,8 +2553,8 @@ class GFEMModel:
             os.makedirs(fig_dir, exist_ok=True)
 
         # Check for werami files
-        for i, g in enumerate(geotherms):
-            path = f"{model_out_dir}/geotherm{i}.tab"
+        for seg in segs:
+            path = f"{model_out_dir}/geotherm-{seg}.tab"
             if not os.path.exists(path):
                 raise Exception(f"No werami data found at {path} !")
 
@@ -2961,21 +2571,16 @@ class GFEMModel:
 
         # Get unique phases
         if perplex_db == "hp02":
-            phase_names = ["O(HP)", "cAmph(DP)", "Cpx(HGP)", "Opx(HGP)", "Maj", "Wus",
-                           "stv", "chdr"]
-        if perplex_db == "hp633":
-            phase_names = ["O(HGP)", "Wad", "Ring", "Aki", "cAmph(DP)", "Cpx(HGP)",
-                           "Opx(HGP)", "Hpx(H)", "Maj", "Wus", "Mpv(H)", "CFer(H)", "stv",
-                           "chdr"]
-        elif perplex_db == "hp622":
-            phase_names = ["O(JH)", "Wad", "Ring", "cAmph(DP)", "Cpx(JH)", "Opx(JH)",
-                           "Hpx(H)", "Maj", "Wus", "Mpv(H)", "CFer(H)", "stv", "chdr"]
-        elif perplex_db == "koma06":
-            phase_names = ["chum", "phA", "phE", "phD", "phB", "hwd", "hrg", "br", "fo",
-                           "hen", "wd", "rg", "aki", "pv", "per", "stv"]
-        else:
+            phase_names = ["O(HP)", "cAmph(DP)", "Cpx(HGP)", "Opx(HGP)", "Maj", "Chl(W)",
+                           "Atg(PN)", "Omph(GHP)", "A-phase"]
+        elif perplex_db == "hp633":
+            phase_names = ["O(HGP)", "cAmph(DP)", "Cpx(HGP)", "Opx(HGP)", "Maj", "Chl(W)",
+                           "Atg(PN)", "Omph(GHP)", "A-phase", "liz"]
+        elif perplex_db == "stx21":
             phase_names = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
                            "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl", "ca-pv", "st"]
+        else:
+            raise Exception("Unrecognized thermodynamic dataset !")
 
         # Sort unique phases and assign unique colors
         sorted_column_names = sorted(phase_names, key=lambda x: x[:2])
@@ -2984,23 +2589,10 @@ class GFEMModel:
         color_map = {col_name: colors[idx % num_colors] for idx, col_name in
                      enumerate(phase_names)}
 
-        # Get 1D reference models
-        ref_models = self._get_1d_reference_models()
-        Pp, rhop = ref_models["prem"]["P"], ref_models["prem"]["rho"]
-
         # Plot assemblages and rock properties along geotherms
-        for i, g in enumerate(geotherms):
-            tabfile = f"{model_out_dir}/geotherm{i}.tab"
-            filename = f"{sid}-geotherm{g}-assemblages.png"
-
-            # Replace P(bars) with P(bar) in koma06 models to be consistent
-            with open(tabfile, "r") as file:
-                content = file.read()
-
-            content = content.replace("P(bars)", "P(bar)")
-
-            with open(tabfile, "w") as file:
-                file.write(content)
+        for seg in segs:
+            tabfile = f"{model_out_dir}/geotherm-{seg}.tab"
+            filename = f"{sid}-geotherm-{seg.replace("_", "-").lower()}-assemblages.png"
 
             # Read wearmi file
             df = pd.read_csv(tabfile, sep="\\s+", skiprows=8)
@@ -3021,14 +2613,12 @@ class GFEMModel:
                                   (df[col] < modal_thresh).all()])
 
             # Get rock property profiles
-            Pg, Tg, rhog = self._get_1d_profile("rho", g)
+            gt = self._get_subduction_geotherm(seg, position="top")
+            Pg, Tg, rhog = self._extract_target_along_1d_geotherm("rho", gt)
             if perplex_db != "stx21":
-                _, _, h2og = self._get_1d_profile("h2o", g)
+                _, _, h2og = self._extract_target_along_1d_geotherm("h2o", gt)
             else:
                 h2og = np.zeros(len(Pg))
-
-            # Crop profiles
-            Pg, rhog, Pp, rhop, rmse, r2 = self._crop_1d_profile(Pg, rhog, Pp, rhop)
 
             # Plot assemblages and rock properties
             fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(figwidth * 2, figheight * 2))
@@ -3045,7 +2635,6 @@ class GFEMModel:
                 ax_stack.plot(df["P(bar)"].values / 1e4, cumulative[:, col],
                               color="black", lw=0.8)
 
-            ax_stack.set_xlim(1, 28)
             ax_stack.set_ylim(0, 100)
             ax_stack.set_xlabel("")
             ax_stack.set_xticks([])
@@ -3055,9 +2644,6 @@ class GFEMModel:
 
             ax_line = axes[1]
             ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
-            ax_line.plot(Pp, rhop, color="black", linewidth=2, linestyle="--",
-                         label=f"PREM $\\rho$")
-            ax_line.set_xlim(1, 28)
             ax_line.set_xlabel("Pressure (GPa)")
             ax_line.set_ylabel("Density (g/cm$^3$)")
             lines1, labels1 = ax_line.get_legend_handles_labels()
@@ -3069,11 +2655,9 @@ class GFEMModel:
             if perplex_db == "stx21" or np.all(h2og == 0):
                 ax_line_sec.set_ylim(-0.04, 1)
                 ax_line_sec.set_yticks([0])
-            else:
-                ax_line_sec.set_ylim(None, 2)
             lines2, labels2 = ax_line_sec.get_legend_handles_labels()
             ax_line.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
-            ax_line.set_title(f"Mantle potential: {g} K")
+            ax_line.set_title(f"{seg.replace("_", " ")}")
 
             handles, labels = ax_stack.get_legend_handles_labels()
             sorted_handles_labels = sorted(zip(handles, labels),
@@ -3088,15 +2672,6 @@ class GFEMModel:
             text_margin_x = 0.02
             text_margin_y = 0.52
             text_spacing_y = 0.1
-
-            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 0)),
-                     f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
-                     fontsize=fontsize * 0.833, horizontalalignment="left",
-                     verticalalignment="top")
-            plt.text(text_margin_x, 1 - (text_margin_y - (text_spacing_y * 1)),
-                     f"RMSE: {rmse:.3f}", transform=plt.gca().transAxes,
-                     fontsize=fontsize * 0.833, horizontalalignment="left",
-                     verticalalignment="top")
 
             # Save the plot to a file
             plt.savefig(f"{fig_dir}/{filename}")
@@ -3120,8 +2695,8 @@ class GFEMModel:
                 self._visualize_array_image(gradient=True)
             if not self._check_model_array_surfs():
                 self._visualize_target_surf()
-            if not self._check_model_prem_images():
-                self._visualize_prem()
+            if not self._check_model_depth_profile_images():
+                self._visualize_depth_profiles()
             if not self._check_model_geotherm_assemblages_images():
                 self._visualize_geotherm_assemblages()
         except Exception as e:
@@ -3142,16 +2717,15 @@ class GFEMModel:
     def build_model(self):
         """
         """
-        self._print_gfem_info()
         max_retries = 3
         for retry in range(max_retries):
             # Check for built model
             if self.model_built:
                 break
             try:
+                self._print_gfem_info()
                 self._configure_perplex_model()
                 self._run_perplex()
-                self._get_comp_time()
                 self._process_perplex_results()
                 break
             except Exception as e:
@@ -3171,6 +2745,7 @@ class GFEMModel:
         try:
             self._summarize_gfem_model_results()
             self.visualize_model()
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in build_model() !!!")
@@ -3335,7 +2910,7 @@ def compose_itr(gfem_model, clean=False):
 
                 combine_plots_horizontally(
                     f"{fig_dir}/temp1.png",
-                    f"{fig_dir}/{sid}-{target}-prem.png",
+                    f"{fig_dir}/{sid}-{target}-depth-profile.png",
                     f"{fig_dir}/image3-{sid}-{target}.png",
                     caption1="",
                     caption2="c)"
@@ -3366,7 +2941,7 @@ def compose_itr(gfem_model, clean=False):
 
             combine_plots_horizontally(
                 f"{fig_dir}/temp1.png",
-                f"{fig_dir}/{sid}-{target}-prem.png",
+                f"{fig_dir}/{sid}-{target}-depth-profile.png",
                 f"{fig_dir}/temp-{target}.png",
                 caption1="",
                 caption2=captions[i][2]
@@ -3423,7 +2998,7 @@ def compose_itr(gfem_model, clean=False):
 
             combine_plots_horizontally(
                 f"{fig_dir}/temp1.png",
-                f"{fig_dir}/{sid}-{target}-prem.png",
+                f"{fig_dir}/{sid}-{target}-depth-profile.png",
                 f"{fig_dir}/temp-{target}.png",
                 caption1="",
                 caption2=captions[i][2]
@@ -3478,10 +3053,10 @@ def compose_itr(gfem_model, clean=False):
 
     if clean:
         # Clean up directory
-        prem_files = glob.glob(f"{fig_dir}/*prem.png")
+        depth_profile_files = glob.glob(f"{fig_dir}/*depth-profile.png")
         grad_files = glob.glob(f"{fig_dir}/*grad.png")
 
-        for file in prem_files + grad_files:
+        for file in depth_profile_files + grad_files:
             os.remove(file)
 
     return None
@@ -3509,9 +3084,9 @@ def compose_gfem_plots(gfem_models, clean=False, nprocs=os.cpu_count() - 2):
     return None
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# visualize prem comps !!
+# visualize depth profiles comps !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
+def visualize_depth_profiles_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
     """
     """
     warnings.simplefilter("ignore", category=UserWarning)
@@ -3561,13 +3136,10 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
         perplex_db = model.perplex_db
         target_units = model.target_units
 
-        # Filter targets for PREM
-        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "h2o"]]
+        # Filter targets
+        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "melt", "h2o"]]
         target_units = [target_units[i] for i in t_ind]
         targets = [targets[i] for i in t_ind]
-
-        # Get 1D reference models
-        ref_models = model._get_1d_reference_models()
 
         # Get dry synthetic endmember compositions
         df_mids = pd.read_csv("assets/synth-mids.csv")
@@ -3580,49 +3152,9 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
         tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         for i, target in enumerate(targets):
-            if (j == 0) and (target in ["rho", "Vp", "Vs"]):
-                # Get 1D reference model profiles
-                P_prem, target_prem = ref_models["prem"]["P"], ref_models["prem"][target]
-                P_stw105, target_stw105 = (ref_models["stw105"]["P"],
-                                           ref_models["stw105"][target])
-
-            if (j == 0) and (target in ["rho", "Vp", "Vs", "h2o"]):
-                # Get 1D HyMaTZ profiles
-                P_hy, _, target_hy = model._get_1d_profile(
-                    target, 1173, hymatz_input=["Pyrolite", 0])
-                P_hy, target_hy, _, _, _, _ = model._crop_1d_profile(
-                    P_hy, target_hy, P_prem, target_prem)
-                P_hy2, _, target_hy2 = model._get_1d_profile(
-                    target, 1173, hymatz_input=["Pyrolite", 100])
-                P_hy2, target_hy2, _, _, _, _ = model._crop_1d_profile(
-                    P_hy2, target_hy2, P_prem, target_prem)
-                P_hy3, _, target_hy3 = model._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 0])
-                P_hy3, target_hy3, _, _, _, _ = model._crop_1d_profile(
-                    P_hy3, target_hy3, P_prem, target_prem)
-                P_hy4, _, target_hy4 = model._get_1d_profile(
-                    target, 1573, hymatz_input=["Pyrolite", 100])
-                P_hy4, target_hy4, _, _, _, _ = model._crop_1d_profile(
-                    P_hy4, target_hy4, P_prem, target_prem)
-                P_hy5, _, target_hy5 = model._get_1d_profile(
-                    target, 1773, hymatz_input=["Pyrolite", 0])
-                P_hy5, target_hy5, _, _, _, _ = model._crop_1d_profile(
-                    P_hy5, target_hy5, P_prem, target_prem)
-                P_hy6, _, target_hy6 = model._get_1d_profile(
-                    target, 1773, hymatz_input=["Pyrolite", 100])
-                P_hy6, target_hy6, _, _, _, _ = model._crop_1d_profile(
-                    P_hy6, target_hy6, P_prem, target_prem)
-
             # Get GFEM model profile
             P_gfem, _, target_gfem = model._get_1d_profile(
                 target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
-
-            if target in ["rho", "Vp", "Vs"]:
-                # Crop GFEM profile and compare with PREM
-                P_gfem, target_gfem, P_prem, target_prem, _, _ = (
-                    model._crop_1d_profile(P_gfem, target_gfem, P_prem, target_prem))
-                _, _, P_stw105, target_stw105, _, _ = (
-                    model._crop_1d_profile(P_gfem, target_gfem, P_stw105, target_stw105))
 
             # Create colorbar
             pal = sns.color_palette("magma", as_cmap=True).reversed()
@@ -3634,21 +3166,6 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
 
             # Plot GFEM profiles
             ax.plot(target_gfem, P_gfem, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.2)
-
-            # Plot reference models
-            if (j == 0) and (target in ["rho", "Vp", "Vs"]):
-                ax.plot(target_prem, P_prem, "-", linewidth=2, color="forestgreen",
-                        label="PREM", zorder=999)
-                ax.plot(target_stw105, P_stw105, ":", linewidth=2, color="forestgreen",
-                        label="STW105", zorder=999)
-
-            # Plot HyMaTZ profiles for dry and 100% WSC Pyrolite
-            if (j == 0) and (target in ["rho", "Vp", "Vs", "h2o"]):
-                ax.fill_betweenx(P_hy3, target_hy3, target_hy4, color=colormap(0),
-                                  alpha=0.2, zorder=998)
-                ax.plot(target_hy3, P_hy3, "-", linewidth=2, color=colormap(0),
-                        label="HyMaTZ", zorder=998)
-                ax.plot(target_hy4, P_hy4, "-", linewidth=2, color=colormap(0), zorder=998)
 
             # Target labels
             if target == "rho":
@@ -3711,7 +3228,7 @@ def visualize_prem_comps(gfem_models, figwidth=6.3, figheight=5.5, fontsize=28):
     fig.text(0.49, 0.50, "d)", fontsize=fontsize * 1.4)
 
     # Save the plot to a file
-    filename = f"prem-comps-{perplex_db}.png"
+    filename = f"depth-profile-comps-{perplex_db}.png"
     plt.savefig(f"{fig_dir}/{filename}")
 
     # Close device
@@ -3869,8 +3386,8 @@ def main():
         for name, models in gfems.items():
             compose_gfem_plots(models)
 
-        # Visualize profile compositions vs. PREM
-        visualize_prem_comps(gfems["m"] + gfems["r"])
+        # Visualize depth profiles
+        visualize_depth_profiles_comps(gfems["m"] + gfems["r"])
 
     except Exception as e:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
