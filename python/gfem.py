@@ -10,6 +10,7 @@ import re
 import time
 import glob
 import shutil
+import textwrap
 import traceback
 import subprocess
 import numpy as np
@@ -80,7 +81,7 @@ class GFEMModel:
         self.targets = ["rho", "Vp", "Vs", "melt", "h2o", "assemblage", "variance"]
 
         # Check perplex db
-        if perplex_db not in ["hp02", "hp633", "stx21"]:
+        if perplex_db not in ["hp02", "hp11", "hp622", "hp633", "stx21"]:
             print("Unrecognized thermodynamic dataset! Defaulting to hp02 ...")
             self.perplex_db = "hp02"
         else:
@@ -90,19 +91,21 @@ class GFEMModel:
         self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
 
         # Perple_X solution models and endmembers to exclude
-        if perplex_db == "hp633":
-            self.melt_mod = "melt(HGPH)"
-            self.em_exclude = ["foL", "liz", "cz", "afchl", "h2oL"]
-            self.sl_include = ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)", "Sp(HGP)",
-                               "Gt(HGP)", "Maj", "feldspar", "cAmph(G)", "Chl(W)",
-                               "Atg(PN)", "A-phase", "B", "T", f"{self.melt_mod}"]
         if perplex_db == "hp02":
             self.melt_mod = "melt(HP)"
-            self.em_exclude = ["foL", "liz", "cz", "afchl", "h2oL"]
+            self.em_exclude = ["diL", "foL", "woGL", "liz", "ak"]
             self.sl_include = ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)", "Sp(HP)",
                                "Gt(HGP)", "Maj", "feldspar", "cAmph(G)", "Chl(W)",
                                "Atg(PN)", "A-phase", "B", "T", f"{self.melt_mod}"]
-        if perplex_db == "stx21":
+        elif perplex_db in ["hp11", "hp622", "hp633"]:
+            self.melt_mod = "melt(HGPH)"
+            self.em_exclude = ["diL", "dijL", "abL", "jdjL", "enL", "naph", "prl", "liz",
+                               "ne", "anl", "tap", "cg", "hen", "cen"]
+            self.sl_include = ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
+                               "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
+                               "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                               f"{self.melt_mod}"]
+        elif perplex_db == "stx21":
             self.melt_mod = None
             self.em_exclude = ["ca-pv"]
             self.sl_include = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
@@ -836,7 +839,10 @@ class GFEMModel:
             oxides.append("H2O")
         oxides_string = "\n".join(oxides)
 
-        if perplex_db == "hp633":
+        if perplex_db not in ["hp622", "hp633"]:
+            oxides_string = oxides_string.upper()
+
+        if perplex_db in ["hp11", "hp622", "hp633"]:
             # Build
             b = (f"{sid}\n"               # Proj name
                  f"td-data\n"             # Thermodynamic data file
@@ -856,8 +862,8 @@ class GFEMModel:
                   f"{P_min} {P_max}\n"    # Enter min and max P(bar)
                   f"Y\n"                  # Specify component amounts by mass ?
                   f"{norm_sample_comp}\n" # Enter mass amounts of components
-                  f"Y\n"                  # Exclude pure and/or endmember phases ?
                   f"N\n"                  # Print output file ?
+                  f"Y\n"                  # Exclude pure and/or endmember phases ?
                   f"N\n"                  # Prompt for phases ?
                   )
             b += (em_exclude + "\n")      # Enter names (1 per line)
@@ -894,7 +900,12 @@ class GFEMModel:
                  f"0\n"          # Zero to exit
                  )
             # Copy thermodynamic data
-            shutil.copy(f"{data_dir}/hp633-td", f"{model_out_dir}/td-data")
+            if perplex_db == "hp11":
+                shutil.copy(f"{data_dir}/hp11-td", f"{model_out_dir}/td-data")
+            elif perplex_db == "hp622":
+                shutil.copy(f"{data_dir}/hp622-td", f"{model_out_dir}/td-data")
+            elif perplex_db == "hp633":
+                shutil.copy(f"{data_dir}/hp633-td", f"{model_out_dir}/td-data")
             shutil.copy(f"{data_dir}/hp-sl", f"{model_out_dir}/solution-models")
         elif perplex_db == "hp02":
             # Build
@@ -907,8 +918,7 @@ class GFEMModel:
                  f"N\n"                   # Calculations with saturated components ?
                  f"N\n"                   # Use chemical potentials as ind variables ?
                  )
-            b += (oxides_string.upper() + # Select components (1 per line)
-                  "\n")
+            b += (oxides_string + "\n")   # Select components (1 per line)
             b += (f"\n"                   # Enter to finish
                   f"5\n"                  # Select fluid EOS (5: H2O-CO2 CORK H&P 91, 98)
                   f"N\n"                  # Calculate along a geotherm ?
@@ -967,8 +977,7 @@ class GFEMModel:
                  f"N\n"                   # Calculations with saturated fluid ?
                  f"N\n"                   # Calculations with saturated components ?
                  )
-            b += (oxides_string.upper() + # Select components (1 per line)
-                  "\n")
+            b += (oxides_string + "\n")   # Select components (1 per line)
             b += (f"\n"                   # Enter to finish
                   f"N\n"                  # Calculate along a geotherm ?
                   f"2\n"                  # X-axis variable (2: T(K))
@@ -1044,16 +1053,16 @@ class GFEMModel:
         werami_geotherms_moho = []
         werami_geotherms_mantle = []
 
-        if perplex_db in ["hp633", "hp02"]:
+        if perplex_db in ["hp02", "hp11", "hp622", "hp633"]:
             # Werami phase
-            f = (f"{sid}\n"            # Proj name
-                 f"2\n"                # Operational mode (2: properties on 2D grid)
-                 f"25\n"               # Select a property (25: Modes of all phases)
-                 f"N\n"                # Output cumulative modes ?
-                 f"N\n"                # Include fluid in computation of properties ?
-                 f"N\n"                # Change default variable range ?
-                 f"\n"                 # Select grid resolution (enter to continue)
-                 f"0\n"                # Zero to exit
+            f = (f"{sid}\n" # Proj name
+                 f"2\n"     # Operational mode (2: properties on 2D grid)
+                 f"25\n"    # Select a property (25: Modes of all phases)
+                 f"N\n"     # Output cumulative modes ?
+                 f"N\n"     # Include fluid in computation of properties ?
+                 f"N\n"     # Change default variable range ?
+                 f"\n"      # Select grid resolution (enter to continue)
+                 f"0\n"     # Zero to exit
                  )
             # Werami geotherm
             if geotherms == "sub":
@@ -1085,26 +1094,26 @@ class GFEMModel:
             elif geotherms == "mantle":
                 for pot in potential_Ts:
                     if os.path.exists(f"{model_out_dir}/geotherm-{pot}"):
-                        g = (f"{sid}\n"            # Proj name
-                             f"4\n"                # Op mode (4: properties along a 1d path)
-                             f"2\n"                # Path (2: a file with T-P points)
-                             f"geotherm-{pot}\n"   # Enter filename
-                             f"1\n"                # How many nth points to plot ?
-                             f"25\n"               # Select a property (25: Modes of all)
-                             f"N\n"                # Output cumulative modes ?
-                             f"N\n"                # Include fluid in computation ?
-                             f"0\n"                # Zero to exit
+                        g = (f"{sid}\n"          # Proj name
+                             f"4\n"              # Op mode (4: properties along a 1d path)
+                             f"2\n"              # Path (2: a file with T-P points)
+                             f"geotherm-{pot}\n" # Enter filename
+                             f"1\n"              # How many nth points to plot ?
+                             f"25\n"             # Select a property (25: Modes of all)
+                             f"N\n"              # Output cumulative modes ?
+                             f"N\n"              # Include fluid in computation ?
+                             f"0\n"              # Zero to exit
                              )
                         werami_geotherms_mantle.append(g)
         elif perplex_db == "stx21":
             # Werami phase
-            f = (f"{sid}\n"            # Proj name
-                 f"2\n"                # Operational mode (2: properties on 2D grid)
-                 f"25\n"               # Select a property (25: Modes of all phases)
-                 f"N\n"                # Output cumulative modes ?
-                 f"N\n"                # Change default variable range ?
-                 f"\n"                 # Select grid resolution (enter to continue)
-                 f"0\n"                # Zero to exit
+            f = (f"{sid}\n" # Proj name
+                 f"2\n"     # Operational mode (2: properties on 2D grid)
+                 f"25\n"    # Select a property (25: Modes of all phases)
+                 f"N\n"     # Output cumulative modes ?
+                 f"N\n"     # Change default variable range ?
+                 f"\n"      # Select grid resolution (enter to continue)
+                 f"0\n"     # Zero to exit
                  )
             # Werami geotherm
             if geotherms == "sub":
@@ -1134,14 +1143,14 @@ class GFEMModel:
             elif geotherms == "mantle":
                 for pot in potential_Ts:
                     if os.path.exists(f"{model_out_dir}/geotherm-{pot}"):
-                        g = (f"{sid}\n"            # Proj name
-                             f"4\n"                # Op mode (4: properties along a 1d path)
-                             f"2\n"                # Path (2: a file with T-P points)
-                             f"geotherm-{pot}\n"   # Enter filename
-                             f"1\n"                # How many nth points to plot ?
-                             f"25\n"               # Select a property (25: Modes of all)
-                             f"N\n"                # Output cumulative modes ?
-                             f"0\n"                # Zero to exit
+                        g = (f"{sid}\n"          # Proj name
+                             f"4\n"              # Op mode (4: properties along a 1d path)
+                             f"2\n"              # Path (2: a file with T-P points)
+                             f"geotherm-{pot}\n" # Enter filename
+                             f"1\n"              # How many nth points to plot ?
+                             f"25\n"             # Select a property (25: Modes of all)
+                             f"N\n"              # Output cumulative modes ?
+                             f"0\n"              # Zero to exit
                              )
                         werami_geotherms_mantle.append(g)
         else:
@@ -1204,6 +1213,8 @@ class GFEMModel:
         verbose = self.verbose
         log_file = self.log_file
         geotherms = self.geotherms
+        em_exclude = self.em_exclude
+        sl_include = self.sl_include
         perplex_db = self.perplex_db
         potential_Ts = self.potential_Ts
         model_out_dir = self.model_out_dir
@@ -1220,6 +1231,14 @@ class GFEMModel:
             max_width = max(max_oxide_width, max_comp_width)
             print(" ".join([f"  {oxide:<{max_width}}" for oxide in ox_gfem]))
             print(" ".join([f"  {comp:<{max_width}}" for comp in norm_sample_comp]))
+            print("  --------------------")
+            emwrp = textwrap.fill(", ".join(em_exclude), width=80, subsequent_indent="    ")
+            slwrp = textwrap.fill(", ".join(sl_include), width=80, subsequent_indent="    ")
+            print(f"  Excluded endmembers:")
+            print(f"    {emwrp}")
+            print("  --------------------")
+            print(f"  Included solid solutions:")
+            print(f"    {slwrp}")
             print("  --------------------")
 
         # Run programs with corresponding configuration files
@@ -1348,7 +1367,7 @@ class GFEMModel:
         if perplex_db == "stx21":
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "assemblage": [], "variance": []}
-        elif perplex_db in ["hp633", "hp02"]:
+        elif perplex_db in ["hp02", "hp11", "hp622", "hp633"]:
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "melt": [], "h2o": [],
                        "assemblage": [], "variance": []}
@@ -3312,10 +3331,11 @@ def gfem_iteration(args, queue):
     """
     """
     stdout_buffer = io.StringIO()
-    perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax = args
+    perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax, geotherms = args
 
     with redirect_stdout(stdout_buffer):
-        iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
+        iteration = GFEMModel(perplex_db, sampleid, source, res,
+                              Pmin, Pmax, Tmin, Tmax, geotherms)
         queue.put(stdout_buffer.getvalue())
 
         if not iteration.model_built:
@@ -3327,8 +3347,9 @@ def gfem_iteration(args, queue):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # build gfem models !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def build_gfem_models(source, sampleids=None, perplex_db="hp633", res=128, Pmin=1,
-                      Pmax=28, Tmin=773, Tmax=2273, nprocs=os.cpu_count() - 2, verbose=1):
+def build_gfem_models(source, sampleids=None, perplex_db="hp602", res=128,
+                      Pmin=1, Pmax=28, Tmin=773, Tmax=2273, geotherms="sub",
+                      nprocs=os.cpu_count() - 2, verbose=1):
     """
     """
     # Check sampleids
@@ -3354,7 +3375,7 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp633", res=128, Pmin=
         nprocs = len(sampleids)
 
     # Create list of args for mp pooling
-    run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax) for
+    run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax, geotherms) for
                 sampleid in sampleids]
 
     # Create a multiprocessing manager and queue
