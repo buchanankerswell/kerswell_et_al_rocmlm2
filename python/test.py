@@ -1,263 +1,107 @@
 import os
 import numpy as np
 import pandas as pd
+from gfem import GFEMModel
 import matplotlib.pyplot as plt
-from hymatz import HyMaTZ
-from rocmlm import RocMLM, train_rocmlms, visualize_rocmlm_performance, compose_rocmlm_plots
-from gfem import (GFEMModel, get_sampleids, build_gfem_models, compose_gfem_plots,
-                  visualize_depth_profiles_comps)
+from matplotlib.patches import Rectangle
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 def main():
     """
     """
-#    model = HyMaTZ(1573, "Pyrolite", 50)
-#
-#    ####################################################################################
-#    Building and training rocmlms
-#    ####################################################################################
-    res, P_min, P_max, T_min, T_max = 128, 0.1, 8.1, 273, 1373
+    ####################################################################################
+    # Building training dataset
+    ####################################################################################
+    res = 128
+    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
     db, samp, source = "hp02", "sm005-loi005", "assets/synth-mids.csv"
-    model = GFEMModel(db, samp, source, res, P_min, P_max, T_min, T_max)
-    model.build_model()
-#    model = GFEMModel("hp633", f"sm014-loi001", "assets/synth-mids.csv", res=32)
-#    model.build_model()
-#
-#    models = []
-#    for i in range(0, 8):
-#        models.append(GFEMModel("hp633", f"sm000-loi00{i}", "assets/synth-mids.csv"))
-#        models.append(GFEMModel("koma06", f"sm000-loi00{i}", "assets/synth-mids.csv"))
-#        models.append(GFEMModel("stx21", f"sm000-loi00{i}", "assets/synth-mids.csv"))
-#    compose_gfem_plots(models)
-#
-#    gfems = {}
-#    sources = {"m": "assets/synth-mids.csv"}
-#    for name, source in sources.items():
-#        sids = get_sampleids(source)[:24]
-#        gfems[name] = build_gfem_models(source, sids, perplex_db="hp633", res=64)
-#    visualize_profiles_comps(gfems["m"])
-#
-#    gfems = {}
-#    sources = {"m": "assets/synth-mids.csv", "r": "assets/synth-rnds.csv"}
-#    for name, source in sources.items():
-#        sids = get_sampleids(source, "all")
-#        gfems[name] = build_gfem_models(source, sids)
-#    training_data = gfems["m"] + gfems["r"]
-#    rocmlms = train_rocmlms(training_data, PT_steps=[1], X_steps=[1])
-#    visualize_rocmlm_performance()
-#    for model in rocmlms: compose_rocmlm_plots(model)
-#
-#    ####################################################################################
-#    End building and training rocmlms
-#    ####################################################################################
-#
-#    ####################################################################################
-#    Visualize iwamori, hymatz, and rocmlm profiles
-#    ####################################################################################
-#    model = GFEMModel("hp633", f"sm000-loi000", "assets/synth-mids.csv", res=64)
-#    ref_models = model._get_1d_reference_models()
-#    prem_P = ref_models["prem"]["P"].to_numpy()
-#    prem_rho = ref_models["prem"]["rho"].to_numpy()
-#    prem_Vp = ref_models["prem"]["Vp"].to_numpy()
-#    prem_Vs = ref_models["prem"]["Vs"].to_numpy()
-#    stw105_P = ref_models["stw105"]["P"].to_numpy()
-#    stw105_rho = ref_models["stw105"]["rho"].to_numpy()
-#    stw105_Vp = ref_models["stw105"]["Vp"].to_numpy()
-#    stw105_Vs = ref_models["stw105"]["Vs"].to_numpy()
-#    iwamori_P, iwamori_T, iwamori_h2o = model._get_1d_profile(iwamori=True)
-#    hymatz_P, hymatz_T, hymatz_h2o = model._get_1d_profile(hymatz_input=["Pyrolite", 100], target="h2o")
-#    _, _, hymatz_rho = model._get_1d_profile(hymatz_input=["Pyrolite", 100], target="rho")
-#    _, _, hymatz_Vp = model._get_1d_profile(hymatz_input=["Pyrolite", 100], target="Vp")
-#    _, _, hymatz_Vs = model._get_1d_profile(hymatz_input=["Pyrolite", 100], target="Vs")
-#    hymatz50_P, hymatz50_T, hymatz50_h2o = model._get_1d_profile(hymatz_input=["Pyrolite", 50], target="h2o")
-#
-#    profile = pd.read_csv("assets/hymatz-1573K-Pyrolite-0H2O", sep="\t")
-#
-#    P = profile["P"].to_numpy()
-#    T = profile["T"].to_numpy()
-#
-#    mod_hp = RocMLM.load_pretrained_model("rocmlms/synthetic-NN3-S248-W65.pkl")
-#    mod_st = RocMLM.load_pretrained_model("rocmlms/perp-synthetic-NN3-S129-W129.pkl")
-#
-#    xi = np.repeat(0.98, len(profile["T"]))
-#    h2o_in = np.repeat(0, len(profile["T"]))
-#    pred_hp = mod_hp.predict(xi, h2o_in, P, T)
-#    pred_st = mod_st.predict_old(xi, P, T)
-#    rho_hp, Vp_hp, Vs_hp, h2o_hp, melt_hp = pred_hp.T
-#    rho_st, Vp_st, Vs_st = pred_st.T
-#
-#    xi = np.repeat(0.85, len(profile["T"]))
-#    h2o_in = np.repeat(0, len(profile["T"]))
-#    pred_hp2 = mod_hp.predict(xi, h2o_in, P, T)
-#    pred_st2 = mod_st.predict_old(xi, P, T)
-#    rho_hp2, Vp_hp2, Vs_hp2, h2o_hp2, melt_hp2 = pred_hp2.T
-#    rho_st2, Vp_st2, Vs_st2 = pred_st2.T
-#
-#    xi = np.repeat(0.85, len(profile["T"]))
-#    h2o_in = np.repeat(1.5, len(profile["T"]))
-#    pred_hp3 = mod_hp.predict(xi, h2o_in, P, T)
-#    pred_st3 = mod_st.predict_old(xi, P, T)
-#    rho_hp3, Vp_hp3, Vs_hp3, h2o_hp3, melt_hp3 = pred_hp3.T
-#    rho_st3, Vp_st3, Vs_st3 = pred_st3.T
-#
-#    fig, axs = plt.subplots(2, 3, figsize=(10, 6.5))
-#
-#    axs[0, 0].plot(prem_rho, prem_P, label="PREM", color="black")
-#    axs[0, 0].plot(stw105_rho, stw105_P, label="stw105", color="black", linestyle="dashed")
-#    axs[0, 0].plot(hymatz_rho, hymatz_P, label="hymatz", color="black", linestyle="dotted")
-#    axs[0, 0].plot(rho_hp, P, label="xi=0.98, dry")
-#    axs[0, 0].plot(rho_hp2, P, label="xi=0.85, dry")
-#    axs[0, 0].plot(rho_hp3, P, label="xi=0.85, h2o=1.5")
-#    axs[0, 0].set_ylabel("P (GPa)")
-#    axs[0, 0].set_title("rho")
-#    axs[0, 0].set_xlim(np.min(rho_hp) - 0.05 * np.min(rho_hp), np.max(rho_hp) + 0.05 * np.max(rho_hp))
-#    axs[0, 0].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[0, 1].plot(prem_Vp, prem_P, label="PREM", color="black")
-#    axs[0, 1].plot(stw105_Vp, stw105_P, label="stw105", color="black", linestyle="dashed")
-#    axs[0, 1].plot(hymatz_Vp, hymatz_P, label="hymatz", color="black", linestyle="dotted")
-#    axs[0, 1].plot(Vp_hp, P)
-#    axs[0, 1].plot(Vp_hp2, P)
-#    axs[0, 1].plot(Vp_hp3, P)
-#    axs[0, 1].set_ylabel("P (GPa)")
-#    axs[0, 1].set_title("Vp")
-#    axs[0, 1].set_xlim(np.min(Vp_hp) - 0.05 * np.min(Vp_hp), np.max(Vp_hp) + 0.05 * np.max(Vp_hp))
-#    axs[0, 1].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[0, 2].plot(prem_Vs, prem_P, label="PREM", color="black")
-#    axs[0, 2].plot(stw105_Vs, stw105_P, label="stw105", color="black", linestyle="dashed")
-#    axs[0, 2].plot(hymatz_Vs, hymatz_P, label="hymatz", color="black", linestyle="dotted")
-#    axs[0, 2].plot(Vs_hp, P)
-#    axs[0, 2].plot(Vs_hp2, P)
-#    axs[0, 2].plot(Vs_hp3, P)
-#    axs[0, 2].set_ylabel("P (GPa)")
-#    axs[0, 2].set_title("Vs")
-#    axs[0, 2].set_xlim(np.min(Vs_hp) - 0.05 * np.min(Vs_hp), np.max(Vs_hp) + 0.05 * np.max(Vs_hp))
-#    axs[0, 2].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[1, 0].plot(iwamori_h2o, iwamori_P, label="Iwamori", color="black", linestyle="dashdot")
-#    axs[1, 0].plot(hymatz_h2o, hymatz_P, label="hymatz100", color="black", linestyle="dotted")
-#    axs[1, 0].plot(hymatz50_h2o, hymatz50_P, label="hymatz50", color="black", linestyle=(0, (1,1)))
-#    axs[1, 0].plot(h2o_hp, P)
-#    axs[1, 0].plot(h2o_hp2, P)
-#    axs[1, 0].plot(h2o_hp3, P)
-#    axs[1, 0].set_ylabel("P (GPa)")
-#    axs[1, 0].set_title("h2o")
-#    axs[1, 0].set_xlim(np.min(h2o_hp) - 0.1 * np.min(h2o_hp), np.max(hymatz_h2o) + 0.05 * np.max(hymatz_h2o))
-#    axs[1, 0].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[1, 1].plot(melt_hp, P)
-#    axs[1, 1].plot(melt_hp2, P)
-#    axs[1, 1].plot(melt_hp3, P)
-#    axs[1, 1].set_ylabel("P (GPa)")
-#    axs[1, 1].set_title("melt")
-#    axs[1, 1].set_xlim(np.min(melt_hp) - 0.1 * np.min(melt_hp), np.max(melt_hp) + 0.05 * np.max(melt_hp))
-#    axs[1, 1].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[1, 2].axis("off")
-#
-#    handles_00, labels_00 = axs[0, 0].get_legend_handles_labels()
-#    handles_10, labels_10 = axs[1, 0].get_legend_handles_labels()
-#    handles = handles_00 + handles_10
-#    labels = labels_00 + labels_10
-#    axs[1, 2].legend(handles, labels, loc="center")
-#    plt.tight_layout()
-#    plt.savefig("test1.png")
-#    plt.close()
-#
-#    thresh = 20
-#    fig, axs = plt.subplots(2, 3, figsize=(10, 6.5))
-#
-#    axs[0, 0].plot(prem_rho, prem_P, label="PREM", color="black")
-#    axs[0, 0].plot(stw105_rho, stw105_P, label="stw105", color="black", linestyle="dashed")
-#    axs[0, 0].plot(hymatz_rho, hymatz_P, label="hymatz", color="black", linestyle="dotted")
-#    axs[0, 0].plot(rho_hp3, P)
-#    axs[0, 0].plot(rho_st2, P)
-#    axs[0, 0].set_ylabel("P (GPa)")
-#    axs[0, 0].set_title("rho")
-#    axs[0, 0].set_xlim(np.min(rho_hp) - 0.05 * np.min(rho_hp), np.max(rho_hp) + 0.05 * np.max(rho_hp))
-#    axs[0, 0].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[0, 1].plot(prem_Vp, prem_P, label="PREM", color="black")
-#    axs[0, 1].plot(stw105_Vp, stw105_P, label="stw105", color="black", linestyle="dashed")
-#    axs[0, 1].plot(hymatz_Vp, hymatz_P, label="hymatz", color="black", linestyle="dotted")
-#    axs[0, 1].plot(Vp_hp3, P)
-#    axs[0, 1].plot(Vp_st2, P)
-#    axs[0, 1].set_ylabel("P (GPa)")
-#    axs[0, 1].set_title("Vp")
-#    axs[0, 1].set_xlim(np.min(Vp_hp) - 0.05 * np.min(Vp_hp), np.max(Vp_hp) + 0.05 * np.max(Vp_hp))
-#    axs[0, 1].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[0, 2].plot(prem_Vs, prem_P, label="PREM", color="black")
-#    axs[0, 2].plot(stw105_Vs, stw105_P, label="stw105", color="black", linestyle="dashed")
-#    axs[0, 2].plot(hymatz_Vs, hymatz_P, label="hymatz", color="black", linestyle="dotted")
-#    axs[0, 2].plot(Vs_hp3, P)
-#    axs[0, 2].plot(Vs_st2, P)
-#    axs[0, 2].set_ylabel("P (GPa)")
-#    axs[0, 2].set_title("Vs")
-#    axs[0, 2].set_xlim(np.min(Vs_hp) - 0.05 * np.min(Vs_hp), np.max(Vs_hp) + 0.05 * np.max(Vs_hp))
-#    axs[0, 2].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[1, 0].plot(rho_hp3, P, alpha=0.2, color="darkblue")
-#    axs[1, 0].plot(rho_hp3[P < thresh], P[P < thresh])
-#    axs[1, 0].plot(rho_st2, P, alpha=0.2, color="darkorange")
-#    axs[1, 0].plot(rho_st2[P > thresh], P[P > thresh])
-#    axs[1, 0].set_ylabel("P (GPa)")
-#    axs[1, 0].set_title("rho")
-#    axs[1, 0].set_xlim(np.min(rho_hp) - 0.05 * np.min(rho_hp), np.max(rho_hp) + 0.05 * np.max(rho_hp))
-#    axs[1, 0].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[1, 1].plot(Vp_hp3, P, alpha=0.2, color="darkblue")
-#    axs[1, 1].plot(Vp_hp3[P < thresh], P[P < thresh])
-#    axs[1, 1].plot(Vp_st2, P, alpha=0.2, color="darkorange")
-#    axs[1, 1].plot(Vp_st2[P > thresh], P[P > thresh])
-#    axs[1, 1].set_ylabel("P (GPa)")
-#    axs[1, 1].set_title("Vp")
-#    axs[1, 1].set_xlim(np.min(Vp_hp) - 0.05 * np.min(Vp_hp), np.max(Vp_hp) + 0.05 * np.max(Vp_hp))
-#    axs[1, 1].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    axs[1, 2].plot(Vs_hp3, P, alpha=0.2, color="darkblue")
-#    axs[1, 2].plot(Vs_hp3[P < thresh], P[P < thresh], label="hp633, xi=0.85, h2o=1.5")
-#    axs[1, 2].plot(Vs_st2, P, alpha=0.2, color="darkorange")
-#    axs[1, 2].plot(Vs_st2[P > thresh], P[P > thresh], label="stx21, xi=0.85, dry")
-#    axs[1, 2].set_ylabel("P (GPa)")
-#    axs[1, 2].set_title("Vs")
-#    axs[1, 2].set_xlim(np.min(Vs_hp) - 0.05 * np.min(Vs_hp), np.max(Vs_hp) + 0.05 * np.max(Vs_hp))
-#    axs[1, 2].set_ylim(np.min(P) - 0.05 * np.min(P), np.max(P) + 0.05 * np.max(P))
-#
-#    plt.legend()
-#    plt.tight_layout()
-#    plt.savefig("test2.png")
-#    plt.close()
-#
-#    # Load CSV file
-#    df = pd.read_csv("~/Downloads/IwamoriH2O.csv")
-#    df["h2o"] = df["h2o"] / 0.3
-#
-#    # Extract unique values for P and T to define grid dimensions
-#    p_unique = np.sort(df["P"].unique())
-#    t_unique = np.sort(df["T"].unique())
-#
-#    # Initialize an empty grid
-#    grid = np.empty((len(t_unique), len(p_unique)))
-#
-#    # Fill the grid with h2o values
-#    for _, row in df.iterrows():
-#        p_index = np.where(p_unique == row["P"])[0][0]
-#        t_index = np.where(t_unique == row["T"])[0][0]
-#        grid[t_index, p_index] = row["h2o"]
-#
-#    plt.imshow(grid.T, cmap="Blues", origin="lower", aspect="auto",
-#               extent=[t_unique.min(), t_unique.max(), p_unique.min(), p_unique.max()])
-#    plt.colorbar(label="h2o")
-#    plt.xlabel("T")
-#    plt.ylabel("P")
-#    plt.savefig("iwamori.png")
-#    plt.close()
-#
-#    ####################################################################################
-#    End visualize iwamori, hymatz, and rocmlm profiles
-#    ####################################################################################
-#
+    model_shallow = GFEMModel(db, samp, source, res, P_min, P_max, T_min, T_max, "sub")
+    model_shallow.build_model()
+
+    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
+    db, samp, source = "stx21", "sm005-loi005", "assets/synth-mids.csv"
+    model_deep = GFEMModel(db, samp, source, res, P_min, P_max, T_min, T_max, "mantle")
+    model_deep.build_model()
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Visualize training dataset design
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    P_min_sh, P_max_sh = model_shallow.P_min, model_shallow.P_max
+    P_min_dp, P_max_dp = model_deep.P_min, model_deep.P_max
+    T_min_sh, T_max_sh = model_shallow.T_min, model_shallow.T_max
+    T_min_dp, T_max_dp = model_deep.T_min, model_deep.T_max
+
+    T_sh_grid = np.linspace(T_min_sh, T_max_sh, res)
+    P_sh_grid = np.linspace(P_min_sh, P_max_sh, res)
+    T_sh, P_sh = np.meshgrid(T_sh_grid, P_sh_grid)
+
+    T_dp_grid = np.linspace(T_min_dp, T_max_dp, res)
+    P_dp_grid = np.linspace(P_min_dp, P_max_dp, res)
+    T_dp, P_dp = np.meshgrid(T_dp_grid, P_dp_grid)
+
+    sub1 = model_shallow._get_subduction_geotherm("Kamchatka")
+    sub2 = model_shallow._get_subduction_geotherm("Central_Cascadia", position="top")
+    mantle1 = model_deep._get_mantle_geotherm(693)
+    mantle2 = model_shallow._get_mantle_geotherm(1773)
+    mantle3 = model_deep._get_mantle_geotherm(1773)
+
+    y = np.linspace(P_min_sh, P_max_sh, res + 1)
+    x = (y * 35 * 2) + 273
+
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["font.size"] = 14
+    plt.rcParams["savefig.bbox"] = "tight"
+    plt.rcParams["axes.facecolor"] = "0.9"
+    plt.rcParams["legend.frameon"] = "False"
+    plt.rcParams["legend.facecolor"] = "0.9"
+    plt.rcParams["legend.loc"] = "upper left"
+    plt.rcParams["legend.fontsize"] = "small"
+    plt.rcParams["figure.autolayout"] = "True"
+
+    fig, ax = plt.subplots(figsize=(6.3, 5))
+
+    width_sh = T_max_sh - T_min_sh
+    height_sh = P_max_sh - P_min_sh
+    shallow_rect = Rectangle((T_min_sh, P_min_sh), width_sh, height_sh, linewidth=1,
+                             edgecolor="darkblue", facecolor="none", label="hp02 wet")
+
+    width_dp = T_max_dp - T_min_dp
+    height_dp = P_max_dp - P_min_dp
+    deep_rect = Rectangle((T_min_dp, P_min_dp), width_dp, height_dp, linewidth=1,
+                          edgecolor="darkorange", facecolor="none", label="stx21 dry")
+
+    ax.add_patch(deep_rect)
+    ax.add_patch(shallow_rect)
+    ax.scatter(T_dp, P_dp, color="darkorange", s=0.1, marker=".")
+    ax.scatter(T_sh, P_sh, color="darkblue", s=0.01, marker=".")
+    ax.plot(sub1["T"], sub1["P"], color="black", label="subduction")
+    ax.plot(sub2["T"], sub2["P"], color="black")
+    ax.plot(mantle1["T"], mantle1["P"], color="black", linestyle=":")
+    ax.plot(x, y, color="black", linestyle=":", label="forbidden")
+    ax.plot(mantle2["T"], mantle2["P"], color="black", linestyle="--", label="sub-cont. plume")
+    ax.plot(mantle3["T"], mantle3["P"], color="black", linestyle="--")
+
+    ax.set_xlabel("Temperature (K)")
+    ax.set_ylabel("Pressure (GPa)")
+
+    ax.legend(loc="upper left", bbox_to_anchor=(0.15, -0.03, 1, 1))
+
+    plt.rcParams["font.size"] = 12
+
+    ax_inset = inset_axes(ax, width="30%", height="30%", loc="lower right",
+                          bbox_to_anchor=(0, 0.06, 1, 1), bbox_transform=ax.transAxes)
+    ax_inset.add_patch(Rectangle((T_min_sh, P_min_sh), width_sh, height_sh, linewidth=1,
+                                 edgecolor="darkblue", facecolor="none"))
+    ax_inset.scatter(T_sh, P_sh, color="darkblue", s=0.01, marker=".")
+    ax_inset.plot(sub1["T"], sub1["P"], color="black")
+    ax_inset.plot(sub2["T"], sub2["P"], color="black")
+    ax_inset.plot(x, y, color="black", linestyle=":")
+    ax_inset.plot(mantle2["T"], mantle2["P"], color="black", linestyle="--")
+    ax_inset.set_xlim(T_min_sh, T_max_sh)
+    ax_inset.set_ylim(P_min_sh, P_max_sh)
+
+    plt.savefig("test.png")
+
 #    ####################################################################################
 #    Test rocmlm inference speed
 #    ####################################################################################

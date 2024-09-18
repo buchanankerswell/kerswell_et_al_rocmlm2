@@ -357,7 +357,7 @@ class RocMLM:
 
         try:
             # Get all PT arrays
-            pt_train = np.stack([m.feature_array for m in gfem_models])
+            pt_train = np.stack([m.pt_array for m in gfem_models])
 
             # Select features
             ft_ind = [features.index(ft) for ft in training_features if ft in features]
