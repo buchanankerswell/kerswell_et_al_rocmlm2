@@ -59,7 +59,7 @@ class GFEMModel:
         self.segs = ["Central_Cascadia", "Kamchatka"]
 
         # Mantle potential temps for creating mantle depth profiles
-        self.potential_Ts = [1173, 1573, 1773]
+        self.pot_Ts = [1173, 1573, 1773]
 
         # Set geotherm threshold for depth profiles
         if res <= 8:
@@ -90,26 +90,42 @@ class GFEMModel:
         # Perple_X chemical system
         self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "LOI"]
 
+        # Melting limit (< K)
+        if perplex_db in ["hp02", "hp11"]:
+            self.T_melt = 1100
+        else:
+            self.T_melt = 273
+
+        # Include fluid in computation of rock properties
+        self.include_fluid = "N"
+
+        # Treat melts as fluids ? (T: rock properties exclude melt fraction)
+        self.melt_is_fluid = "T"
+
         # Perple_X solution models and endmembers to exclude
         if perplex_db == "hp02":
-            self.melt_mod = "melt(HP)"
-            self.em_exclude = ["diL", "foL", "woGL", "liz", "ak", "pswo", "wo"]
-            self.sl_include = ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)", "Sp(HP)",
-                               "Gt(HGP)", "Maj", "feldspar", "cAmph(G)", "Chl(W)",
-                               "Atg(PN)", "A-phase", "B", "T", f"{self.melt_mod}"]
+            self.melt_mod = "melt(HGPH)"
+            self.em_exclude = sorted(["anL", "enL", "foL", "fo8L", "foHL", "diL", "woGL",
+                                      "liz", "ak", "pswo", "wo"])
+            self.sl_include = sorted(["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)",
+                                      "Sp(HP)", "Gt(HGP)", "Maj", "feldspar", "cAmph(G)",
+                                      "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                                      f"{self.melt_mod}"])
         elif perplex_db in ["hp11", "hp622", "hp633"]:
             self.melt_mod = "melt(HGPH)"
-            self.em_exclude = ["diL", "dijL", "abL", "jdjL", "enL", "naph", "prl", "liz",
-                               "ne", "anl", "tap", "cg", "hen", "cen"]
-            self.sl_include = ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                               "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                               "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                               f"{self.melt_mod}"]
+            self.em_exclude = sorted(["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
+                                      "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
+                                      "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
+                                      "cen", "glt", "cgh", "dsp", "fctd"])
+            self.sl_include = sorted(["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
+                                      "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
+                                      "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                                      "Anth", f"{self.melt_mod}"])
         elif perplex_db == "stx21":
             self.melt_mod = None
-            self.em_exclude = ["ca-pv"]
-            self.sl_include = ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring", "Opx",
-                               "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
+            self.em_exclude = sorted(["ca-pv"])
+            self.sl_include = sorted(["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring",
+                                      "Opx", "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"])
 
         # Perplex dirs and filepaths
         self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
@@ -164,7 +180,7 @@ class GFEMModel:
         model_out_dir = self.model_out_dir
 
         print("+++++++++++++++++++++++++++++++++++++++++++++")
-        print(f"GFEM model: {sid}")
+        print(f"GFEM model: {sid} {perplex_db}")
         print("---------------------------------------------")
         print(f"  PT resolution:  {res}")
         print(f"  P range:        {P_min:.1f} - {P_max:.1f} GPa")
@@ -559,7 +575,7 @@ class GFEMModel:
         return geotherm
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get 1d mantle geotherm !!
+    # get mantle geotherm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_mantle_geotherm(self, mantle_potential=1573, Qs=55e-3, Ts=273, A1=1.0e-6,
                              A2=2.2e-8, k1=2.3, k2=3.0, mantle_adiabat=0.5e-3,
@@ -763,12 +779,15 @@ class GFEMModel:
         sid = self.sid
         res = self.res
         segs = self.segs
+        T_melt = self.T_melt
+        pot_Ts = self.pot_Ts
         ox_gfem = self.ox_gfem
         melt_mod = self.melt_mod
         data_dir = self.data_dir
         geotherms = self.geotherms
         perplex_db = self.perplex_db
-        potential_Ts = self.potential_Ts
+        include_fluid = self.include_fluid
+        melt_is_fluid = self.melt_is_fluid
         model_out_dir = self.model_out_dir
         T_min, T_max = self.T_min, self.T_max
         sl_include = "\n".join(self.sl_include)
@@ -791,7 +810,8 @@ class GFEMModel:
              f"vrh/hs_weighting       0.5\n"
              f"Anderson-Gruneisen     F\n"
              f"explicit_bulk_modulus  T\n"
-             f"melt_is_fluid          T\n"
+             f"melt_is_fluid          {melt_is_fluid}\n"
+             f"T_melt                 {T_melt}\n"
              f"poisson_test           F\n"
              f"poisson_ratio          on 0.31\n"
              f"seismic_output         some\n"
@@ -876,28 +896,28 @@ class GFEMModel:
                   f"{sid}\n"              # Calculation title
                   )
             # Werami targets
-            w = (f"{sid}\n"      # Proj name
-                 f"2\n"          # Operational mode (2: properties on 2D grid)
-                 f"2\n"          # Select a property (2: Density kg/m3)
-                 f"N\n"          # Calculate individual phase properties ?
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"13\n"         # Select a property (13: P-wave velocity m/s)
-                 f"N\n"          # Calculate individual phase properties ?
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"14\n"         # Select a property (14: P-wave velocity m/s)
-                 f"N\n"          # Calculate individual phase properties ?
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"24\n"         # Select a property (24: Assemblage index)
-                 f"7\n"          # Select a property (7: Mode % of phase)
-                 f"{melt_mod}\n" # Enter solution or compound
-                 f"6\n"          # Select a property (6: Composition of system)
-                 f"1\n"          # Enter a component (1: H2O)
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"0\n"          # Zero to finish
-                 f"N\n"          # Change default variable range ?
-                 f"\n"           # Select the grid resolution (enter to continue)
-                 f"5\n"          # Dummy
-                 f"0\n"          # Zero to exit
+            w = (f"{sid}\n"           # Proj name
+                 f"2\n"               # Operational mode (2: properties on 2D grid)
+                 f"2\n"               # Select a property (2: Density kg/m3)
+                 f"N\n"               # Calculate individual phase properties ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"13\n"              # Select a property (13: P-wave velocity m/s)
+                 f"N\n"               # Calculate individual phase properties ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"14\n"              # Select a property (14: P-wave velocity m/s)
+                 f"N\n"               # Calculate individual phase properties ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"24\n"              # Select a property (24: Assemblage index)
+                 f"7\n"               # Select a property (7: Mode % of phase)
+                 f"{melt_mod}\n"      # Enter solution or compound
+                 f"6\n"               # Select a property (6: Composition of system)
+                 f"1\n"               # Enter a component (1: H2O)
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"0\n"               # Zero to finish
+                 f"N\n"               # Change default variable range ?
+                 f"\n"                # Select the grid resolution (enter to continue)
+                 f"5\n"               # Dummy
+                 f"0\n"               # Zero to exit
                  )
             # Copy thermodynamic data
             if perplex_db == "hp11":
@@ -941,28 +961,28 @@ class GFEMModel:
                   f"{sid}\n"              # Calculation title
                   )
             # Werami targets
-            w = (f"{sid}\n"      # Proj name
-                 f"2\n"          # Operational mode (2: properties on 2D grid)
-                 f"2\n"          # Select a property (2: Density kg/m3)
-                 f"N\n"          # Calculate individual phase properties ?
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"13\n"         # Select a property (13: P-wave velocity m/s)
-                 f"N\n"          # Calculate individual phase properties ?
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"14\n"         # Select a property (14: P-wave velocity m/s)
-                 f"N\n"          # Calculate individual phase properties ?
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"24\n"         # Select a property (24: Assemblage index)
-                 f"7\n"          # Select a property (7: Mode % of phase)
-                 f"{melt_mod}\n" # Enter solution or compound
-                 f"6\n"          # Select a property (6: Composition of system)
-                 f"1\n"          # Enter a component (1: H2O)
-                 f"N\n"          # Include fluid in computation of properties ?
-                 f"0\n"          # Zero to finish
-                 f"N\n"          # Change default variable range ?
-                 f"\n"           # Select the grid resolution (enter to continue)
-                 f"5\n"          # Dummy
-                 f"0\n"          # Zero to exit
+            w = (f"{sid}\n"           # Proj name
+                 f"2\n"               # Operational mode (2: properties on 2D grid)
+                 f"2\n"               # Select a property (2: Density kg/m3)
+                 f"N\n"               # Calculate individual phase properties ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"13\n"              # Select a property (13: P-wave velocity m/s)
+                 f"N\n"               # Calculate individual phase properties ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"14\n"              # Select a property (14: P-wave velocity m/s)
+                 f"N\n"               # Calculate individual phase properties ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"24\n"              # Select a property (24: Assemblage index)
+                 f"7\n"               # Select a property (7: Mode % of phase)
+                 f"{melt_mod}\n"      # Enter solution or compound
+                 f"6\n"               # Select a property (6: Composition of system)
+                 f"1\n"               # Enter a component (1: H2O)
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"0\n"               # Zero to finish
+                 f"N\n"               # Change default variable range ?
+                 f"\n"                # Select the grid resolution (enter to continue)
+                 f"5\n"               # Dummy
+                 f"0\n"               # Zero to exit
                  )
             # Copy thermodynamic data
             shutil.copy(f"{data_dir}/hp02-td", f"{model_out_dir}/td-data")
@@ -1040,29 +1060,39 @@ class GFEMModel:
                                     index=False, header=False, float_format="%.6E")
                 geotherm_moho.to_csv(f"{model_out_dir}/gt-slabmoho-{seg}", sep="\t",
                                      index=False, header=False, float_format="%.6E")
-        elif geotherms == "mantle":
-            for pot in potential_Ts:
+        elif geotherms == "craton":
+            for pot in pot_Ts:
                 geotherm = self._get_mantle_geotherm(pot)
                 geotherm["P"] = geotherm["P"] * 1e4
                 geotherm = geotherm[["T", "P"]]
-                geotherm.to_csv(f"{model_out_dir}/gt-{pot}", sep="\t",
+                geotherm.to_csv(f"{model_out_dir}/gt-craton-{pot}", sep="\t",
+                                index=False, header=False, float_format="%.6E")
+        elif geotherms == "mor":
+            for pot in pot_Ts:
+                geotherm = self._get_mantle_geotherm(
+                    pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                    crust_thickness=7e3, litho_thickness=1e3)
+                geotherm["P"] = geotherm["P"] * 1e4
+                geotherm = geotherm[["T", "P"]]
+                geotherm.to_csv(f"{model_out_dir}/gt-mor-{pot}", sep="\t",
                                 index=False, header=False, float_format="%.6E")
 
         # Initialize werami geotherms
         werami_geotherms_top = []
+        werami_geotherms_mor = []
         werami_geotherms_moho = []
-        werami_geotherms_mantle = []
+        werami_geotherms_craton = []
 
         if "hp" in perplex_db:
             # Werami phase
-            f = (f"{sid}\n" # Proj name
-                 f"2\n"     # Operational mode (2: properties on 2D grid)
-                 f"25\n"    # Select a property (25: Modes of all phases)
-                 f"N\n"     # Output cumulative modes ?
-                 f"N\n"     # Include fluid in computation of properties ?
-                 f"N\n"     # Change default variable range ?
-                 f"\n"      # Select grid resolution (enter to continue)
-                 f"0\n"     # Zero to exit
+            f = (f"{sid}\n"           # Proj name
+                 f"2\n"               # Operational mode (2: properties on 2D grid)
+                 f"25\n"              # Select a property (25: Modes of all phases)
+                 f"N\n"               # Output cumulative modes ?
+                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"N\n"               # Change default variable range ?
+                 f"\n"                # Select grid resolution (enter to continue)
+                 f"0\n"               # Zero to exit
                  )
             # Werami geotherm
             if geotherms == "sub":
@@ -1071,11 +1101,11 @@ class GFEMModel:
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"gt-slabtop-{seg}\n"   # Enter filename
+                             f"gt-slabtop-{seg}\n" # Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
-                             f"Y\n"                # Include fluid in computation ?
+                             f"{include_fluid}\n"  # Include fluid in computation ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_top.append(g)
@@ -1083,28 +1113,42 @@ class GFEMModel:
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"gt-slabmoho-{seg}\n" # Enter filename
+                             f"gt-slabmoho-{seg}\n"# Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
-                             f"Y\n"                # Include fluid in computation ?
+                             f"{include_fluid}\n"  # Include fluid in computation ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_moho.append(g)
-            elif geotherms == "mantle":
-                for pot in potential_Ts:
-                    if os.path.exists(f"{model_out_dir}/gt-{pot}"):
+            elif geotherms == "craton":
+                for pot in pot_Ts:
+                    if os.path.exists(f"{model_out_dir}/gt-craton-{pot}"):
                         g = (f"{sid}\n"          # Proj name
                              f"4\n"              # Op mode (4: properties along a 1d path)
                              f"2\n"              # Path (2: a file with T-P points)
-                             f"gt-{pot}\n" # Enter filename
+                             f"gt-craton-{pot}\n"# Enter filename
                              f"1\n"              # How many nth points to plot ?
                              f"25\n"             # Select a property (25: Modes of all)
                              f"N\n"              # Output cumulative modes ?
-                             f"Y\n"              # Include fluid in computation ?
+                             f"{include_fluid}\n"# Include fluid in computation ?
                              f"0\n"              # Zero to exit
                              )
-                        werami_geotherms_mantle.append(g)
+                        werami_geotherms_craton.append(g)
+            elif geotherms == "mor":
+                for pot in pot_Ts:
+                    if os.path.exists(f"{model_out_dir}/gt-mor-{pot}"):
+                        g = (f"{sid}\n"          # Proj name
+                             f"4\n"              # Op mode (4: properties along a 1d path)
+                             f"2\n"              # Path (2: a file with T-P points)
+                             f"gt-mor-{pot}\n"   # Enter filename
+                             f"1\n"              # How many nth points to plot ?
+                             f"25\n"             # Select a property (25: Modes of all)
+                             f"N\n"              # Output cumulative modes ?
+                             f"{include_fluid}\n"# Include fluid in computation ?
+                             f"0\n"              # Zero to exit
+                             )
+                        werami_geotherms_mor.append(g)
         elif perplex_db == "stx21":
             # Werami phase
             f = (f"{sid}\n" # Proj name
@@ -1122,7 +1166,7 @@ class GFEMModel:
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"gt-slabtop-{seg}\n"   # Enter filename
+                             f"gt-slabtop-{seg}\n" # Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
@@ -1133,26 +1177,39 @@ class GFEMModel:
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"gt-slabmoho-{seg}\n"   # Enter filename
+                             f"gt-slabmoho-{seg}\n"# Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_moho.append(g)
-            elif geotherms == "mantle":
-                for pot in potential_Ts:
-                    if os.path.exists(f"{model_out_dir}/gt-{pot}"):
+            elif geotherms == "craton":
+                for pot in pot_Ts:
+                    if os.path.exists(f"{model_out_dir}/gt-craton-{pot}"):
                         g = (f"{sid}\n"          # Proj name
                              f"4\n"              # Op mode (4: properties along a 1d path)
                              f"2\n"              # Path (2: a file with T-P points)
-                             f"gt-{pot}\n" # Enter filename
+                             f"gt-craton-{pot}\n"# Enter filename
                              f"1\n"              # How many nth points to plot ?
                              f"25\n"             # Select a property (25: Modes of all)
                              f"N\n"              # Output cumulative modes ?
                              f"0\n"              # Zero to exit
                              )
-                        werami_geotherms_mantle.append(g)
+                        werami_geotherms_craton.append(g)
+            elif geotherms == "mor":
+                for pot in pot_Ts:
+                    if os.path.exists(f"{model_out_dir}/gt-mor-{pot}"):
+                        g = (f"{sid}\n"          # Proj name
+                             f"4\n"              # Op mode (4: properties along a 1d path)
+                             f"2\n"              # Path (2: a file with T-P points)
+                             f"gt-mor-{pot}\n"   # Enter filename
+                             f"1\n"              # How many nth points to plot ?
+                             f"25\n"             # Select a property (25: Modes of all)
+                             f"N\n"              # Output cumulative modes ?
+                             f"0\n"              # Zero to exit
+                             )
+                        werami_geotherms_mor.append(g)
         else:
             raise Exception("Unrecognized thermodynamic dataset !")
 
@@ -1169,9 +1226,13 @@ class GFEMModel:
             for i, g in enumerate(werami_geotherms_moho):
                 with open(f"{model_out_dir}/werami-gt-slabmoho-{segs[i]}", "w") as file:
                     file.write(g)
-        if werami_geotherms_mantle:
-            for i, g in enumerate(werami_geotherms_mantle):
-                with open(f"{model_out_dir}/werami-gt-{potential_Ts[i]}", "w") as file:
+        if werami_geotherms_craton:
+            for i, g in enumerate(werami_geotherms_craton):
+                with open(f"{model_out_dir}/werami-gt-craton-{pot_Ts[i]}", "w") as file:
+                    file.write(g)
+        if werami_geotherms_mor:
+            for i, g in enumerate(werami_geotherms_mor):
+                with open(f"{model_out_dir}/werami-gt-mor-{pot_Ts[i]}", "w") as file:
                     file.write(g)
 
         return None
@@ -1208,6 +1269,7 @@ class GFEMModel:
         # Get self attributes
         sid = self.sid
         segs = self.segs
+        pot_Ts = self.pot_Ts
         ox_gfem = self.ox_gfem
         timeout = self.timeout
         verbose = self.verbose
@@ -1216,7 +1278,6 @@ class GFEMModel:
         em_exclude = self.em_exclude
         sl_include = self.sl_include
         perplex_db = self.perplex_db
-        potential_Ts = self.potential_Ts
         model_out_dir = self.model_out_dir
         norm_sample_comp = self.norm_sample_comp
 
@@ -1237,7 +1298,7 @@ class GFEMModel:
             print(f"  Excluded endmembers:")
             print(f"    {emwrp}")
             print("  --------------------")
-            print(f"  Included solid solutions:")
+            print(f"  Included solution models:")
             print(f"    {slwrp}")
             print("  --------------------")
 
@@ -1259,9 +1320,12 @@ class GFEMModel:
                     for seg in segs:
                         config_files.append(f"{model_out_dir}/werami-gt-slabtop-{seg}")
                         config_files.append(f"{model_out_dir}/werami-gt-slabmoho-{seg}")
-                elif geotherms == "mantle":
-                    for pot in potential_Ts:
-                        config_files.append(f"{model_out_dir}/werami-gt-{pot}")
+                elif geotherms == "craton":
+                    for pot in pot_Ts:
+                        config_files.append(f"{model_out_dir}/werami-gt-craton-{pot}")
+                elif geotherms == "mor":
+                    for pot in pot_Ts:
+                        config_files.append(f"{model_out_dir}/werami-gt-mor-{pot}")
 
                 self._replace_in_file(f"{model_out_dir}/build-options",
                                       {"Anderson-Gruneisen     F":
@@ -1331,10 +1395,14 @@ class GFEMModel:
                                 shutil.copy(
                                     f"{model_out_dir}/{sid}_1.tab",
                                     f"{model_out_dir}/gt-slabmoho-{segs[seg_index]}.tab")
-                        elif geotherms == "mantle":
+                        elif geotherms == "craton":
                             shutil.copy(
                                 f"{model_out_dir}/{sid}_1.tab",
-                                f"{model_out_dir}/gt-{potential_Ts[i - 2]}.tab")
+                                f"{model_out_dir}/gt-craton-{pot_Ts[i - 2]}.tab")
+                        elif geotherms == "mor":
+                            shutil.copy(
+                                f"{model_out_dir}/{sid}_1.tab",
+                                f"{model_out_dir}/gt-mor-{pot_Ts[i - 2]}.tab")
 
                         os.remove(f"{model_out_dir}/{sid}_1.tab")
 
@@ -1640,8 +1708,9 @@ class GFEMModel:
         # Impute missing values
         for key, value in results_rearranged.items():
             if key in targets and key not in ["assemblage", "variance"]:
-                target_array_list.append(
-                    self._process_array(value.reshape(res + 1, res + 1)).flatten())
+#                target_array_list.append(
+#                    self._process_array(value.reshape(res + 1, res + 1)).flatten())
+                target_array_list.append(value)
             else:
                 target_array_list.append(value)
 
@@ -1746,8 +1815,15 @@ class GFEMModel:
                 if check:
                     existing_figs.append(check)
 
-            elif geotherms == "mantle":
-                path = f"{fig_dir}/{sid}-{target}-depth-profile-mantle-{perplex_db}.png"
+            elif geotherms == "craton":
+                path = f"{fig_dir}/{sid}-{target}-depth-profile-craton-{perplex_db}.png"
+                check = os.path.exists(path)
+
+                if check:
+                    existing_figs.append(check)
+
+            elif geotherms == "mor":
+                path = f"{fig_dir}/{sid}-{target}-depth-profile-mor-{perplex_db}.png"
                 check = os.path.exists(path)
 
                 if check:
@@ -1767,10 +1843,10 @@ class GFEMModel:
         # Get model data
         sid = self.sid
         segs = self.segs
+        pot_Ts = self.pot_Ts
         fig_dir = self.fig_dir
         geotherms = self.geotherms
         perplex_db = self.perplex_db
-        potential_Ts = self.potential_Ts
 
         # Check for existing plots
         existing_figs = []
@@ -1790,16 +1866,30 @@ class GFEMModel:
             else:
                 return False
 
-        elif geotherms == "mantle":
-            for i, pot in enumerate(potential_Ts):
-                path = f"{fig_dir}/{sid}-gt-{pot}-assemblages-{perplex_db}.png"
+        elif geotherms == "craton":
+            for i, pot in enumerate(pot_Ts):
+                path = f"{fig_dir}/{sid}-gt-craton-{pot}-assemblages-{perplex_db}.png"
 
                 check = os.path.exists(path)
 
                 if check:
                     existing_figs.append(check)
 
-            if len(existing_figs) == len(potential_Ts):
+            if len(existing_figs) == len(pot_Ts):
+                return True
+            else:
+                return False
+
+        elif geotherms == "mor":
+            for i, pot in enumerate(pot_Ts):
+                path = f"{fig_dir}/{sid}-gt-mor-{pot}-assemblages-{perplex_db}.png"
+
+                check = os.path.exists(path)
+
+                if check:
+                    existing_figs.append(check)
+
+            if len(existing_figs) == len(pot_Ts):
                 return True
             else:
                 return False
@@ -1818,6 +1908,7 @@ class GFEMModel:
         sid = self.sid
         res = self.res
         segs = self.segs
+        pot_Ts = self.pot_Ts
         targets = self.targets
         results = self.results
         fig_dir = self.fig_dir
@@ -1825,7 +1916,6 @@ class GFEMModel:
         geothresh = self.geothresh
         perplex_db = self.perplex_db
         model_built = self.model_built
-        potential_Ts = self.potential_Ts
         target_array = self.target_array
         target_units = self.target_units
         P, T = results["P"], results["T"]
@@ -1861,10 +1951,16 @@ class GFEMModel:
                 sub_gtt[seg] = self._get_subduction_geotherm(seg, slab_position="slabtop")
                 sub_gtm[seg] = self._get_subduction_geotherm(seg, slab_position="slabmoho")
         # Get mantle geotherms
-        elif geotherms == "mantle":
+        elif geotherms == "craton":
             ad_gt = {}
-            for pot in potential_Ts:
+            for pot in pot_Ts:
                 ad_gt[pot] = self._get_mantle_geotherm(pot)
+        elif geotherms == "mor":
+            ad_gt = {}
+            for pot in pot_Ts:
+                ad_gt[pot] = self._get_mantle_geotherm(
+                    pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                    crust_thickness=7e3, litho_thickness=1e3)
 
         # Set plot style and settings
         plt.rcParams["figure.dpi"] = 300
@@ -1993,7 +2089,7 @@ class GFEMModel:
                 cmap = ListedColormap(color_palette)
 
                 # Set nan color
-                cmap.set_bad(color="white")
+                cmap.set_bad(color="0.9")
 
                 # Plot as a raster using imshow
                 fig, ax = plt.subplots(figsize=(figwidth, figheight))
@@ -2007,7 +2103,11 @@ class GFEMModel:
                     for seg, gt in sub_gtm.items():
                         ax.plot(gt["T"], gt["P"], linestyle="--", color="black",
                                 linewidth=2, label=seg)
-                elif geotherms == "mantle":
+                elif geotherms == "craton":
+                    for i, (pot, gt) in enumerate(ad_gt.items()):
+                        ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
+                                linewidth=2, label=pot)
+                elif geotherms == "mor":
                     for i, (pot, gt) in enumerate(ad_gt.items()):
                         ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
                                 linewidth=2, label=pot)
@@ -2063,7 +2163,7 @@ class GFEMModel:
 
                 # Set nan color
                 cmap = plt.colormaps[cmap]
-                cmap.set_bad(color="white")
+                cmap.set_bad(color="0.9")
 
                 # Plot as a raster using imshow
                 fig, ax = plt.subplots()
@@ -2077,7 +2177,11 @@ class GFEMModel:
                     for seg, gt in sub_gtm.items():
                         ax.plot(gt["T"], gt["P"], linestyle="--", color="black",
                                 linewidth=2, label=seg)
-                elif geotherms == "mantle":
+                elif geotherms == "craton":
+                    for i, (pot, gt) in enumerate(ad_gt.items()):
+                        ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
+                                linewidth=2, label=pot)
+                elif geotherms == "mor":
                     for i, (pot, gt) in enumerate(ad_gt.items()):
                         ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
                                 linewidth=2, label=pot)
@@ -2266,7 +2370,7 @@ class GFEMModel:
                 cmap = ListedColormap(color_palette)
 
                 # Set nan color
-                cmap.set_bad(color="white")
+                cmap.set_bad(color="0.9")
 
                 # 3D surface
                 fig = plt.figure(figsize=(figwidth, figheight), constrained_layout=True)
@@ -2335,7 +2439,7 @@ class GFEMModel:
 
                 # Set nan color
                 cmap = plt.get_cmap(cmap)
-                cmap.set_bad(color="white")
+                cmap.set_bad(color="0.9")
 
                 # 3D surface
                 fig = plt.figure(figsize=(figwidth, figheight), constrained_layout=True)
@@ -2412,6 +2516,7 @@ class GFEMModel:
         segs = self.segs
         P_min = self.P_min
         P_max = self.P_max
+        pot_Ts = self.pot_Ts
         targets = self.targets
         fig_dir = self.fig_dir
         data_dir = self.data_dir
@@ -2419,7 +2524,6 @@ class GFEMModel:
         geothresh = self.geothresh
         perplex_db = self.perplex_db
         model_built = self.model_built
-        potential_Ts = self.potential_Ts
         target_units = self.target_units
         model_out_dir = self.model_out_dir
 
@@ -2434,11 +2538,6 @@ class GFEMModel:
         # Check for figs directory
         if not os.path.exists(fig_dir):
             os.makedirs(fig_dir, exist_ok=True)
-
-        # Filter targets
-        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "melt", "h2o"]]
-        target_units = [target_units[i] for i in t_ind]
-        targets = [targets[i] for i in t_ind]
 
         # Get synthetic endmember compositions
         sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
@@ -2472,82 +2571,90 @@ class GFEMModel:
         colormap = plt.colormaps["tab10"]
 
         for i, target in enumerate(targets):
-            # Plotting
-            fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
-
-            Pprof, tprof, labels = [], [], []
-
-            # Plot assemblages and rock properties along geotherms
-            if geotherms == "sub":
-                for i, seg in enumerate(segs):
-                    if slab_position == "slabtop":
-                        filename = (f"{sid}-{target}-depth-profile-sub-slabtop-"
-                                    f"{perplex_db}.png")
-                        gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
-                    elif slab_position == "slabmoho":
-                        filename = (f"{sid}-{target}-depth-profile-sub-slabmoho-"
-                                    f"{perplex_db}.png")
-                        gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
-                    Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
-                    seg_lab = seg.replace("_", " ").lower()
-                    labels.append(seg_lab)
-                    Pprof.append(Pp)
-                    tprof.append(tp)
-            elif geotherms == "mantle":
-                filename = f"{sid}-{target}-depth-profile-mantle-{perplex_db}.png"
-                for i, pot in enumerate(potential_Ts):
-                    gt = self._get_mantle_geotherm(pot)
-                    Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
-                    labels.append(pot)
-                    Pprof.append(Pp)
-                    tprof.append(tp)
-
-            for i, (Pp, tp, lab) in enumerate(zip(Pprof, tprof, labels)):
-                # Plot GFEM model profiles
-                ax1.plot(tp, Pp, "-", linewidth=2, color=colormap(i), label=lab)
-
-            if target == "rho":
-                target_label = "Density"
-            elif target == "h2o":
-                target_label = "H$_2$O"
-            elif target == "melt":
-                target_label = "Melt"
-            else:
-                target_label = target
-
             if target not in ["assemblage", "variance"]:
+                # Plotting
+                fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
+
+                Pprof, tprof, labels = [], [], []
+
+                # Plot assemblages and rock properties along geotherms
+                if geotherms == "sub":
+                    for j, seg in enumerate(segs):
+                        if slab_position == "slabtop":
+                            filename = (f"{sid}-{target}-depth-profile-sub-slabtop-"
+                                        f"{perplex_db}.png")
+                            gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
+                        elif slab_position == "slabmoho":
+                            filename = (f"{sid}-{target}-depth-profile-sub-slabmoho-"
+                                        f"{perplex_db}.png")
+                            gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
+                        Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
+                        seg_lab = seg.replace("_", " ").lower()
+                        labels.append(seg_lab)
+                        Pprof.append(Pp)
+                        tprof.append(tp)
+                elif geotherms == "craton":
+                    filename = f"{sid}-{target}-depth-profile-craton-{perplex_db}.png"
+                    for j, pot in enumerate(pot_Ts):
+                        gt = self._get_mantle_geotherm(pot)
+                        Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
+                        labels.append(pot)
+                        Pprof.append(Pp)
+                        tprof.append(tp)
+                elif geotherms == "mor":
+                    filename = f"{sid}-{target}-depth-profile-mor-{perplex_db}.png"
+                    for j, pot in enumerate(pot_Ts):
+                        gt = self._get_mantle_geotherm(
+                            pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                            crust_thickness=7e3, litho_thickness=1e3)
+                        Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
+                        labels.append(pot)
+                        Pprof.append(Pp)
+                        tprof.append(tp)
+
+                for j, (Pp, tp, lab) in enumerate(zip(Pprof, tprof, labels)):
+                    # Plot GFEM model profiles
+                    ax1.plot(tp, Pp, "-", linewidth=2, color=colormap(j), label=lab)
+
+                if target == "rho":
+                    target_label = "Density"
+                elif target == "h2o":
+                    target_label = "H$_2$O"
+                elif target == "melt":
+                    target_label = "Melt"
+                else:
+                    target_label = target
+
                 ax1.set_xlabel(f"{target_label} ({target_units[i]})")
-            else:
-                ax1.set_xlabel(f"{target_label}")
-            ax1.set_ylabel("P (GPa)")
-            ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-            ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                ax1.set_ylabel("P (GPa)")
+                ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+                ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
-            # Vertical text spacing
-            text_margin_x = 0.04
-            text_margin_y = 0.15
-            text_spacing_y = 0.1
+                # Vertical text spacing
+                text_margin_x = 0.04
+                text_margin_y = 0.15
+                text_spacing_y = 0.1
 
-            # Convert the primary y-axis data (pressure) to depth
-            depth_conversion = lambda P: P * 30
-            depth_values = depth_conversion(np.linspace(P_min, P_max, len(Pp)))
+                # Convert the primary y-axis data (pressure) to depth
+                depth_conversion = lambda P: P * 30
+                depth_values = depth_conversion(np.linspace(P_min, P_max, len(Pp)))
 
-            # Create the secondary y-axis and plot depth on it
-            ax2 = ax1.secondary_yaxis(
-                "right", functions=(depth_conversion, depth_conversion))
-            ax2.set_ylabel("Depth (km)")
+                # Create the secondary y-axis and plot depth on it
+                ax2 = ax1.secondary_yaxis(
+                    "right", functions=(depth_conversion, depth_conversion))
+                ax2.set_ylabel("Depth (km)")
 
-            plt.legend(loc="upper left", columnspacing=0, handletextpad=0.2,
-                       fontsize=fontsize * 0.833)
+                plt.legend(loc="upper left", columnspacing=0, handletextpad=0.2,
+                           fontsize=fontsize * 0.833)
 
-            plt.title("Depth Profile")
+                plt.title("Depth Profile")
 
-            # Save the plot to a file
-            plt.savefig(f"{fig_dir}/{filename}")
+                # Save the plot to a file
+                plt.savefig(f"{fig_dir}/{filename}")
 
-            # Close device
-            plt.close()
-            print(f"  Figure saved to: {fig_dir}/{filename} ...")
+                # Close device
+                plt.close()
+                print(f"  Figure saved to: {fig_dir}/{filename} ...")
 
         return None
 
@@ -2563,12 +2670,12 @@ class GFEMModel:
         res = self.res
         loi = self.loi
         segs = self.segs
+        pot_Ts = self.pot_Ts
         fig_dir = self.fig_dir
         xi = self.fertility_index
         geotherms = self.geotherms
         perplex_db = self.perplex_db
         model_built = self.model_built
-        potential_Ts = self.potential_Ts
         model_out_dir = self.model_out_dir
 
         # Check for model
@@ -2580,7 +2687,7 @@ class GFEMModel:
             os.makedirs(fig_dir, exist_ok=True)
 
         # Check for werami files
-        if geotherms not in ["sub", "mantle"]:
+        if geotherms not in ["sub", "craton", "mor"]:
             raise Exception("Unrecognized geotherms argument !")
 
         if geotherms == "sub":
@@ -2592,9 +2699,15 @@ class GFEMModel:
                 if not os.path.exists(path_moho):
                     raise Exception(f"No werami data found at {path_moho} !")
 
-        if geotherms == "mantle":
-            for pot in potential_Ts:
-                path = f"{model_out_dir}/gt-{pot}.tab"
+        if geotherms == "craton":
+            for pot in pot_Ts:
+                path = f"{model_out_dir}/gt-craton-{pot}.tab"
+                if not os.path.exists(path):
+                    raise Exception(f"No werami data found at {path} !")
+
+        if geotherms == "mor":
+            for pot in pot_Ts:
+                path = f"{model_out_dir}/gt-mor-{pot}.tab"
                 if not os.path.exists(path):
                     raise Exception(f"No werami data found at {path} !")
 
@@ -2663,18 +2776,30 @@ class GFEMModel:
                     tabfiles.append(f"{model_out_dir}/gt-slabtop-{seg}.tab")
                     filenames.append(f"{sid}-gt-slabtop-{seg_lab}-assemblages-"
                                      f"{perplex_db}.png")
-                    gts.append(self._get_subduction_geotherm(seg, slab_position="slabtop"))
+                    gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
+                    gts.append(gt)
                 elif slab_position == "slabmoho":
                     tabfiles.append(f"{model_out_dir}/gt-slabmoho-{seg}.tab")
                     filenames.append(f"{sid}-gt-slabmoho-{seg_lab}-assemblages-"
                                      f"{perplex_db}.png")
-                    gts.append(self._get_subduction_geotherm(seg, slab_position="slabmoho"))
-        elif geotherms == "mantle":
-            for pot in potential_Ts:
+                    gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
+                    gts.append(gt)
+        elif geotherms == "craton":
+            for pot in pot_Ts:
                 labels.append(pot)
-                tabfiles.append(f"{model_out_dir}/gt-{pot}.tab")
-                filenames.append(f"{sid}-gt-{pot}-assemblages-{perplex_db}.png")
-                gts.append(self._get_mantle_geotherm(pot))
+                tabfiles.append(f"{model_out_dir}/gt-craton-{pot}.tab")
+                filenames.append(f"{sid}-gt-craton-{pot}-assemblages-{perplex_db}.png")
+                gt = self._get_mantle_geotherm(pot)
+                gts.append(gt)
+        elif geotherms == "mor":
+            for pot in pot_Ts:
+                labels.append(pot)
+                tabfiles.append(f"{model_out_dir}/gt-mor-{pot}.tab")
+                filenames.append(f"{sid}-gt-mor-{pot}-assemblages-{perplex_db}.png")
+                gt = self._get_mantle_geotherm(
+                    pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                    crust_thickness=7e3, litho_thickness=1e3)
+                gts.append(gt)
 
         for tabfile, filename, gt, lab in zip(tabfiles, filenames, gts, labels):
             # Read wearmi file
@@ -2789,7 +2914,7 @@ class GFEMModel:
                     self._visualize_geotherm_assemblages(slab_position="slabtop")
                 if not self._check_model_gt_assemblages_images(slab_position="slabmoho"):
                     self._visualize_geotherm_assemblages(slab_position="slabmoho")
-            elif self.geotherms == "mantle":
+            elif self.geotherms in ["craton", "mor"]:
                 if not self._check_model_depth_profile_images():
                     self._visualize_depth_profiles()
                 if not self._check_model_gt_assemblages_images():
@@ -3231,11 +3356,6 @@ def visualize_depth_profiles_comps(gfem_models, figwidth=6.3, figheight=5.5, fon
         perplex_db = model.perplex_db
         target_units = model.target_units
 
-        # Filter targets
-        t_ind = [i for i, t in enumerate(targets) if t in ["rho", "Vp", "Vs", "melt", "h2o"]]
-        target_units = [target_units[i] for i in t_ind]
-        targets = [targets[i] for i in t_ind]
-
         # Get dry synthetic endmember compositions
         df_mids = pd.read_csv("assets/synth-mids.csv")
         df_dry = df_mids[df_mids["LOI"] == 0]
@@ -3247,87 +3367,87 @@ def visualize_depth_profiles_comps(gfem_models, figwidth=6.3, figheight=5.5, fon
         tend = df_synth_bench["SAMPLEID"].iloc[-1]
 
         for i, target in enumerate(targets):
-            # Get GFEM model profile
-            P_gfem, _, target_gfem = model._get_1d_profile(
-                target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
-
-            # Create colorbar
-            pal = plt.get_cmap("magma_r")
-            norm = plt.Normalize(df_synth_bench[XI_col].min(), df_synth_bench[XI_col].max())
-            sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
-            sm.set_array([])
-
-            ax = axes[i]
-
-            # Plot GFEM profiles
-            ax.plot(target_gfem, P_gfem, "-", linewidth=1, color=sm.to_rgba(xi), alpha=0.2)
-
-            # Target labels
-            if target == "rho":
-                target_label = "Density"
-            elif target == "h2o":
-                target_label = "H$_2$O"
-            elif target == "melt":
-                target_label = "Melt"
-            else:
-                target_label = target
-
-            if (i == 1) or (i == 3):
-                ax.set_ylabel("")
-                ax.set_yticks([])
-            else:
-                ax.set_ylabel("P (GPa)")
-
             if target not in ["assemblage", "variance"]:
+                # Get GFEM model profile
+                P_gfem, _, target_gfem = model._get_1d_profile(
+                    target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
+
+                # Create colorbar
+                pal = plt.get_cmap("magma_r")
+                norm = plt.Normalize(df_synth_bench[XI_col].min(),
+                                     df_synth_bench[XI_col].max())
+                sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
+                sm.set_array([])
+
+                ax = axes[i]
+
+                # Plot GFEM profiles
+                ax.plot(target_gfem, P_gfem, "-", linewidth=1,
+                        color=sm.to_rgba(xi), alpha=0.2)
+
+                # Target labels
+                if target == "rho":
+                    target_label = "Density"
+                elif target == "h2o":
+                    target_label = "H$_2$O"
+                elif target == "melt":
+                    target_label = "Melt"
+                else:
+                    target_label = target
+
+                if (i == 1) or (i == 3):
+                    ax.set_ylabel("")
+                    ax.set_yticks([])
+                else:
+                    ax.set_ylabel("P (GPa)")
+
                 ax.set_xlabel(f"{target_label} ({target_units[i]})")
-            else:
-                ax.set_xlabel(f"{target_label}")
 
-            if target == "rho":
-                ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-                ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-            elif target == "Vp":
-                ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-                ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-            elif target == "Vs":
-                ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-                ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-            elif target == "melt":
-                ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-                ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-            elif target == "h2o":
-                ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-                ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                if target == "rho":
+                    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                elif target == "Vp":
+                    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                elif target == "Vs":
+                    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                elif target == "melt":
+                    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+                    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+                elif target == "h2o":
+                    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
-            # Convert the primary y-axis data (pressure) to depth
-            depth_conversion = lambda P: P * 30
-            depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
+                # Convert the primary y-axis data (pressure) to depth
+                depth_conversion = lambda P: P * 30
+                depth_values = depth_conversion(np.linspace(P_min, P_max, len(P_gfem)))
 
-            # Create the secondary y-axis and plot depth on it
-            if (i == 1) or (i == 3):
-                ax2 = ax.secondary_yaxis(
-                    "right", functions=(depth_conversion, depth_conversion))
-                ax2.set_yticks([410, 670])
-                ax2.set_ylabel("Depth (km)")
+                # Create the secondary y-axis and plot depth on it
+                if (i == 1) or (i == 3):
+                    ax2 = ax.secondary_yaxis(
+                        "right", functions=(depth_conversion, depth_conversion))
+                    ax2.set_yticks([410, 670])
+                    ax2.set_ylabel("Depth (km)")
 
-            if i == 0:
-                cbaxes = inset_axes(ax, width="40%", height="3%", loc=2)
-                colorbar = plt.colorbar(sm, ax=ax, cax=cbaxes, label="$\\xi$",
-                                        orientation="horizontal")
-                ax.legend(loc="lower right", columnspacing=0, handletextpad=0.2,
-                          fontsize=fontsize * 0.833)
+                if i == 0:
+                    cbaxes = inset_axes(ax, width="40%", height="3%", loc=2)
+                    colorbar = plt.colorbar(sm, ax=ax, cax=cbaxes, label="$\\xi$",
+                                            orientation="horizontal")
+                    ax.legend(loc="lower right", columnspacing=0, handletextpad=0.2,
+                              fontsize=fontsize * 0.833)
 
-    fig.text(0.08, 0.98, "a)", fontsize=fontsize * 1.4)
-    fig.text(0.49, 0.98, "b)", fontsize=fontsize * 1.4)
-    fig.text(0.08, 0.50, "c)", fontsize=fontsize * 1.4)
-    fig.text(0.49, 0.50, "d)", fontsize=fontsize * 1.4)
+        fig.text(0.08, 0.98, "a)", fontsize=fontsize * 1.4)
+        fig.text(0.49, 0.98, "b)", fontsize=fontsize * 1.4)
+        fig.text(0.08, 0.50, "c)", fontsize=fontsize * 1.4)
+        fig.text(0.49, 0.50, "d)", fontsize=fontsize * 1.4)
 
-    # Save the plot to a file
-    filename = f"depth-profile-comps-{perplex_db}.png"
-    plt.savefig(f"{fig_dir}/{filename}")
+        # Save the plot to a file
+        filename = f"depth-profile-comps-{perplex_db}.png"
+        plt.savefig(f"{fig_dir}/{filename}")
 
-    # Close device
-    plt.close()
+        # Close device
+        plt.close()
 
     return None
 

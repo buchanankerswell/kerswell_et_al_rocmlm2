@@ -15,11 +15,11 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Testing gfem models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    res, source, samp = 32, "assets/synth-mids.csv", "sm005-loi005"
+    res, source, samp = 64, "assets/synth-mids.csv", "sm005-loi005"
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # HP models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gts, P_min, P_max, T_min, T_max = "sub", 0.1, 8.1, 273, 1973
+    gts, P_min, P_max, T_min, T_max = "mor", 0.1, 8.1, 273, 1973
     model_shallow = GFEMModel("hp02", samp, source, res, P_min, P_max, T_min, T_max, gts)
     model_shallow.build_model()
 
@@ -35,7 +35,7 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # STX models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gts, P_min, P_max, T_min, T_max = "mantle", 8.1, 136.1, 773, 4273
+    gts, P_min, P_max, T_min, T_max = "mor", 8.1, 136.1, 773, 4273
     model_deep = GFEMModel("stx21", samp, source, res, P_min, P_max, T_min, T_max, gts)
     model_deep.build_model()
 
