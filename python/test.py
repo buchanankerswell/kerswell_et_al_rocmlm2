@@ -45,6 +45,8 @@ def main():
 #    sids = get_sampleids(source)
 #    db, geotherms, P_min, P_max, T_min, T_max = "stx21", "mantle", 8.1, 136.1, 773, 4273
 #    db, geotherms, P_min, P_max, T_min, T_max = "hp02", "sub", 0.1, 8.1, 273, 1973
+#    db, geotherms, P_min, P_max, T_min, T_max = "hp11", "sub", 0.1, 8.1, 273, 1973
+#    db, geotherms, P_min, P_max, T_min, T_max = "hp622", "sub", 0.1, 8.1, 273, 1973
 #    db, geotherms, P_min, P_max, T_min, T_max = "hp633", "sub", 0.1, 8.1, 273, 1973
 #    gfems = build_gfem_models(source, sids, db, res, P_min, P_max, T_min, T_max, geotherms)
 

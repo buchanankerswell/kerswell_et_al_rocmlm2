@@ -25,9 +25,9 @@ from sklearn.metrics import r2_score, mean_squared_error
 # plotting !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import cv2
-import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib.colors import hsv_to_rgb
 from PIL import Image, ImageDraw, ImageFont
 from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -93,7 +93,7 @@ class GFEMModel:
         # Perple_X solution models and endmembers to exclude
         if perplex_db == "hp02":
             self.melt_mod = "melt(HP)"
-            self.em_exclude = ["diL", "foL", "woGL", "liz", "ak"]
+            self.em_exclude = ["diL", "foL", "woGL", "liz", "ak", "pswo", "wo"]
             self.sl_include = ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)", "Sp(HP)",
                                "Gt(HGP)", "Maj", "feldspar", "cAmph(G)", "Chl(W)",
                                "Atg(PN)", "A-phase", "B", "T", f"{self.melt_mod}"]
@@ -502,7 +502,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get 1d subduction geotherm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_subduction_geotherm(self, segment="Central_Cascadia", position="moho"):
+    def _get_subduction_geotherm(self, segment="Central_Cascadia", slab_position="slabmoho"):
         """
         """
         # Get self attributes
@@ -531,9 +531,9 @@ class GFEMModel:
         # Read reference geotherm
         geotherm = pd.read_csv(path, header=None, names=ref_cols, sep=r"\s+")
 
-        if position == "moho":
+        if slab_position == "slabmoho":
             geotherm = geotherm[geotherm["slab_depth"] == 7]
-        elif position == "top":
+        elif slab_position == "slabtop":
             geotherm = geotherm[geotherm["slab_depth"] == 0]
         else:
             raise Exception(f"Unrecognized position argument '{position}' !")
@@ -1030,22 +1030,22 @@ class GFEMModel:
         # Write subduction geotherms to tsv files
         if geotherms == "sub":
             for seg in segs:
-                geotherm_top = self._get_subduction_geotherm(seg, position="top")
-                geotherm_moho = self._get_subduction_geotherm(seg, position="moho")
+                geotherm_top = self._get_subduction_geotherm(seg, slab_position="slabtop")
+                geotherm_moho = self._get_subduction_geotherm(seg, slab_position="slabmoho")
                 geotherm_top["P"] = geotherm_top["P"] * 1e4
                 geotherm_moho["P"] = geotherm_moho["P"] * 1e4
                 geotherm_top = geotherm_top[["T", "P"]]
                 geotherm_moho = geotherm_moho[["T", "P"]]
-                geotherm_top.to_csv(f"{model_out_dir}/geotherm-top-{seg}", sep="\t",
+                geotherm_top.to_csv(f"{model_out_dir}/gt-slabtop-{seg}", sep="\t",
                                     index=False, header=False, float_format="%.6E")
-                geotherm_moho.to_csv(f"{model_out_dir}/geotherm-moho-{seg}", sep="\t",
+                geotherm_moho.to_csv(f"{model_out_dir}/gt-slabmoho-{seg}", sep="\t",
                                      index=False, header=False, float_format="%.6E")
         elif geotherms == "mantle":
             for pot in potential_Ts:
                 geotherm = self._get_mantle_geotherm(pot)
                 geotherm["P"] = geotherm["P"] * 1e4
                 geotherm = geotherm[["T", "P"]]
-                geotherm.to_csv(f"{model_out_dir}/geotherm-{pot}", sep="\t",
+                geotherm.to_csv(f"{model_out_dir}/gt-{pot}", sep="\t",
                                 index=False, header=False, float_format="%.6E")
 
         # Initialize werami geotherms
@@ -1053,7 +1053,7 @@ class GFEMModel:
         werami_geotherms_moho = []
         werami_geotherms_mantle = []
 
-        if perplex_db in ["hp02", "hp11", "hp622", "hp633"]:
+        if "hp" in perplex_db:
             # Werami phase
             f = (f"{sid}\n" # Proj name
                  f"2\n"     # Operational mode (2: properties on 2D grid)
@@ -1067,41 +1067,41 @@ class GFEMModel:
             # Werami geotherm
             if geotherms == "sub":
                 for seg in segs:
-                    if os.path.exists(f"{model_out_dir}/geotherm-top-{seg}"):
+                    if os.path.exists(f"{model_out_dir}/gt-slabtop-{seg}"):
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"geotherm-top-{seg}\n"   # Enter filename
+                             f"gt-slabtop-{seg}\n"   # Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
-                             f"N\n"                # Include fluid in computation ?
+                             f"Y\n"                # Include fluid in computation ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_top.append(g)
-                    if os.path.exists(f"{model_out_dir}/geotherm-moho-{seg}"):
+                    if os.path.exists(f"{model_out_dir}/gt-slabmoho-{seg}"):
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"geotherm-moho-{seg}\n" # Enter filename
+                             f"gt-slabmoho-{seg}\n" # Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
-                             f"N\n"                # Include fluid in computation ?
+                             f"Y\n"                # Include fluid in computation ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_moho.append(g)
             elif geotherms == "mantle":
                 for pot in potential_Ts:
-                    if os.path.exists(f"{model_out_dir}/geotherm-{pot}"):
+                    if os.path.exists(f"{model_out_dir}/gt-{pot}"):
                         g = (f"{sid}\n"          # Proj name
                              f"4\n"              # Op mode (4: properties along a 1d path)
                              f"2\n"              # Path (2: a file with T-P points)
-                             f"geotherm-{pot}\n" # Enter filename
+                             f"gt-{pot}\n" # Enter filename
                              f"1\n"              # How many nth points to plot ?
                              f"25\n"             # Select a property (25: Modes of all)
                              f"N\n"              # Output cumulative modes ?
-                             f"N\n"              # Include fluid in computation ?
+                             f"Y\n"              # Include fluid in computation ?
                              f"0\n"              # Zero to exit
                              )
                         werami_geotherms_mantle.append(g)
@@ -1118,22 +1118,22 @@ class GFEMModel:
             # Werami geotherm
             if geotherms == "sub":
                 for seg in segs:
-                    if os.path.exists(f"{model_out_dir}/geotherm-top-{seg}"):
+                    if os.path.exists(f"{model_out_dir}/gt-slabtop-{seg}"):
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"geotherm-top-{seg}\n"   # Enter filename
+                             f"gt-slabtop-{seg}\n"   # Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_top.append(g)
-                    if os.path.exists(f"{model_out_dir}/geotherm-moho-{seg}"):
+                    if os.path.exists(f"{model_out_dir}/gt-slabmoho-{seg}"):
                         g = (f"{sid}\n"            # Proj name
                              f"4\n"                # Op mode (4: properties along a 1d path)
                              f"2\n"                # Path (2: a file with T-P points)
-                             f"geotherm-moho-{seg}\n"   # Enter filename
+                             f"gt-slabmoho-{seg}\n"   # Enter filename
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
@@ -1142,11 +1142,11 @@ class GFEMModel:
                         werami_geotherms_moho.append(g)
             elif geotherms == "mantle":
                 for pot in potential_Ts:
-                    if os.path.exists(f"{model_out_dir}/geotherm-{pot}"):
+                    if os.path.exists(f"{model_out_dir}/gt-{pot}"):
                         g = (f"{sid}\n"          # Proj name
                              f"4\n"              # Op mode (4: properties along a 1d path)
                              f"2\n"              # Path (2: a file with T-P points)
-                             f"geotherm-{pot}\n" # Enter filename
+                             f"gt-{pot}\n" # Enter filename
                              f"1\n"              # How many nth points to plot ?
                              f"25\n"             # Select a property (25: Modes of all)
                              f"N\n"              # Output cumulative modes ?
@@ -1163,15 +1163,15 @@ class GFEMModel:
         # Write werami geotherms
         if werami_geotherms_top:
             for i, g in enumerate(werami_geotherms_top):
-                with open(f"{model_out_dir}/werami-geotherm-top-{segs[i]}", "w") as file:
+                with open(f"{model_out_dir}/werami-gt-slabtop-{segs[i]}", "w") as file:
                     file.write(g)
         if werami_geotherms_moho:
             for i, g in enumerate(werami_geotherms_moho):
-                with open(f"{model_out_dir}/werami-geotherm-moho-{segs[i]}", "w") as file:
+                with open(f"{model_out_dir}/werami-gt-slabmoho-{segs[i]}", "w") as file:
                     file.write(g)
         if werami_geotherms_mantle:
             for i, g in enumerate(werami_geotherms_mantle):
-                with open(f"{model_out_dir}/werami-geotherm-{potential_Ts[i]}", "w") as file:
+                with open(f"{model_out_dir}/werami-gt-{potential_Ts[i]}", "w") as file:
                     file.write(g)
 
         return None
@@ -1257,11 +1257,11 @@ class GFEMModel:
                 config_files.append(f"{model_out_dir}/werami-phase")
                 if geotherms == "sub":
                     for seg in segs:
-                        config_files.append(f"{model_out_dir}/werami-geotherm-top-{seg}")
-                        config_files.append(f"{model_out_dir}/werami-geotherm-moho-{seg}")
+                        config_files.append(f"{model_out_dir}/werami-gt-slabtop-{seg}")
+                        config_files.append(f"{model_out_dir}/werami-gt-slabmoho-{seg}")
                 elif geotherms == "mantle":
                     for pot in potential_Ts:
-                        config_files.append(f"{model_out_dir}/werami-geotherm-{pot}")
+                        config_files.append(f"{model_out_dir}/werami-gt-{pot}")
 
                 self._replace_in_file(f"{model_out_dir}/build-options",
                                       {"Anderson-Gruneisen     F":
@@ -1326,15 +1326,15 @@ class GFEMModel:
                             if (i - 2) % 2 == 0:
                                 shutil.copy(
                                     f"{model_out_dir}/{sid}_1.tab",
-                                    f"{model_out_dir}/geotherm-top-{segs[seg_index]}.tab")
+                                    f"{model_out_dir}/gt-slabtop-{segs[seg_index]}.tab")
                             else:
                                 shutil.copy(
                                     f"{model_out_dir}/{sid}_1.tab",
-                                    f"{model_out_dir}/geotherm-moho-{segs[seg_index]}.tab")
+                                    f"{model_out_dir}/gt-slabmoho-{segs[seg_index]}.tab")
                         elif geotherms == "mantle":
                             shutil.copy(
                                 f"{model_out_dir}/{sid}_1.tab",
-                                f"{model_out_dir}/geotherm-{potential_Ts[i - 2]}.tab")
+                                f"{model_out_dir}/gt-{potential_Ts[i - 2]}.tab")
 
                         os.remove(f"{model_out_dir}/{sid}_1.tab")
 
@@ -1364,13 +1364,13 @@ class GFEMModel:
         perplex_targets = f"{model_out_dir}/target-array.tab"
 
         # Initialize results
-        if perplex_db == "stx21":
-            results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
-                       "assemblage_index": [], "assemblage": [], "variance": []}
-        elif perplex_db in ["hp02", "hp11", "hp622", "hp633"]:
+        if "hp" in perplex_db:
             results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
                        "assemblage_index": [], "melt": [], "h2o": [],
                        "assemblage": [], "variance": []}
+        elif perplex_db == "stx21":
+            results = {"T": [], "P": [], "rho": [], "Vp": [], "Vs": [],
+                       "assemblage_index": [], "assemblage": [], "variance": []}
         else:
             raise Exception("Unrecognized thermodynamic dataset !")
 
@@ -1673,9 +1673,9 @@ class GFEMModel:
         existing_figs = []
         for i, target in enumerate(targets):
             if gradient:
-                path = f"{fig_dir}/{sid}-{target}-grad.png"
+                path = f"{fig_dir}/{sid}-{target}-grad-{perplex_db}.png"
             else:
-                path = f"{fig_dir}/{sid}-{target}.png"
+                path = f"{fig_dir}/{sid}-{target}-{perplex_db}.png"
 
             check = os.path.exists(path)
 
@@ -1706,7 +1706,7 @@ class GFEMModel:
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            path = f"{fig_dir}/{sid}-{target}-surf.png"
+            path = f"{fig_dir}/{sid}-{target}-surf-{perplex_db}.png"
 
             check = os.path.exists(path)
 
@@ -1721,7 +1721,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # check model depth profile images !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_depth_profile_images(self, slab_position="top"):
+    def _check_model_depth_profile_images(self, slab_position="slabtop"):
         """
         """
         # Get model data
@@ -1729,6 +1729,7 @@ class GFEMModel:
         targets = self.targets
         fig_dir = self.fig_dir
         geotherms = self.geotherms
+        perplex_db = self.perplex_db
 
         # Filter targets
         t_ind = [i for i, t in enumerate(targets) if t not in ["assemblage", "variance"]]
@@ -1738,14 +1739,15 @@ class GFEMModel:
         existing_figs = []
         for i, target in enumerate(targets):
             if geotherms == "sub":
-                path = f"{fig_dir}/{sid}-{target}-depth-profile-sub-{slab_position}.png"
+                path = (f"{fig_dir}/{sid}-{target}-depth-profile-sub-{slab_position}-"
+                        f"{perplex_db}.png")
                 check = os.path.exists(path)
 
                 if check:
                     existing_figs.append(check)
 
             elif geotherms == "mantle":
-                path = f"{fig_dir}/{sid}-{target}-depth-profile-mantle.png"
+                path = f"{fig_dir}/{sid}-{target}-depth-profile-mantle-{perplex_db}.png"
                 check = os.path.exists(path)
 
                 if check:
@@ -1757,9 +1759,9 @@ class GFEMModel:
             return False
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check model geotherm assemblages !!
+    # check model gt assemblages !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_geotherm_assemblages_images(self, slab_position="top"):
+    def _check_model_gt_assemblages_images(self, slab_position="slabtop"):
         """
         """
         # Get model data
@@ -1767,6 +1769,7 @@ class GFEMModel:
         segs = self.segs
         fig_dir = self.fig_dir
         geotherms = self.geotherms
+        perplex_db = self.perplex_db
         potential_Ts = self.potential_Ts
 
         # Check for existing plots
@@ -1774,7 +1777,8 @@ class GFEMModel:
         if geotherms == "sub":
             for i, seg in enumerate(segs):
                 seg_lab = seg.replace("_", "-").lower()
-                path = f"{fig_dir}/{sid}-geotherm-{slab_position}-{seg_lab}-assemblages.png"
+                path = (f"{fig_dir}/{sid}-gt-{slab_position}-{seg_lab}-assemblages-"
+                        f"{perplex_db}.png")
 
                 check = os.path.exists(path)
 
@@ -1788,7 +1792,7 @@ class GFEMModel:
 
         elif geotherms == "mantle":
             for i, pot in enumerate(potential_Ts):
-                path = f"{fig_dir}/{sid}-geotherm-{pot}-assemblages.png"
+                path = f"{fig_dir}/{sid}-gt-{pot}-assemblages-{perplex_db}.png"
 
                 check = os.path.exists(path)
 
@@ -1819,6 +1823,7 @@ class GFEMModel:
         fig_dir = self.fig_dir
         geotherms = self.geotherms
         geothresh = self.geothresh
+        perplex_db = self.perplex_db
         model_built = self.model_built
         potential_Ts = self.potential_Ts
         target_array = self.target_array
@@ -1853,8 +1858,8 @@ class GFEMModel:
             sub_gtt = {}
             sub_gtm = {}
             for seg in segs:
-                sub_gtt[seg] = self._get_subduction_geotherm(seg, position="top")
-                sub_gtm[seg] = self._get_subduction_geotherm(seg, position="moho")
+                sub_gtt[seg] = self._get_subduction_geotherm(seg, slab_position="slabtop")
+                sub_gtm[seg] = self._get_subduction_geotherm(seg, slab_position="slabmoho")
         # Get mantle geotherms
         elif geotherms == "mantle":
             ad_gt = {}
@@ -1886,7 +1891,7 @@ class GFEMModel:
                 target_label = target
 
             # Set filename
-            filename = f"{sid}-{target}.png"
+            filename = f"{sid}-{target}-{perplex_db}.png"
             if target not in ["assemblage", "variance"]:
                 title = f"{target_label} ({target_units[i]})"
             else:
@@ -1913,7 +1918,7 @@ class GFEMModel:
                 else:
                     square_target = np.full_like(edges_x, np.nan)
 
-                filename = f"{sid}-{target}-grad.png"
+                filename = f"{sid}-{target}-grad-{perplex_db}.png"
                 title = f"{target_label} Gradient"
 
             # Use discrete colorscale
@@ -2180,7 +2185,7 @@ class GFEMModel:
                 target_label = target
 
             # Set filename
-            filename = f"{sid}-{target}-surf.png"
+            filename = f"{sid}-{target}-surf-{perplex_db}.png"
             if target not in ["assemblage", "variance"]:
                 title = f"{target_label} ({target_units[i]})"
             else:
@@ -2397,8 +2402,8 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize depth profiles !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_depth_profiles(self, slab_position="top", figwidth=6.3, figheight=4.725,
-                                  fontsize=22):
+    def _visualize_depth_profiles(self, slab_position="slabtop", figwidth=6.3,
+                                  figheight=4.725, fontsize=22):
         """
         """
         # Get model data
@@ -2412,6 +2417,7 @@ class GFEMModel:
         data_dir = self.data_dir
         geotherms = self.geotherms
         geothresh = self.geothresh
+        perplex_db = self.perplex_db
         model_built = self.model_built
         potential_Ts = self.potential_Ts
         target_units = self.target_units
@@ -2474,19 +2480,21 @@ class GFEMModel:
             # Plot assemblages and rock properties along geotherms
             if geotherms == "sub":
                 for i, seg in enumerate(segs):
-                    if slab_position == "top":
-                        filename = f"{sid}-{target}-depth-profile-sub-top.png"
-                        gt = self._get_subduction_geotherm(seg, position="top")
-                    elif slab_position == "moho":
-                        filename = f"{sid}-{target}-depth-profile-sub-moho.png"
-                        gt = self._get_subduction_geotherm(seg, position="moho")
+                    if slab_position == "slabtop":
+                        filename = (f"{sid}-{target}-depth-profile-sub-slabtop-"
+                                    f"{perplex_db}.png")
+                        gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
+                    elif slab_position == "slabmoho":
+                        filename = (f"{sid}-{target}-depth-profile-sub-slabmoho-"
+                                    f"{perplex_db}.png")
+                        gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
                     Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
                     seg_lab = seg.replace("_", " ").lower()
                     labels.append(seg_lab)
                     Pprof.append(Pp)
                     tprof.append(tp)
             elif geotherms == "mantle":
-                filename = f"{sid}-{target}-depth-profile-mantle.png"
+                filename = f"{sid}-{target}-depth-profile-mantle-{perplex_db}.png"
                 for i, pot in enumerate(potential_Ts):
                     gt = self._get_mantle_geotherm(pot)
                     Pp, _, tp = (self._extract_target_along_1d_geotherm(target, gt))
@@ -2546,7 +2554,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize geotherm assemblages !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_geotherm_assemblages(self, slab_position="top", modal_thresh=5,
+    def _visualize_geotherm_assemblages(self, slab_position="slabtop", modal_thresh=5,
                                         figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
@@ -2577,8 +2585,8 @@ class GFEMModel:
 
         if geotherms == "sub":
             for seg in segs:
-                path_top = f"{model_out_dir}/geotherm-moho-{seg}.tab"
-                path_moho = f"{model_out_dir}/geotherm-top-{seg}.tab"
+                path_top = f"{model_out_dir}/gt-slabmoho-{seg}.tab"
+                path_moho = f"{model_out_dir}/gt-slabtop-{seg}.tab"
                 if not os.path.exists(path_top):
                     raise Exception(f"No werami data found at {path_top} !")
                 if not os.path.exists(path_moho):
@@ -2586,7 +2594,7 @@ class GFEMModel:
 
         if geotherms == "mantle":
             for pot in potential_Ts:
-                path = f"{model_out_dir}/geotherm-{pot}.tab"
+                path = f"{model_out_dir}/gt-{pot}.tab"
                 if not os.path.exists(path):
                     raise Exception(f"No werami data found at {path} !")
 
@@ -2601,18 +2609,48 @@ class GFEMModel:
         plt.rcParams["legend.fontsize"] = "small"
         plt.rcParams["figure.autolayout"] = "True"
 
-        # Get unique phases
-        phases = pd.read_csv(f"{model_out_dir}/assemblages.csv")
-        all_phases = [p for a in phases["assemblage"] for p in a.split()]
+        # Get unique phases that meet modal_thresh for all gfem models
+        all_phases = []
+
+        if "hp" in perplex_db:
+            file_pattern = os.path.join("gfems", "*hp*", "gt*.tab")
+        elif perplex_db == "stx21":
+            file_pattern = os.path.join("gfems", "*stx*", "gt*.tab")
+        else:
+            raise Exception("Unrecognized thermodynamic dataset !")
+
+        for file_path in glob.glob(file_pattern, recursive=True):
+            # Read wearmi file
+            df = pd.read_csv(file_path, sep="\\s+", skiprows=8)
+            df = df.dropna(axis=1, how="all")
+            df = df.fillna(0)
+            df = df.drop(["T(K)", "P(bar)"], axis=1)
+
+            # Combine duplicate columns
+            normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
+            duplicate_columns = normalized_columns[
+                normalized_columns.duplicated()].unique()
+            for base_name in duplicate_columns:
+                cols_to_combine = df.loc[:, normalized_columns == base_name]
+                combined_col = cols_to_combine.sum(axis=1)
+                df[base_name] = combined_col
+                df = df.drop(cols_to_combine.columns[1:], axis=1)
+                normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
+
+            # Drop minor phases
+            df = df.drop(columns=[col for col in df.columns if
+                                  (df[col] < modal_thresh).all()])
+            all_phases.extend(df.columns)
+
         phase_names = sorted(set(all_phases))
 
-        # Sort unique phases and assign unique colors
+        # Assign unique colors to phases that meet modal_thresh
         num_colors = len(phase_names)
-        colors = sns.color_palette("husl", num_colors)
+        hues = np.linspace(0, 1, num_colors, endpoint=False)
+        colors = [hsv_to_rgb([hue, 0.8, 0.75]) for hue in hues]
         colormap = plt.colormaps["tab20"]
         colors = [colormap(i) for i in range(num_colors)]
-        color_map = {col_name: colors[idx % num_colors] for
-                     idx, col_name in enumerate(phase_names)}
+        color_map = {col_name: colors[idx] for idx, col_name in enumerate(phase_names)}
 
         tabfiles, filenames, gts, labels = [], [], [], []
 
@@ -2621,19 +2659,21 @@ class GFEMModel:
             for seg in segs:
                 seg_lab = seg.replace("_", "-").lower()
                 labels.append(seg_lab)
-                if slab_position == "top":
-                    tabfiles.append(f"{model_out_dir}/geotherm-top-{seg}.tab")
-                    filenames.append(f"{sid}-geotherm-top-{seg_lab}-assemblages.png")
-                    gts.append(self._get_subduction_geotherm(seg, position="top"))
-                elif slab_position == "moho":
-                    tabfiles.append(f"{model_out_dir}/geotherm-moho-{seg}.tab")
-                    filenames.append(f"{sid}-geotherm-moho-{seg_lab}-assemblages.png")
-                    gts.append(self._get_subduction_geotherm(seg, position="moho"))
+                if slab_position == "slabtop":
+                    tabfiles.append(f"{model_out_dir}/gt-slabtop-{seg}.tab")
+                    filenames.append(f"{sid}-gt-slabtop-{seg_lab}-assemblages-"
+                                     f"{perplex_db}.png")
+                    gts.append(self._get_subduction_geotherm(seg, slab_position="slabtop"))
+                elif slab_position == "slabmoho":
+                    tabfiles.append(f"{model_out_dir}/gt-slabmoho-{seg}.tab")
+                    filenames.append(f"{sid}-gt-slabmoho-{seg_lab}-assemblages-"
+                                     f"{perplex_db}.png")
+                    gts.append(self._get_subduction_geotherm(seg, slab_position="slabmoho"))
         elif geotherms == "mantle":
             for pot in potential_Ts:
                 labels.append(pot)
-                tabfiles.append(f"{model_out_dir}/geotherm-{pot}.tab")
-                filenames.append(f"{sid}-geotherm-{pot}-assemblages.png")
+                tabfiles.append(f"{model_out_dir}/gt-{pot}.tab")
+                filenames.append(f"{sid}-gt-{pot}-assemblages-{perplex_db}.png")
                 gts.append(self._get_mantle_geotherm(pot))
 
         for tabfile, filename, gt, lab in zip(tabfiles, filenames, gts, labels):
@@ -2643,13 +2683,14 @@ class GFEMModel:
             df = df.fillna(0)
 
             # Combine duplicate columns
-            normalized_columns = df.columns.str.replace(r'\.\d+$', '', regex=True)
+            normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
             duplicate_columns = normalized_columns[normalized_columns.duplicated()].unique()
             for base_name in duplicate_columns:
                 cols_to_combine = df.loc[:, normalized_columns == base_name]
                 combined_col = cols_to_combine.sum(axis=1)
                 df[base_name] = combined_col
                 df = df.drop(cols_to_combine.columns[1:], axis=1)
+                normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
 
             # Drop minor phases
             df = df.drop(columns=[col for col in df.columns if
@@ -2740,18 +2781,18 @@ class GFEMModel:
             if not self._check_model_array_surfs():
                 self._visualize_target_surf()
             if self.geotherms == "sub":
-                if not self._check_model_depth_profile_images(slab_position="top"):
-                    self._visualize_depth_profiles(slab_position="top")
-                if not self._check_model_depth_profile_images(slab_position="moho"):
-                    self._visualize_depth_profiles(slab_position="moho")
-                if not self._check_model_geotherm_assemblages_images(slab_position="top"):
-                    self._visualize_geotherm_assemblages(slab_position="top")
-                if not self._check_model_geotherm_assemblages_images(slab_position="moho"):
-                    self._visualize_geotherm_assemblages(slab_position="moho")
+                if not self._check_model_depth_profile_images(slab_position="slabtop"):
+                    self._visualize_depth_profiles(slab_position="slabtop")
+                if not self._check_model_depth_profile_images(slab_position="slabmoho"):
+                    self._visualize_depth_profiles(slab_position="slabmoho")
+                if not self._check_model_gt_assemblages_images(slab_position="slabtop"):
+                    self._visualize_geotherm_assemblages(slab_position="slabtop")
+                if not self._check_model_gt_assemblages_images(slab_position="slabmoho"):
+                    self._visualize_geotherm_assemblages(slab_position="slabmoho")
             elif self.geotherms == "mantle":
                 if not self._check_model_depth_profile_images():
                     self._visualize_depth_profiles()
-                if not self._check_model_geotherm_assemblages_images():
+                if not self._check_model_gt_assemblages_images():
                     self._visualize_geotherm_assemblages()
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -3211,7 +3252,7 @@ def visualize_depth_profiles_comps(gfem_models, figwidth=6.3, figheight=5.5, fon
                 target, Qs=55e-3, A1=1e-6, k1=2.3, litho_thickness=150)
 
             # Create colorbar
-            pal = sns.color_palette("magma", as_cmap=True).reversed()
+            pal = plt.get_cmap("magma_r")
             norm = plt.Normalize(df_synth_bench[XI_col].min(), df_synth_bench[XI_col].max())
             sm = plt.cm.ScalarMappable(cmap="magma_r", norm=norm)
             sm.set_array([])
