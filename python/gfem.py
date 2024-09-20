@@ -97,7 +97,8 @@ class GFEMModel:
             self.T_melt = 273
 
         # Include fluid in computation of rock properties
-        self.include_fluid = "N"
+        self.fluid_properties = "N"
+        self.fluid_assemblages = "Y"
 
         # Treat melts as fluids ? (T: rock properties exclude melt fraction)
         self.melt_is_fluid = "T"
@@ -786,15 +787,16 @@ class GFEMModel:
         data_dir = self.data_dir
         geotherms = self.geotherms
         perplex_db = self.perplex_db
-        include_fluid = self.include_fluid
         melt_is_fluid = self.melt_is_fluid
         model_out_dir = self.model_out_dir
         T_min, T_max = self.T_min, self.T_max
         sl_include = "\n".join(self.sl_include)
         em_exclude = "\n".join(self.em_exclude)
+        P_min, P_max = self.P_min * 1e4, self.P_max * 1e4
         norm_sample_comp = self._get_normalized_sample_comp()
         norm_sample_comp = " ".join(map(str, norm_sample_comp))
-        P_min, P_max = self.P_min * 1e4, self.P_max * 1e4
+        fluid_properties = self.fluid_properties
+        fluid_assemblages = self.fluid_assemblages
 
         # Build options
         # https://www.perplex.ethz.ch/perplex_options.html
@@ -900,19 +902,19 @@ class GFEMModel:
                  f"2\n"               # Operational mode (2: properties on 2D grid)
                  f"2\n"               # Select a property (2: Density kg/m3)
                  f"N\n"               # Calculate individual phase properties ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"13\n"              # Select a property (13: P-wave velocity m/s)
                  f"N\n"               # Calculate individual phase properties ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"14\n"              # Select a property (14: P-wave velocity m/s)
                  f"N\n"               # Calculate individual phase properties ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"24\n"              # Select a property (24: Assemblage index)
                  f"7\n"               # Select a property (7: Mode % of phase)
                  f"{melt_mod}\n"      # Enter solution or compound
                  f"6\n"               # Select a property (6: Composition of system)
                  f"1\n"               # Enter a component (1: H2O)
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"0\n"               # Zero to finish
                  f"N\n"               # Change default variable range ?
                  f"\n"                # Select the grid resolution (enter to continue)
@@ -965,19 +967,19 @@ class GFEMModel:
                  f"2\n"               # Operational mode (2: properties on 2D grid)
                  f"2\n"               # Select a property (2: Density kg/m3)
                  f"N\n"               # Calculate individual phase properties ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"13\n"              # Select a property (13: P-wave velocity m/s)
                  f"N\n"               # Calculate individual phase properties ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"14\n"              # Select a property (14: P-wave velocity m/s)
                  f"N\n"               # Calculate individual phase properties ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"24\n"              # Select a property (24: Assemblage index)
                  f"7\n"               # Select a property (7: Mode % of phase)
                  f"{melt_mod}\n"      # Enter solution or compound
                  f"6\n"               # Select a property (6: Composition of system)
                  f"1\n"               # Enter a component (1: H2O)
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_properties}\n" # Include fluid in computation of properties ?
                  f"0\n"               # Zero to finish
                  f"N\n"               # Change default variable range ?
                  f"\n"                # Select the grid resolution (enter to continue)
@@ -1089,7 +1091,7 @@ class GFEMModel:
                  f"2\n"               # Operational mode (2: properties on 2D grid)
                  f"25\n"              # Select a property (25: Modes of all phases)
                  f"N\n"               # Output cumulative modes ?
-                 f"{include_fluid}\n" # Include fluid in computation of properties ?
+                 f"{fluid_assemblages}\n" # Include fluid in computation of properties ?
                  f"N\n"               # Change default variable range ?
                  f"\n"                # Select grid resolution (enter to continue)
                  f"0\n"               # Zero to exit
@@ -1105,7 +1107,7 @@ class GFEMModel:
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
-                             f"{include_fluid}\n"  # Include fluid in computation ?
+                             f"{fluid_assemblages}\n"  # Include fluid in computation ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_top.append(g)
@@ -1117,7 +1119,7 @@ class GFEMModel:
                              f"1\n"                # How many nth points to plot ?
                              f"25\n"               # Select a property (25: Modes of all)
                              f"N\n"                # Output cumulative modes ?
-                             f"{include_fluid}\n"  # Include fluid in computation ?
+                             f"{fluid_assemblages}\n"  # Include fluid in computation ?
                              f"0\n"                # Zero to exit
                              )
                         werami_geotherms_moho.append(g)
@@ -1131,7 +1133,7 @@ class GFEMModel:
                              f"1\n"              # How many nth points to plot ?
                              f"25\n"             # Select a property (25: Modes of all)
                              f"N\n"              # Output cumulative modes ?
-                             f"{include_fluid}\n"# Include fluid in computation ?
+                             f"{fluid_assemblages}\n"# Include fluid in computation ?
                              f"0\n"              # Zero to exit
                              )
                         werami_geotherms_craton.append(g)
@@ -1145,7 +1147,7 @@ class GFEMModel:
                              f"1\n"              # How many nth points to plot ?
                              f"25\n"             # Select a property (25: Modes of all)
                              f"N\n"              # Output cumulative modes ?
-                             f"{include_fluid}\n"# Include fluid in computation ?
+                             f"{fluid_assemblages}\n"# Include fluid in computation ?
                              f"0\n"              # Zero to exit
                              )
                         werami_geotherms_mor.append(g)
@@ -2964,16 +2966,7 @@ class GFEMModel:
                 else:
                     self.model_build_error = True
                     self.model_error = e
-
                     return None
-        try:
-            self.visualize_model()
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in build_model() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
 
         return None
 
@@ -3524,8 +3517,9 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp602", res=128,
         raise Exception(f"Source {source} does not exist!")
 
     models = []
+    smpwrp = textwrap.fill(", ".join(sampleids), width=80, subsequent_indent="  ")
     print(f"Building GFEM models for {len(sampleids)} samples:")
-    print(sampleids)
+    print(f"  {smpwrp}")
 
     # Define number of processors
     if nprocs is None or nprocs > os.cpu_count():
@@ -3589,15 +3583,20 @@ def main():
     """
     """
     try:
-        # Build GFEM models
         gfems = {}
         sources = {"b": "assets/bench-pca.csv",
                    "m": "assets/synth-mids.csv",
                    "r": "assets/synth-rnds.csv"}
 
+        # Build GFEM models
         for name, source in sources.items():
             sids = get_sampleids(source)
             gfems[name] = build_gfem_models(source, sids, res=64)
+
+        # Visualize models
+        for name, models in gfems.items():
+            for m in models:
+                m.visualize_model()
 
         # Compose plots
         for name, models in gfems.items():

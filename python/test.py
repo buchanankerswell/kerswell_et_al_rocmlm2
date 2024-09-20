@@ -15,40 +15,51 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Testing gfem models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    res, source, samp = 64, "assets/synth-mids.csv", "sm005-loi005"
+    res, src, samp, gts = 32, "assets/synth-mids.csv", "sm005-loi005", "mor"
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # HP models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gts, P_min, P_max, T_min, T_max = "mor", 0.1, 8.1, 273, 1973
-    model_shallow = GFEMModel("hp02", samp, source, res, P_min, P_max, T_min, T_max, gts)
-    model_shallow.build_model()
-
-    model_shallow = GFEMModel("hp11", samp, source, res, P_min, P_max, T_min, T_max, gts)
-    model_shallow.build_model()
-
-    model_shallow = GFEMModel("hp622", samp, source, res, P_min, P_max, T_min, T_max, gts)
-    model_shallow.build_model()
-
-    model_shallow = GFEMModel("hp633", samp, source, res, P_min, P_max, T_min, T_max, gts)
-    model_shallow.build_model()
-
+#    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+#    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max, gts)
+#    model_shallow.build_model()
+#
+#    model_shallow = GFEMModel("hp11", samp, src, res, P_min, P_max, T_min, T_max, gts)
+#    model_shallow.build_model()
+#
+#    model_shallow = GFEMModel("hp622", samp, src, res, P_min, P_max, T_min, T_max, gts)
+#    model_shallow.build_model()
+#
+#    model_shallow = GFEMModel("hp633", samp, src, res, P_min, P_max, T_min, T_max, gts)
+#    model_shallow.build_model()
+#
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # STX models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gts, P_min, P_max, T_min, T_max = "mor", 8.1, 136.1, 773, 4273
-    model_deep = GFEMModel("stx21", samp, source, res, P_min, P_max, T_min, T_max, gts)
-    model_deep.build_model()
+#    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
+#    model_deep = GFEMModel("stx21", samp, src, res, P_min, P_max, T_min, T_max, gts)
+#    model_deep.build_model()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Build GFEM models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#    sids = get_sampleids(source)
-#    db, geotherms, P_min, P_max, T_min, T_max = "stx21", "mantle", 8.1, 136.1, 773, 4273
-#    db, geotherms, P_min, P_max, T_min, T_max = "hp02", "sub", 0.1, 8.1, 273, 1973
-#    db, geotherms, P_min, P_max, T_min, T_max = "hp11", "sub", 0.1, 8.1, 273, 1973
-#    db, geotherms, P_min, P_max, T_min, T_max = "hp622", "sub", 0.1, 8.1, 273, 1973
-#    db, geotherms, P_min, P_max, T_min, T_max = "hp633", "sub", 0.1, 8.1, 273, 1973
-#    gfems = build_gfem_models(source, sids, db, res, P_min, P_max, T_min, T_max, geotherms)
+    gfems = []
+    sids = get_sampleids(src)
+    sids = [s for s in sids if "loi005" in s]
+
+    # stx models
+    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
+    gfems.extend(build_gfem_models(src, sids, "stx21", res, P_min, P_max, T_min, T_max, gts))
+
+    # hp models
+    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+    gfems.extend(build_gfem_models(src, sids, "hp02", res, P_min, P_max, T_min, T_max, gts))
+    gfems.extend(build_gfem_models(src, sids, "hp11", res, P_min, P_max, T_min, T_max, gts))
+    gfems.extend(build_gfem_models(src, sids, "hp622", res, P_min, P_max, T_min, T_max, gts))
+    gfems.extend(build_gfem_models(src, sids, "hp633", res, P_min, P_max, T_min, T_max, gts))
+
+    # visualize models
+    for m in gfems:
+        m.visualize_model()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Visualize training dataset design
