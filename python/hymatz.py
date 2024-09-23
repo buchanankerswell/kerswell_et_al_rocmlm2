@@ -28,15 +28,13 @@ sys.path.insert(0, hymatz_dir)
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 from HyMaTZ.GUI_cal_MP import Phase_diagram
 from HyMaTZ.Mineral_Physics.Velocity_calculator import Velocity_calculator
-from HyMaTZ.Mineral_Physics.Stix2011data import (ab, an, sp, hc, fo, fa, mgwa, fewa, mgri,
-                                                 feri, en, fs, mgts, odi, di, he, cen, cats,
-                                                 jd, hpcen, hpcfs, mgpv, fepv, alpv, capv,
-                                                 mgil, feil, co, py, al, gr, mgmj, jdmj, qtz,
-                                                 coes, st, mppv, fppv, appv, pe, wu, mgcf,
-                                                 fecf, nacf, ky, neph, OL_, WA_, RI_)
-from HyMaTZ.Mineral_Physics.Solidsolution import (c2c, CF, Cpx, Gt, Aki, Wus, O, Opx, Pl, Ppv,
-                                                  ppv, Pv, Ring, Sp, Wad, OLwater, WAwater,
-                                                  RIwater)
+from HyMaTZ.Mineral_Physics.Stix2011data import (
+    ab, an, sp, hc, fo, fa, mgwa, fewa, mgri, feri, en, fs, mgts, odi, di, he, cen, cats,
+    jd, hpcen, hpcfs, mgpv, fepv, alpv, capv, mgil, feil, co, py, al, gr, mgmj, jdmj, qtz,
+    coes, st, mppv, fppv, appv, pe, wu, mgcf, fecf, nacf, ky, neph, OL_, WA_, RI_)
+from HyMaTZ.Mineral_Physics.Solidsolution import (
+    c2c, CF, Cpx, Gt, Aki, Wus, O, Opx, Pl, Ppv, ppv, Pv, Ring, Sp, Wad, OLwater, WAwater,
+    RIwater)
 
 #######################################################
 ## .1.          HyMaTZ Regression class          !!! ##

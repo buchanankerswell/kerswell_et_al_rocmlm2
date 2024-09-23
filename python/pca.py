@@ -436,7 +436,6 @@ class MixingArray:
         data = self._convert_to_fe2o3t(data)
 
         # Normalize to volatile free basis
-#        self.max_loi = data["LOI"].max()
         data = self._normalize_volatile_free(data)
 
         # Convert all Fe oxides to FEOT
