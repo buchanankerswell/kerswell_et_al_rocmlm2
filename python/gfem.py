@@ -17,8 +17,9 @@ import numpy as np
 import pandas as pd
 from hymatz import HyMaTZ
 import multiprocessing as mp
-from scipy.interpolate import griddata
 from contextlib import redirect_stdout
+from scipy.interpolate import griddata
+from scipy.interpolate import LinearNDInterpolator
 np.set_printoptions(precision=3, suppress=True)
 from sklearn.metrics import r2_score, mean_squared_error
 
@@ -67,8 +68,8 @@ class GFEMModel:
         # Define features and targets (see werami_output_map for list of targets)
         self.features = ["XI_FRAC", "LOI"]
         self.targets = ["density", "Vp", "Vs", "melt_fraction", "H2O", "molar_entropy",
-                        "molar_heat_capacity", "phase_assemblage", "assemblage_index",
-                        "phase_assemblage_variance"]
+                        "molar_volume", "molar_heat_capacity", "phase_assemblage",
+                        "assemblage_index", "phase_assemblage_variance"]
 
         # Check perplex db
         if perplex_db not in ["hp02", "hp11", "hp622", "hp633", "stx21"]:
@@ -871,8 +872,7 @@ class GFEMModel:
                     if T_geotherm[j] >= potential_temp:
                         T_geotherm[j] = potential_temp
 
-            P_geotherm = np.round(z / litho_P_gradient, 1)
-            T_geotherm = np.round(T_geotherm, 2)
+            P_geotherm = z / litho_P_gradient
 
             geotherm = pd.DataFrame(
                 {"P": P_geotherm, "T": T_geotherm}).sort_values(by=["P", "T"])
@@ -934,8 +934,11 @@ class GFEMModel:
             geo_P, geo_T = geotherm["P"], geotherm["T"]
             geo_points = np.array([geo_T, geo_P]).T
 
-            # Interpolate target along geotherm
-            target_interp = griddata(gfem_points, target_vals, geo_points, method="cubic")
+            # Create interpolator
+            interpolator = LinearNDInterpolator(gfem_points, target_vals)
+
+            # Interpolate target values at the geotherm PT points
+            target_interp = interpolator(geo_points)
 
             # Save in dataframe
             df = pd.DataFrame({"P": geo_P, "T": geo_T, target: target_interp})
@@ -2161,7 +2164,7 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # check model array images !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_model_array_images(self, gradient=False):
+    def _check_model_array_images(self, type="sub", gradient=False):
         """
         """
         # Get model data
@@ -2169,8 +2172,11 @@ class GFEMModel:
         targets = self.targets
         fig_dir = self.fig_dir
         perplex_db = self.perplex_db
-        targets_exclude = ["phase_assemblage", "assemblage_index",
-                           "phase_assemblage_variance"]
+        if gradient:
+            targets_exclude = ["phase_assemblage", "assemblage_index",
+                               "phase_assemblage_variance"]
+        else:
+            targets_exclude = ["phase_assemblage"]
 
         # Filter targets
         idx = [i for i, t in enumerate(targets) if t not in targets_exclude]
@@ -2180,9 +2186,11 @@ class GFEMModel:
         existing_figs = []
         for i, target in enumerate(targets):
             if gradient:
-                path = f"{fig_dir}/{sid}-{target}-grad-{perplex_db}.png"
+                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-grad-{perplex_db}-"
+                        f"{type}.png")
             else:
-                path = f"{fig_dir}/{sid}-{target}-{perplex_db}.png"
+                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-{perplex_db}-"
+                        f"{type}.png")
 
             check = os.path.exists(path)
 
@@ -2205,8 +2213,7 @@ class GFEMModel:
         targets = self.targets
         fig_dir = self.fig_dir
         perplex_db = self.perplex_db
-        targets_exclude = ["phase_assemblage", "assemblage_index",
-                           "phase_assemblage_variance"]
+        targets_exclude = ["phase_assemblage"]
 
         # Filter targets
         idx = [i for i, t in enumerate(targets) if t not in targets_exclude]
@@ -2215,7 +2222,7 @@ class GFEMModel:
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            path = f"{fig_dir}/{sid}-{target}-surf-{perplex_db}.png"
+            path = f"{fig_dir}/{sid}-{target.replace("_", "-")}-surf-{perplex_db}.png"
 
             check = os.path.exists(path)
 
@@ -2250,27 +2257,29 @@ class GFEMModel:
         existing_figs = []
         for i, target in enumerate(targets):
             if P_min < 6:
-                path = (f"{fig_dir}/{sid}-{target}-depth-profile-sub-slabtop-"
-                        f"{perplex_db}.png")
+                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
+                        f"sub-slabtop-{perplex_db}.png")
                 check = os.path.exists(path)
 
                 if check:
                     existing_figs.append(check)
 
-                path = (f"{fig_dir}/{sid}-{target}-depth-profile-sub-slabmoho-"
-                        f"{perplex_db}.png")
+                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
+                        f"sub-slabmoho-{perplex_db}.png")
                 check = os.path.exists(path)
 
                 if check:
                     existing_figs.append(check)
 
-            path = f"{fig_dir}/{sid}-{target}-depth-profile-craton-{perplex_db}.png"
+            path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
+                    f"craton-{perplex_db}.png")
             check = os.path.exists(path)
 
             if check:
                 existing_figs.append(check)
 
-            path = f"{fig_dir}/{sid}-{target}-depth-profile-mor-{perplex_db}.png"
+            path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
+                    f"mor-{perplex_db}.png")
             check = os.path.exists(path)
 
             if check:
@@ -2434,7 +2443,7 @@ class GFEMModel:
             target_label = target_labels_map[target]
 
             # Set filename
-            filename = f"{sid}-{target.replace("_", "-")}-{perplex_db}.png"
+            filename = f"{sid}-{target.replace("_", "-")}-{perplex_db}-{type}.png"
             if target not in ["assemblage_index", "phase_assemblage_variance"]:
                 title = f"{target_label} ({target_units_map[target]})"
             else:
@@ -2461,7 +2470,7 @@ class GFEMModel:
                 else:
                     square_target = np.full_like(edges_x, np.nan)
 
-                filename = f"{sid}-{target.replace("_", "-")}-grad-{perplex_db}.png"
+                filename = f"{sid}-{target.replace("_", "-")}-grad-{perplex_db}-{type}.png"
                 title = f"{target_label} Gradient"
 
             # Use discrete colorscale
@@ -3334,13 +3343,17 @@ class GFEMModel:
                 self._get_results()
                 self._get_target_array()
                 self._get_pt_array()
-            if not self._check_model_array_images(gradient=False):
+            if not self._check_model_array_images(type="mor", gradient=False):
                 self._visualize_array_image(type="mor", gradient=False)
+            if not self._check_model_array_images(type="sub", gradient=False):
                 self._visualize_array_image(type="sub", gradient=False)
+            if not self._check_model_array_images(type="craton", gradient=False):
                 self._visualize_array_image(type="craton", gradient=False)
-            if not self._check_model_array_images(gradient=True):
+            if not self._check_model_array_images(type="mor", gradient=True):
                 self._visualize_array_image(type="mor", gradient=True)
+            if not self._check_model_array_images(type="sub", gradient=True):
                 self._visualize_array_image(type="sub", gradient=True)
+            if not self._check_model_array_images(type="craton", gradient=True):
                 self._visualize_array_image(type="craton", gradient=True)
             if not self._check_model_array_surfs():
                 self._visualize_target_surf()
