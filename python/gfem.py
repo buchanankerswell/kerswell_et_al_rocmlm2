@@ -42,19 +42,21 @@ class GFEMModel:
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, perplex_db, sid, source, res=128, P_min=1, P_max=28, T_min=773,
-                 T_max=2273, seed=42, verbose=1):
+                 T_max=2273, verbose=1):
         """
         """
         # Input
         self.res = res
         self.sid = sid
-        self.seed = seed
         self.P_min = P_min
         self.P_max = P_max
         self.T_min = T_min
         self.T_max = T_max
         self.source = source
         self.verbose = verbose
+
+        # Random seed
+        self.seed = 42
 
         # Sigfigs
         self.digits = 3

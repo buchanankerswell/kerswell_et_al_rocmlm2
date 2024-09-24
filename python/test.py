@@ -1,10 +1,11 @@
 import os
 import numpy as np
 import pandas as pd
-from gfem import GFEMModel, get_sampleids, build_gfem_models
+from rocmlm import RocMLM
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from gfem import GFEMModel, get_sampleids, build_gfem_models
 
 def main():
     """
@@ -15,37 +16,48 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Testing gfem models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    res, src, samp, gts = 128, "assets/synth-mids.csv", "sm005-loi005", "mor"
-
-    # hp model
-    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max, gts)
-    model_shallow.build_model()
-    model_shallow.visualize_model()
-
-    # stx model
-    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
-    model_deep = GFEMModel("stx21", samp, src, res, P_min, P_max, T_min, T_max, gts)
-    model_deep.build_model()
-    model_deep.visualize_model()
+#    res, src, samp = 128, "assets/synth-mids.csv", "sm005-loi005"
+#
+#    # hp model
+#    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+#    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
+#    model_shallow.build_model()
+#    model_shallow.visualize_model()
+#
+#    # stx model
+#    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
+#    model_deep = GFEMModel("stx21", samp, src, res, P_min, P_max, T_min, T_max)
+#    model_deep.build_model()
+#    model_deep.visualize_model()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Build GFEM models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#    gfems = []
-#    sids = get_sampleids(src)
-#
+    res, src = 32, "assets/synth-mids.csv"
+    sids = get_sampleids(src)
+
 #    # stx models
 #    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
-#    gfems.extend(build_gfem_models(src, sids, "stx21", res, P_min, P_max, T_min, T_max, gts))
-#
-#    # hp models
-#    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-#    gfems.extend(build_gfem_models(src, sids, "hp02", res, P_min, P_max, T_min, T_max, gts))
+#    gfems = build_gfem_models(src, sids, "stx21", res, P_min, P_max, T_min, T_max)
 #
 #    # visualize models
 #    for m in gfems:
 #        m.visualize_model()
+
+    # hp models
+    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+    gfems = build_gfem_models(src, sids[::8], "hp02", res, P_min, P_max, T_min, T_max)
+
+#    # visualize models
+#    for m in gfems:
+#        m.visualize_model()
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Train RocMLMs
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    model = RocMLM(gfems)
+    model.train_rocmlm()
+    model.visualize_rocmlm()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Visualize training dataset design

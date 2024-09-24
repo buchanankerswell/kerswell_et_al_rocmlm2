@@ -5,10 +5,12 @@
 # utilities !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import os
+import re
 import glob
 import time
 import joblib
 import warnings
+import textwrap
 import traceback
 import numpy as np
 import pandas as pd
@@ -50,49 +52,44 @@ class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # init !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, gfem_models, ml_model, X_step=1, PT_step=1,
-                 training_features=["XI_FRAC", "LOI"],
-                 training_targets=["rho", "Vp", "Vs", "h2o", "melt"],
-                 tune=True, epochs=int(1e2), batchprop=0.2, kfolds=5,
-                 nprocs=os.cpu_count() - 2, seed=42, verbose=1):
+    def __init__(self, gfem_models, ml_algo="DT", verbose=1):
         """
         """
         # Input
-        self.seed = seed
-        self.tune = tune
-        self.epochs = epochs
-        self.kfolds = kfolds
-        self.X_step = X_step
-        self.PT_step = PT_step
         self.verbose = verbose
-        self.batchprop = batchprop
+        self.ml_algo = ml_algo
         self.gfem_models = gfem_models
-        self.training_targets = training_targets
-        self.training_features = training_features
+
+        # Random seed
+        self.seed = 42
+
+        # ML options
+        self.kfolds = 5
+        self.tune = True
+        self.nn_L1 = int(8)
+        self.nn_L2 = int(16)
+        self.nn_L3 = int(32)
+        self.batchprop = 0.2
+        self.epochs = int(1e3)
+        self.rocmlm_features = ["XI_FRAC", "LOI"]
+        self.rocmlm_targets = ["density", "Vp", "Vs", "H2O", "melt_fraction",
+                               "molar_entropy", "molar_heat_capacity"]
 
         # Parallel processing
-        if nprocs is None or nprocs > os.cpu_count():
-            self.nprocs = os.cpu_count()
-        else:
-            self.nprocs = nprocs
+        self.nprocs = os.cpu_count() - 2
 
         # Model labels
-        if ml_model == "KN":
-            ml_model_label_full = "K Neighbors"
-        elif ml_model == "RF":
-            ml_model_label_full = "Random Forest"
-        elif ml_model == "DT":
-            ml_model_label_full = "Decision Tree"
-        elif ml_model == "NN1":
-            ml_model_label_full = "Neural Net 1L"
-        elif ml_model == "NN2":
-            ml_model_label_full = "Neural Net 2L"
-        elif ml_model == "NN3":
-            ml_model_label_full = "Neural Net 3L"
-        self.ml_model_label = ml_model
-        self.ml_model_label_full = ml_model_label_full
+        self.ml_label_map = {
+            "KN": "K Neighbors",
+            "RF": "Random Forest",
+            "DT": "Decision Tree",
+            "NN1": "Neural Net 1L",
+            "NN2": "Neural Net 2L",
+            "NN3": "Neural Net 3L"
+        }
+        self.ml_algo_label = self.ml_label_map[ml_algo]
 
-        # Feature and target arrays
+        # GFEM model metadata
         self.sids = []
         self.res = None
         self.P_min = None
@@ -101,47 +98,38 @@ class RocMLM:
         self.T_max = None
         self.targets = None
         self.features = None
-        self.geothresh = None
-        self.target_units = None
         self.shape_target = None
         self.target_train = None
         self.feature_train = None
         self.shape_feature = None
+        self.target_units_map = None
         self.shape_target_square = None
         self.shape_feature_square = None
 
-        # Get gfem model metadata
+        # Get GFEM model metadata
         self._get_gfem_model_metadata()
         self._process_training_data()
 
         # Output filepaths
         self.data_dir = "assets"
         self.model_out_dir = f"rocmlms"
-        if any(s in self.sids for s in ["PUM", "DMM", "PYR"]):
-            self.model_prefix = (f"benchmark-{self.ml_model_label}-"
-                                 f"S{self.shape_feature_square[0]}-"
-                                 f"W{self.shape_feature_square[1]}")
-            self.fig_dir = f"figs/rocmlm/benchmark_{self.ml_model_label}"
-        elif any("sm" in sample or "sr" in sample for sample in self.sids):
-            self.model_prefix = (f"synthetic-{self.ml_model_label}-"
-                                 f"S{self.shape_feature_square[0]}-"
-                                 f"W{self.shape_feature_square[1]}")
-            self.fig_dir = (f"figs/rocmlm/synthetic_{self.ml_model_label}")
+        self.model_prefix = (f"{self.ml_algo}-"
+                             f"S{self.shape_feature_square[0]}-"
+                             f"W{self.shape_feature_square[1]}-"
+                             f"F{self.shape_feature_square[2]}")
+        self.fig_dir = (f"figs/rocmlm/{self.model_prefix}")
         self.rocmlm_path = f"{self.model_out_dir}/{self.model_prefix}.pkl"
-        self.ml_model_only_path = f"{self.model_out_dir}/{self.model_prefix}-model-only.pkl"
-        self.ml_model_scaler_X_path = (f"{self.model_out_dir}/{self.model_prefix}-"
-                                       f"scaler_X.pkl")
-        self.ml_model_scaler_y_path = (f"{self.model_out_dir}/{self.model_prefix}-"
-                                       f"scaler_y.pkl")
+        self.rocmlm_only_path = f"{self.model_out_dir}/{self.model_prefix}-model-only.pkl"
+        self.scaler_X_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_X.pkl"
+        self.scaler_y_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_y.pkl"
 
         # Check for figs directory
         if not os.path.exists(self.fig_dir):
             os.makedirs(self.fig_dir, exist_ok=True)
 
         # ML model definition and tuning
-        self.ml_model = None
         self.ml_model_tuned = False
-        self.model_hyperparams = None
+        self.ml_model_hyperparams = None
 
         # Cross validation performance metrics
         self.cv_info = {}
@@ -153,11 +141,11 @@ class RocMLM:
         self.prediction_square = np.array([])
 
         # Trained model
-        self.ml_model_only = None
+        self.rocmlm = None
         self.ml_model_error = None
+        self.rocmlm_scaler_X = None
+        self.rocmlm_scaler_y = None
         self.ml_model_trained = False
-        self.ml_model_scaler_X = None
-        self.ml_model_scaler_y = None
         self.ml_model_training_error = False
 
         # Set np array printing option
@@ -178,17 +166,19 @@ class RocMLM:
         if os.path.exists(file_path):
             try:
                 print(f"  Loading RocMLM object from {file_path} ...")
-                rocmlm = joblib.load(file_path)
-                return rocmlm
+                model = joblib.load(file_path)
+                return model
             except Exception as e:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"!!! ERROR in load_pretrained_model() !!!")
                 print(f"{e}")
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 traceback.print_exc()
+                return None
         else:
             print(f"File {file_path} does not exist !")
-            return None
+
+        return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # print rocmlm info !!
@@ -199,27 +189,31 @@ class RocMLM:
         # Get self attributes
         kfolds = self.kfolds
         epochs = self.epochs
+        ml_algo = self.ml_algo
         feat_train = self.feature_train
         target_train = self.target_train
-        ml_model_label = self.ml_model_label
-        training_targets = self.training_targets
-        training_features = self.training_features
-        model_hyperparams = self.model_hyperparams
-        ml_model_label_full = self.ml_model_label_full
+        ml_algo_label = self.ml_algo_label
+        rocmlm_targets = self.rocmlm_targets
+        rocmlm_features = self.rocmlm_features
+        ml_model_hyperparams = self.ml_model_hyperparams
+
+        tgwrp = textwrap.fill(", ".join(rocmlm_targets), width=80,
+                              subsequent_indent="                  ")
+        ftwrp = textwrap.fill(", ".join(rocmlm_features), width=80)
 
         # Print rocmlm config
         print("+++++++++++++++++++++++++++++++++++++++++++++")
-        print("RocMLM model defined as:")
-        print(f"    model: {ml_model_label_full}")
-        if "NN" in ml_model_label:
+        print("  RocMLM model defined as:")
+        print(f"    model: {ml_algo_label}")
+        if "NN" in ml_algo:
             print(f"    epochs: {epochs}")
         print(f"    k folds: {kfolds}")
-        print(f"    features: {training_features}")
-        print(f"    targets: {training_targets}")
+        print(f"    features: {ftwrp}")
+        print(f"    targets: {tgwrp}")
         print(f"    features array shape: {feat_train.shape}")
         print(f"    targets array shape: {target_train.shape}")
         print(f"    hyperparameters:")
-        for key, value in model_hyperparams.items():
+        for key, value in ml_model_hyperparams.items():
             print(f"        {key}: {value}")
         print("+++++++++++++++++++++++++++++++++++++++++++++")
         print(f"Running ({kfolds}) kfold cross validation ...")
@@ -232,26 +226,30 @@ class RocMLM:
     def _check_existing_model(self):
         """
         """
+        # Get self attributes
+        verbose = self.verbose
+        rocmlm_path = self.rocmlm_path
+        model_out_dir = self.model_out_dir
+
         # Check for existing model build
-        if os.path.exists(self.model_out_dir):
-            if os.path.exists(self.rocmlm_path):
-                if self.verbose >= 1:
-                    print(f"Found pretrained model {self.rocmlm_path} !")
+        if os.path.exists(model_out_dir):
+            if os.path.exists(rocmlm_path):
+                if verbose >= 1:
+                    print(f"Found pretrained model {rocmlm_path} !")
                 try:
                     self.ml_model_trained = True
-                    rocmlm = joblib.load(self.rocmlm_path)
-                    rocmlm.visualize_model()
+                    model = joblib.load(rocmlm_path)
                 except Exception as e:
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     print(f"!!! ERROR in _check_existing_model() !!!")
                     print(f"{e}")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                     traceback.print_exc()
-                return None
+                    return None
             else:
-                os.makedirs(self.model_out_dir, exist_ok=True)
+                os.makedirs(model_out_dir, exist_ok=True)
         else:
-            os.makedirs(self.model_out_dir, exist_ok=True)
+            os.makedirs(model_out_dir, exist_ok=True)
 
         return None
 
@@ -261,10 +259,19 @@ class RocMLM:
     def _get_unique_value(self, input_list):
         """
         """
-        unique_value = input_list[0]
-        for item in input_list[1:]:
-            if item != unique_value:
-                raise ValueError("Not all values are the same !")
+        try:
+            unique_value = input_list[0]
+            for item in input_list[1:]:
+                if item != unique_value:
+                    raise Exception("Not all values are the same !")
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _get_unique_value() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
 
         return unique_value
 
@@ -277,11 +284,10 @@ class RocMLM:
         # Get self attributes
         gfem_models = self.gfem_models
 
-        # Check for gfem models
-        if not gfem_models:
-            raise Exception("No GFEM models to compile !")
-
         try:
+            if not gfem_models:
+                raise Exception("No GFEM models to compile !")
+
             # Get model metadata
             sids = [m.sid for m in gfem_models]
             res = self._get_unique_value([m.res for m in gfem_models])
@@ -289,15 +295,11 @@ class RocMLM:
             P_max = self._get_unique_value([m.P_max for m in gfem_models])
             T_min = self._get_unique_value([m.T_min for m in gfem_models])
             T_max = self._get_unique_value([m.T_max for m in gfem_models])
-            targets = self._get_unique_value([m.targets for m in gfem_models])
             ox_gfem = self._get_unique_value([m.ox_gfem for m in gfem_models])
-            fts_list = self._get_unique_value([m.features for m in gfem_models])
-            ox_exclude = self._get_unique_value([m.ox_exclude for m in gfem_models])
-            target_units = self._get_unique_value([m.target_units for m in gfem_models])
-
-            # Combine training features
-            subset_oxides = [oxide for oxide in ox_gfem if oxide not in ox_exclude]
-            features = subset_oxides + [ft for ft in fts_list if ft not in subset_oxides]
+            gfem_targets = self._get_unique_value([m.targets for m in gfem_models])
+            gfem_features = self._get_unique_value([m.features for m in gfem_models])
+            target_units_map = self._get_unique_value(
+                [m.target_units_map for m in gfem_models])
 
             # Update self attributes
             self.res = res
@@ -306,24 +308,9 @@ class RocMLM:
             self.P_max = P_max
             self.T_min = T_min
             self.T_max = T_max
-            self.targets = targets
-            self.features = features
-            self.target_units = target_units
-
-            # Set geotherm threshold for depth profiles
-            res_step = int(res / self.PT_step)
-            if res_step <= 8:
-                self.geothresh = 40
-            elif res_step <= 16:
-                self.geothresh = 20
-            elif res_step <= 32:
-                self.geothresh = 10
-            elif res_step <= 64:
-                self.geothresh = 5
-            elif res_step <= 128:
-                self.geothresh = 2.5
-            else:
-                self.geothresh = 1.25
+            self.gfem_targets = gfem_targets
+            self.gfem_features = gfem_features
+            self.target_units_map = target_units_map
 
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -331,6 +318,7 @@ class RocMLM:
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
+            return None
 
         return None
 
@@ -343,105 +331,70 @@ class RocMLM:
         # Get self attributes
         res = self.res
         sids = self.sids
-        X_step = self.X_step
-        PT_step = self.PT_step
-        targets = self.targets
-        features = self.features
         gfem_models = self.gfem_models
-        training_targets = self.training_targets
-        training_features = self.training_features
-
-        # Check for gfem models
-        if not gfem_models:
-            raise Exception("No GFEM models to compile !")
+        gfem_targets = self.gfem_targets
+        gfem_features = self.gfem_features
+        rocmlm_targets = self.rocmlm_targets
+        rocmlm_features = self.rocmlm_features
 
         try:
-            # Get all PT arrays
+            if not gfem_models:
+                raise Exception("No GFEM models to compile !")
+
+            # Get PT array (M, W, 2)
             pt_train = np.stack([m.pt_array for m in gfem_models])
 
-            # Select features
-            ft_ind = [features.index(ft) for ft in training_features if ft in features]
-            training_features = [features[i] for i in ft_ind]
+            # Get rocmlm training features (M, W, rocmlm f)
+            ft_idx = [gfem_features.index(f) for f in rocmlm_features if f in gfem_features]
+            rocmlm_features = [gfem_features[i] for i in ft_idx]
 
-            # Get sample features
             feat_train = []
-
             for m in gfem_models:
-                selected_features = [m.sample_features[i] for i in ft_ind]
+                selected_features = [m.sample_features[i] for i in ft_idx]
                 feat_train.append(selected_features)
 
             feat_train = np.array(feat_train)
 
-            # Tile features to match PT array shape
+            # Tile features to match PT array shape (M, W, rocmlm f)
             feat_train = np.tile(feat_train[:, np.newaxis, :], (1, pt_train.shape[1], 1))
 
-            # Combine features
+            # Combine PT and rocmlm training feature arrays (M, W, rocmlm f + 2)
             combined_train = np.concatenate((feat_train, pt_train), axis=2)
 
-            # Flatten features
+            # Flatten features (M * W, rocmlm f + 2)
             feature_train = combined_train.reshape(-1, combined_train.shape[-1])
 
-            # Define target indices
-            t_ind = [targets.index(t) for t in training_targets if t in targets]
-            training_targets = [targets[i] for i in t_ind]
+            # Get rocmlm training targets
+            t_idx = [gfem_targets.index(t) for t in rocmlm_targets if t in gfem_targets]
+            rocmlm_targets = [gfem_targets[i] for i in t_idx]
 
-            # Get target arrays
+            # Get target arrays (M, W, gfem T)
             target_train = np.stack([m.target_array for m in gfem_models])
 
-            # Flatten targets
+            # Flatten targets (M * W, gfem T)
             target_train = target_train.reshape(-1, target_train.shape[-1])
 
-            # Select training targets
-            target_train = target_train[:, t_ind]
+            # Select training targets (M * W, rocmlm T)
+            target_train = target_train[:, t_idx]
 
             # Define array shapes
-            M = int(len(gfem_models))
-            W = int((res + 1) ** 2)
-            w = int(np.sqrt(W))
-            F = int(len(training_features) + 2)
-            T = int(len(training_targets))
+            M = int(len(gfem_models))         # Number of samples
+            W = int((res + 1) ** 2)           # PT grid size
+            w = int(np.sqrt(W))               # P or T array size
+            f = int(len(rocmlm_features))     # Number of rocmlm features
+            F = int(f + 2)                    # Number of rocmlm features + PT
+            T = int(len(rocmlm_targets))      # Number of rocmlm targets
             shape_target = (M, W, T)
             shape_feature = (M, W, F)
             shape_target_square = (M, w, w, T)
             shape_feature_square = (M, w, w, F)
 
-            if not X_step and not PT_step:
-                self.shape_target = shape_target
-                self.target_train = target_train
-                self.shape_feature = shape_feature
-                self.feature_train = feature_train
-                self.shape_target_square = shape_target_square
-                self.shape_feature_square = shape_feature_square
-            else:
-                # Reshape arrays
-                new_feature_train = feature_train.reshape((shape_feature_square))
-                new_target_train = target_train.reshape((shape_target_square))
-
-                # Subset arrays
-                new_feature_train = new_feature_train[::X_step, ::PT_step, ::PT_step, :]
-                new_target_train = new_target_train[::X_step, ::PT_step, ::PT_step, :]
-
-                # Redefine array shapes
-                new_M = np.ceil((len(gfem_models) / X_step)).astype(int)
-                new_W = int(((res / PT_step) + 1) ** 2)
-                new_w = int(np.sqrt(new_W))
-                new_shape_target = (new_M, new_W, T)
-                new_shape_feature = (new_M, new_W, F)
-                new_shape_target_square = (new_M, new_w, new_w, T)
-                new_shape_feature_square = (new_M, new_w, new_w, F)
-
-                # Flatten arrays
-                new_feature_train = new_feature_train.reshape(
-                    -1, new_feature_train.shape[-1])
-                new_target_train = new_target_train.reshape(
-                    -1, new_target_train.shape[-1])
-
-                self.target_train = new_target_train
-                self.shape_target = new_shape_target
-                self.shape_feature = new_shape_feature
-                self.feature_train = new_feature_train
-                self.shape_target_square = new_shape_target_square
-                self.shape_feature_square = new_shape_feature_square
+            self.shape_target = shape_target
+            self.target_train = target_train
+            self.shape_feature = shape_feature
+            self.feature_train = feature_train
+            self.shape_target_square = shape_target_square
+            self.shape_feature_square = shape_feature_square
 
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -449,219 +402,9 @@ class RocMLM:
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
+            return None
 
         return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get 1d reference models !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_1d_reference_models(self):
-        """
-        """
-        # Get self attributes
-        data_dir = self.data_dir
-
-        # Check for data dir
-        if not os.path.exists(data_dir):
-            raise Exception(f"Data not found at {data_dir} !")
-
-        # Reference model paths
-        ref_paths = {"prem": f"{data_dir}/PREM_1s.csv", "stw105": f"{data_dir}/STW105.csv"}
-
-        # Define column headers
-        prem_cols = ["radius", "depth", "rho", "Vp", "Vph", "Vs", "Vsh", "eta", "Q_mu",
-                     "Q_kappa"]
-        stw105_cols = ["radius", "rho", "Vp", "Vs", "unk1", "unk2", "Vph", "Vsh", "eta"]
-
-        ref_cols = {"prem": prem_cols, "stw105": stw105_cols}
-        columns_to_keep = ["depth", "P", "rho", "Vp", "Vs"]
-
-        # Initialize reference models
-        ref_models = {}
-
-        # Load reference models
-        for name, path in ref_paths.items():
-            if not os.path.exists(path):
-                raise Exception(f"Refernce model {name} not found at {path} !")
-
-            # Read reference model
-            model = pd.read_csv(path, header=None, names=ref_cols[name])
-
-            # Transform units
-            if name == "stw105":
-                model["depth"] = (model["radius"].max() - model["radius"]) / 1e3
-                model["rho"] = model["rho"] / 1e3
-                model["Vp"] = model["Vp"] / 1e3
-                model["Vs"] = model["Vs"] / 1e3
-                model.sort_values(by=["depth"], inplace=True)
-
-            def calculate_pressure(row):
-                z = row["depth"]
-                depths = model[model["depth"] <= z]["depth"] * 1e3
-                rhos = model[model["depth"] <= z]["rho"] * 1e3
-                rho_integral = np.trapz(rhos, x=depths)
-                pressure = 9.81 * rho_integral / 1e9
-                return pressure
-
-            model["P"] = model.apply(calculate_pressure, axis=1)
-
-            # Clean up df
-            model = model[columns_to_keep]
-            model = model.round(3)
-
-            # Save model
-            ref_models[name] = model
-
-        # Invert STW105
-        ref_models["stw105"] = ref_models["stw105"].sort_values(by="depth", ascending=True)
-
-        return ref_models
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get 1d profile !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_1d_profile(self, target=None, results=None, mantle_potential=1573, Qs=250e-3,
-                        Ts=273, A1=2.2e-8, A2=2.2e-8, k1=3.0, k2=3.0, crust_thickness=35,
-                        litho_thickness=1):
-        """
-        """
-        # Get self attributes
-        res = self.res
-        P_min = self.P_min
-        P_max = self.P_max
-        T_min = self.T_min
-        T_max = self.T_max
-        geothresh = self.geothresh
-        ml_model_trained = self.ml_model_trained
-
-        # Check for model
-        if not ml_model_trained:
-            raise Exception("No RocMLM model! Call train_rocmlm() first ...")
-
-        # Define PT (target)
-        if not target:
-            P_array = np.linspace(P_min, P_max, res + 1)
-            T_array = np.linspace(T_min, T_max, res + 1)
-            P_grid, T_grid = np.meshgrid(P_array, T_array)
-            P, T = P_grid.flatten(), T_grid.flatten()
-            df = pd.DataFrame({"P": P, "T": T}).sort_values(by=["P", "T"])
-        else:
-            P = results["P"]
-            T = results["T"]
-            trg = results[target]
-            df = pd.DataFrame({"P": P, "T": T, target: trg}).sort_values(by=["P", "T"])
-
-        # Geotherm Parameters
-        Z_min = np.min(P) * 35e3
-        Z_max = np.max(P) * 35e3
-        z = np.linspace(Z_min, Z_max, len(P))
-        T_geotherm = np.zeros(len(P))
-
-        # Layer1 (crust)
-        # A1 Radiogenic heat production (W/m^3)
-        # k1 Thermal conductivity (W/mK)
-        D1 = crust_thickness * 1e3 # Thickness (m)
-
-        # Layer2 (lithospheric mantle)
-        # A2 Radiogenic heat production (W/m^3)
-        # k2 Thermal conductivity (W/mK)
-        D2 = litho_thickness * 1e3
-
-        # Calculate heat flow at the top of each layer
-        Qt2 = Qs - (A1 * D1)
-        Qt1 = Qs
-
-        # Calculate T at the top of each layer
-        Tt1 = Ts
-        Tt2 = Tt1 + (Qt1 * D1 / k1) - (A1 / 2 / k1 * D1**2)
-        Tt3 = Tt2 + (Qt2 * D2 / k2) - (A2 / 2 / k2 * D2**2)
-
-        # Calculate T within each layer
-        for j in range(len(P)):
-            potential_temp = mantle_potential + 0.5e-3 * z[j]
-            if z[j] <= D1:
-                T_geotherm[j] = Tt1 + (Qt1 / k1 * z[j]) - (A1 / (2 * k1) * z[j]**2)
-                if T_geotherm[j] >= potential_temp:
-                    T_geotherm[j] = potential_temp
-            elif D1 < z[j] <= D2 + D1:
-                T_geotherm[j] = Tt2 + (Qt2 / k2 * (z[j] - D1)) - (A2 / (2 * k2) *
-                                                                  (z[j] - D1)**2)
-                if T_geotherm[j] >= potential_temp:
-                    T_geotherm[j] = potential_temp
-            elif z[j] > D2 + D1:
-                T_geotherm[j] = Tt3 + 0.5e-3 * (z[j] - D1 - D2)
-                if T_geotherm[j] >= potential_temp:
-                    T_geotherm[j] = potential_temp
-
-        P_geotherm = np.round(z / 35e3, 1)
-        T_geotherm = np.round(T_geotherm, 2)
-
-        df["geotherm_P"] = P_geotherm
-        df["geotherm_T"] = T_geotherm
-
-        # Subset df along geotherm
-        df = df[abs(df["T"] - df["geotherm_T"]) < geothresh]
-
-        # Get PT values
-        P_values = np.nan_to_num(df["P"].values)
-        T_values = np.nan_to_num(df["T"].values)
-
-        # Get target values
-        if target:
-            targets = np.nan_to_num(df[target].values)
-            return P_values, T_values, targets
-        else:
-            return P_values, T_values
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # crop 1d profile !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _crop_1d_profile(self, P_gfem, target_gfem, P_ref, target_ref):
-        """
-        """
-        try:
-            # Initialize interpolators
-            interp_ref = interp1d(P_ref, target_ref, fill_value="extrapolate")
-
-            # Get min and max P
-            P_min, P_max = np.nanmin(P_gfem), np.nanmax(P_gfem)
-
-            # New x values for interpolation
-            x_new = np.linspace(P_min, P_max, len(P_gfem))
-
-            # Interpolate profile
-            P_ref, target_ref = x_new, interp_ref(x_new)
-
-            # Create cropping masks
-            mask_ref = (P_ref >= P_min) & (P_ref <= P_max)
-            mask_gfem = (P_gfem >= P_min) & (P_gfem <= P_max)
-
-            # Crop profiles
-            P_ref, target_ref = P_ref[mask_ref], target_ref[mask_ref]
-            P_gfem, target_gfem = P_gfem[mask_gfem], target_gfem[mask_gfem]
-
-            # Create nan and inf masks
-            mask = (np.isnan(target_gfem) | np.isnan(target_ref) |
-                    np.isinf(target_gfem) | np.isinf(target_ref))
-
-            # Remove nans and inf
-            P_ref, target_ref = P_ref[~mask], target_ref[~mask]
-            P_gfem, target_gfem = P_gfem[~mask], target_gfem[~mask]
-
-            # Calculate rmse and r2 along profiles
-            r2 = np.round(r2_score(target_ref, target_gfem), 3)
-            rmse = np.round(np.sqrt(mean_squared_error(target_ref, target_gfem)), 3)
-
-            return P_gfem, target_gfem, P_ref, target_ref, rmse, r2
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in crop_1d_profile() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-
-            return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # scale arrays !!
@@ -669,180 +412,47 @@ class RocMLM:
     def _scale_arrays(self, feature_array, target_array):
         """
         """
-        # Reshape the features and targets arrays
-        X = feature_array
-        y = target_array
+        try:
+            # Reshape the features and targets arrays
+            X = feature_array
+            y = target_array
 
-        # Replace inf with nan
-        X[~np.isfinite(X)] = np.nan
-        y[~np.isfinite(y)] = np.nan
+            # Replace inf with nan
+            X[~np.isfinite(X)] = np.nan
+            y[~np.isfinite(y)] = np.nan
 
-        # Create nan mask
-        mask = np.any(np.isnan(y), axis=1)
+            # Create nan mask
+            mask = np.any(np.isnan(y), axis=1)
 
-        # Remove nans
-#        X, y = X[~mask,:], y[~mask,:]
-        X, y = np.nan_to_num(X), np.nan_to_num(y)
+            # Remove nans
+            X, y = X[~mask,:], y[~mask,:]
+#            X, y = np.nan_to_num(X), np.nan_to_num(y)
 
-        # Check for infinity in input data
-        if not np.isfinite(X).all() or not np.isfinite(y).all():
-            raise ValueError("Input data contains NaN or infinity values.")
+            # Check for infinity in input data
+            if not np.isfinite(X).all() or not np.isfinite(y).all():
+                raise Exception("Input data contains NaN or infinity values !")
 
-        # Initialize scalers
-        scaler_X, scaler_y = StandardScaler(), StandardScaler()
+            # Initialize scalers
+            scaler_X, scaler_y = StandardScaler(), StandardScaler()
 
-        # Scale features array
-        X_scaled = scaler_X.fit_transform(X)
+            # Scale features array
+            X_scaled = scaler_X.fit_transform(X)
 
-        # Scale the target array
-        y_scaled = scaler_y.fit_transform(y)
+            # Scale the target array
+            y_scaled = scaler_y.fit_transform(y)
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _scale_arrays() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None, None, None, None, None, None
 
         return X, y, scaler_X, scaler_y, X_scaled, y_scaled
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .1.2.             Lookup Tables               !!! ++
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # append to lut csv !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _append_to_lut_csv(self, data_dict):
-        """
-        """
-        # CSV filepath
-        filepath = f"assets/lut-efficiency.csv"
-
-        # Check if the CSV file already exists
-        if not pd.io.common.file_exists(filepath):
-            df = pd.DataFrame(data_dict)
-
-        else:
-            df = pd.read_csv(filepath)
-
-            # Append the new data dictionary to the DataFrame
-            new_data = pd.DataFrame(data_dict)
-
-            df = pd.concat([df, new_data], ignore_index=True)
-
-        # Sort df
-        df = df.sort_values(by=["sample", "size"])
-
-        # Save the updated DataFrame back to the CSV file
-        df.to_csv(filepath, index=False)
-
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # evaluate lut performance !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _evaluate_lut_performance(self):
-        """
-        """
-        # Get self attributes
-        sids = self.sids
-        X_step = self.X_step
-        PT_step = self.PT_step
-        gfem_models = self.gfem_models
-        target_train = self.target_train
-
-        # Check benchmark models
-        if any(s in sids for s in ["PUM", "DMM", "PYR"]):
-            return None
-
-        # Check for gfem models
-        if not gfem_models:
-            raise Exception("No GFEM models to compile !")
-
-        try:
-            # Get feature (PTX) arrays
-            P = np.unique(gfem_models[0].feature_array[:, 0])
-            T = np.unique(gfem_models[0].feature_array[:, 1])
-            X = np.array([m.fertility_index for m in gfem_models])
-
-            # Make X increase monotonically
-            X = np.linspace(np.min(X), np.max(X), X.shape[0])
-
-            # Get central PTX points
-            P_point = (np.max(P) - np.min(P)) / 2
-            T_point = (np.max(T) - np.min(T)) / 2
-            X_point = (np.max(X) - np.min(X)) / 2
-
-            # Get target arrays
-            target_train = np.stack([m.target_array for m in gfem_models])
-
-            # Initialize df columns
-            sample, model_label, size, eval_time, model_size_mb = [], [], [], [], []
-
-            # Subset grid
-            P_sub = P[::PT_step]
-            T_sub = T[::PT_step]
-            X_sub = X[::X_step]
-
-            # Initialize eval times
-            eval_times = []
-
-            # Clock evaluation time for each target
-            for i in range(target_train.shape[-1] - 1):
-                # Select a single target array
-                Z = target_train[:, :, i]
-
-                # Reshape into 3d rectilinear grid
-                Z = np.reshape(Z, (X.shape[0], P.shape[0], T.shape[0]))
-
-                # Subset grid
-                Z_sub = Z[::X_step, ::PT_step, ::PT_step]
-
-                # Handle nans
-                Z_sub = np.nan_to_num(Z_sub)
-
-                # Initialize interpolator
-                I = RegularGridInterpolator((X_sub, P_sub, T_sub), Z_sub, method="cubic",
-                                            bounds_error=False)
-
-                # Time lookup table evaluation at central PT point
-                start_time = time.time()
-                point_eval = I(np.array([X_point, P_point, T_point]))
-                end_time = time.time()
-
-                # Calculate evaluation time
-                elapsed_time = (end_time - start_time)
-
-                # Save elapsed time
-                eval_times.append(elapsed_time)
-
-            # Store df info
-            sample.append(f"SYNTH{X_sub.shape[0]}")
-
-            model_label.append("lut")
-            size.append((P_sub.shape[0] - 1) ** 2)
-            eval_time.append(round(sum(eval_times), 5))
-
-            # Save ml model only
-            lut_path = f"rocmlms/lut-S{X_sub.shape[0]}-W{P_sub.shape[0]}.pkl"
-            with open(lut_path, "wb") as file:
-                joblib.dump(I, file)
-
-            # Add lut model size (Mb)
-            model_size = os.path.getsize(lut_path) * (target_train.shape[-1] - 1)
-            model_size_mb.append(round(model_size / (1024 ** 2), 5))
-
-            # Create df
-            evals = {"sample": sample, "model": model_label, "size": size,
-                     "time": eval_time, "model_size_mb": model_size_mb}
-
-            # Write csv
-            self._append_to_lut_csv(evals)
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _evaluate_lut_performance() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-
-        return None
-
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .1.3.               RocMLMs                   !!! ++
+    #+ .1.2.               RocMLMs                   !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # configure rocmlm !!
@@ -853,295 +463,284 @@ class RocMLM:
         # Get self attributes
         tune = self.tune
         seed = self.seed
+        nn_L1 = self.nn_L1
+        nn_L2 = self.nn_L2
+        nn_L3 = self.nn_L3
         epochs = self.epochs
         nprocs = self.nprocs
         verbose = self.verbose
+        ml_algo = self.ml_algo
         batchprop = self.batchprop
         model_prefix = self.model_prefix
         target_train = self.target_train
-        model_label = self.ml_model_label
         feature_train = self.feature_train
 
-        # Check for training features
-        if feature_train.size == 0:
-            raise Exception("No training features !")
+        try:
+            if feature_train.size == 0:
+                raise Exception("No training features !")
 
-        # Check for training targets
-        if target_train.size == 0:
-            raise Exception("No training targets !")
+            if target_train.size == 0:
+                raise Exception("No training targets !")
 
-        # Scale training dataset
-        X_train, y_train, scaler_X_train, scaler_y_train, X_scaled_train, y_scaled_train = \
-            self._scale_arrays(feature_train, target_train)
+            # Scale training dataset
+            _, _, _, _, X_scaled, y_scaled = self._scale_arrays(feature_train, target_train)
 
-        # Define NN layer sizes
-        nn_L1, nn_L2, nn_L3 = int(8), int(16), int(32)
+            # Define NN batch size
+            bs = max(int(len(y_scaled) * batchprop), 8)
 
-        print(f"Configuring model {model_prefix} ...")
+            if verbose >= 1:
+                print(f"  Configuring model {model_prefix} ...")
 
-        if tune:
-            # Define ML model and grid search param space for hyperparameter tuning
-            print(f"Tuning model {model_prefix} ...")
+            if tune:
+                if verbose >= 1:
+                    print(f"  Tuning model {model_prefix} ...")
 
-            if model_label == "KN":
-                model = KNeighborsRegressor()
+                # Define ML model and grid search param space for hyperparameter tuning
+                if ml_algo == "KN":
+                    model = KNeighborsRegressor()
+                    param_grid = dict(n_neighbors=[2, 4, 8], weights=["uniform", "distance"])
+                elif ml_algo == "RF":
+                    model = RandomForestRegressor(random_state=seed)
+                    param_grid = dict(n_estimators=[400, 800, 1200],
+                                      max_features=[1, 2, 3],
+                                      min_samples_leaf=[1, 2, 3],
+                                      min_samples_split=[2, 4, 6])
+                elif ml_algo == "DT":
+                    model = DecisionTreeRegressor(random_state=seed)
+                    param_grid = dict(splitter=["best", "random"],
+                                      max_features=[1, 2, 3],
+                                      min_samples_leaf=[1, 2, 3],
+                                      min_samples_split=[2, 4, 6])
+                elif ml_algo == "NN1":
+                    model = MLPRegressor(random_state=seed, max_iter=epochs, batch_size=bs)
+                    param_grid = dict(hidden_layer_sizes=[(nn_L1), (nn_L2), (nn_L3)],
+                                      learning_rate_init=[0.0001, 0.0005, 0.001])
+                elif ml_algo == "NN2":
+                    model = MLPRegressor(random_state=seed, max_iter=epochs, batch_size=bs)
+                    param_grid = dict(hidden_layer_sizes=[(nn_L2, nn_L2),
+                                                          (nn_L3, nn_L2),
+                                                          (nn_L3, nn_L3)],
+                                      learning_rate_init=[0.0001, 0.0005, 0.001])
+                elif ml_algo == "NN3":
+                    model = MLPRegressor(random_state=seed, max_iter=epochs, batch_size=bs)
+                    param_grid = dict(hidden_layer_sizes=[(nn_L3, nn_L2, nn_L2),
+                                                          (nn_L3, nn_L3, nn_L2),
+                                                          (nn_L3, nn_L3, nn_L3)],
+                                      learning_rate_init=[0.0001, 0.0005, 0.001])
 
-                param_grid = dict(n_neighbors=[2, 4, 8], weights=["uniform", "distance"])
+                # K-fold cross validation
+                kf = KFold(n_splits=6, shuffle=True, random_state=seed)
 
-            elif model_label == "RF":
-                model = RandomForestRegressor(random_state=seed)
+                # Perform grid search hyperparameter tuning
+                grid_search = GridSearchCV(model, param_grid=param_grid, cv=kf,
+                                           scoring="neg_root_mean_squared_error",
+                                           n_jobs=nprocs)
+                grid_search.fit(X_scaled, y_scaled)
 
-                param_grid = dict(n_estimators=[400, 800, 1200],
-                                  max_features=[1, 2, 3],
-                                  min_samples_leaf=[1, 2, 3],
-                                  min_samples_split=[2, 4, 6])
+                # Define ML model with tuned hyperparameters
+                if ml_algo == "KN":
+                    model = KNeighborsRegressor(
+                        n_neighbors=grid_search.best_params_["n_neighbors"],
+                        weights=grid_search.best_params_["weights"]
+                    )
 
-            elif model_label == "DT":
-                model = DecisionTreeRegressor(random_state=seed)
+                elif ml_algo == "RF":
+                    model = RandomForestRegressor(
+                        random_state=seed,
+                        n_estimators=grid_search.best_params_["n_estimators"],
+                        max_features=grid_search.best_params_["max_features"],
+                        min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
+                        min_samples_split=grid_search.best_params_["min_samples_split"]
+                    )
 
-                param_grid = dict(splitter=["best", "random"],
-                                  max_features=[1, 2, 3],
-                                  min_samples_leaf=[1, 2, 3],
-                                  min_samples_split=[2, 4, 6])
+                elif ml_algo == "DT":
+                    model = DecisionTreeRegressor(
+                        random_state=seed,
+                        splitter=grid_search.best_params_["splitter"],
+                        max_features=grid_search.best_params_["max_features"],
+                        min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
+                        min_samples_split=grid_search.best_params_["min_samples_split"]
+                    )
 
-            elif model_label == "NN1":
-                model = MLPRegressor(random_state=seed, max_iter=epochs,
-                                     batch_size=max(int(len(y_scaled_train) * batchprop), 8))
+                elif ml_algo in ["NN1", "NN2", "NN3"]:
+                    model = MLPRegressor(
+                        random_state=seed,
+                        learning_rate_init=grid_search.best_params_["learning_rate_init"],
+                        hidden_layer_sizes=grid_search.best_params_["hidden_layer_sizes"]
+                    )
 
-                param_grid = dict(hidden_layer_sizes=[(nn_L1), (nn_L2), (nn_L3)],
-                                  learning_rate_init=[0.0001, 0.0005, 0.001])
+                self.ml_model_tuned = True
 
-            elif model_label == "NN2":
-                model = MLPRegressor(random_state=seed, max_iter=epochs,
-                                     batch_size=max(int(len(y_scaled_train) * batchprop), 8))
+            else:
+                # Define ML models without tuning
+                if ml_algo == "KN":
+                    model = KNeighborsRegressor(n_neighbors=4, weights="distance")
+                elif ml_algo == "RF":
+                    model = RandomForestRegressor(random_state=seed, n_estimators=400,
+                                                  max_features=2, min_samples_leaf=1,
+                                                  min_samples_split=2)
+                elif ml_algo == "DT":
+                    model = DecisionTreeRegressor(random_state=seed, splitter="best",
+                                                  max_features=2, min_samples_leaf=1,
+                                                  min_samples_split=2)
+                elif ml_algo == "NN1":
+                    model = MLPRegressor(random_state=seed, max_iter=epochs,
+                                         learning_rate_init=0.001,
+                                         hidden_layer_sizes=(nn_L3))
+                elif ml_algo == "NN2":
+                    model = MLPRegressor(random_state=seed, max_iter=epochs,
+                                         learning_rate_init=0.0001,
+                                         hidden_layer_sizes=(nn_L3, nn_L3))
+                elif ml_algo == "NN3":
+                    model = MLPRegressor(random_state=seed, max_iter=epochs,
+                                         learning_rate_init=0.0001,
+                                         hidden_layer_sizes=(nn_L3, nn_L3, nn_L3))
 
-                param_grid = dict(hidden_layer_sizes=[(nn_L2, nn_L2),
-                                                      (nn_L3, nn_L2),
-                                                      (nn_L3, nn_L3)],
-                                  learning_rate_init=[0.0001, 0.0005, 0.001])
+            # Get trained model
+            self.rocmlm = model
 
-            elif model_label == "NN3":
-                model = MLPRegressor(random_state=seed, max_iter=epochs,
-                                     batch_size=max(int(len(y_scaled_train) * batchprop), 8))
+            # Get hyperparameters
+            self.ml_model_hyperparams = model.get_params()
 
-                param_grid = dict(hidden_layer_sizes=[(nn_L3, nn_L2, nn_L2),
-                                                      (nn_L3, nn_L3, nn_L2),
-                                                      (nn_L3, nn_L3, nn_L3)],
-                                  learning_rate_init=[0.0001, 0.0005, 0.001])
-
-            # K-fold cross validation
-            kf = KFold(n_splits=3, shuffle=True, random_state=seed)
-
-            # Perform grid search hyperparameter tuning
-            grid_search = GridSearchCV(model, param_grid=param_grid, cv=kf,
-                                       scoring="neg_root_mean_squared_error",
-                                       n_jobs=nprocs, verbose=verbose)
-            grid_search.fit(X_scaled_train, y_scaled_train)
-
-            # Define ML model with tuned hyperparameters
-            if model_label == "KN":
-                model = KNeighborsRegressor(
-                    n_neighbors=grid_search.best_params_["n_neighbors"],
-                    weights=grid_search.best_params_["weights"]
-                )
-
-            elif model_label == "RF":
-                model = RandomForestRegressor(
-                    random_state=seed,
-                    n_estimators=grid_search.best_params_["n_estimators"],
-                    max_features=grid_search.best_params_["max_features"],
-                    min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
-                    min_samples_split=grid_search.best_params_["min_samples_split"]
-                )
-
-            elif model_label == "DT":
-                model = DecisionTreeRegressor(
-                    random_state=seed,
-                    splitter=grid_search.best_params_["splitter"],
-                    max_features=grid_search.best_params_["max_features"],
-                    min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
-                    min_samples_split=grid_search.best_params_["min_samples_split"]
-                )
-
-            elif model_label in ["NN1", "NN2", "NN3"]:
-                model = MLPRegressor(
-                    random_state=seed,
-                    learning_rate_init=grid_search.best_params_["learning_rate_init"],
-                    hidden_layer_sizes=grid_search.best_params_["hidden_layer_sizes"]
-                )
-
-            self.ml_model_tuned = True
-
-        else:
-            # Define ML models without tuning
-            if model_label == "KN":
-                model = KNeighborsRegressor(n_neighbors=4, weights="distance")
-
-            elif model_label == "RF":
-                model = RandomForestRegressor(random_state=seed, n_estimators=400,
-                                              max_features=2, min_samples_leaf=1,
-                                              min_samples_split=2)
-
-            elif model_label == "DT":
-                model = DecisionTreeRegressor(random_state=seed, splitter="best",
-                                              max_features=2, min_samples_leaf=1,
-                                              min_samples_split=2)
-
-            elif model_label == "NN1":
-                model = MLPRegressor(random_state=seed, max_iter=epochs,
-                                     learning_rate_init=0.001,
-                                     hidden_layer_sizes=(nn_L3))
-
-            elif model_label == "NN2":
-                model = MLPRegressor(random_state=seed, max_iter=epochs,
-                                     learning_rate_init=0.0001,
-                                     hidden_layer_sizes=(nn_L3, nn_L3))
-
-            elif model_label == "NN3":
-                model = MLPRegressor(random_state=seed, max_iter=epochs,
-                                     learning_rate_init=0.0001,
-                                     hidden_layer_sizes=(nn_L3, nn_L3, nn_L3))
-
-        # Get trained model
-        self.ml_model = model
-
-        # Get hyperparameters
-        self.model_hyperparams = model.get_params()
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _configure_rocmlm() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
 
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # iterate kfold !!
+    # kfold itr !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _iterate_kfold(self, fold_args):
+    def _kfold_itr(self, fold_args):
         """
         """
         # Get self attributes
+        rocmlm = self.rocmlm
         epochs = self.epochs
-        model = self.ml_model
-        verbose = self.verbose
+        ml_algo = self.ml_algo
         batchprop = self.batchprop
         target_train = self.target_train
-        model_label = self.ml_model_label
         feature_train = self.feature_train
 
-        # Check for training features
-        if feature_train.size == 0:
-            raise Exception("No training features !")
+        try:
+            # Check for training features
+            if feature_train.size == 0:
+                raise Exception("No training features !")
 
-        # Check for training targets
-        if target_train.size == 0:
-            raise Exception("No training targets !")
+            # Check for training targets
+            if target_train.size == 0:
+                raise Exception("No training targets !")
 
-        # Scale training dataset
-        X_train, y_train, scaler_X_train, scaler_y_train, X_scaled_train, y_scaled_train = \
-            self._scale_arrays(feature_train, target_train)
+            # Scale training dataset
+            X, y, _, scaler_y, X_scaled, y_scaled = \
+                self._scale_arrays(feature_train, target_train)
 
-        # Get fold indices
-        (train_index, test_index) = fold_args
+            # Get fold indices
+            (train_index, test_idxex) = fold_args
 
-        # Split the data into training and testing sets
-        X_train, X_test = X_scaled_train[train_index], X_scaled_train[test_index]
-        y_train, y_test = y_scaled_train[train_index], y_scaled_train[test_index]
+            # Split the data into training and testing sets
+            X, X_test = X_scaled[train_index], X_scaled[test_idxex]
+            y, y_test = y_scaled[train_index], y_scaled[test_idxex]
 
-        if "NN" in model_label:
-            # Initialize lists to store loss values
-            epoch_, train_loss_, test_loss_ = [], [], []
+            if "NN" in ml_algo:
+                # Initialize lists to store loss values
+                epoch_, train_loss_, test_loss_ = [], [], []
 
-            # Set batch size as a proportion of the training dataset size
-            batch_size = int(len(y_train) * batchprop)
+                # Set batch size as a proportion of the training dataset size
+                bs = max(int(len(y) * batchprop), 8)
 
-            # Ensure a minimum batch size
-            batch_size = max(batch_size, 8)
+                # Start training timer
+                training_start_time = time.time()
 
-            # Start training timer
-            training_start_time = time.time()
+                # Partial training
+                with tqdm(total=epochs, desc="Training NN", position=0) as pbar:
+                    for epoch in range(epochs):
+                        # Shuffle the training data for each epoch
+                        indices = np.arange(len(y))
+                        np.random.shuffle(indices)
 
-            # Partial training
-            with tqdm(total=epochs, desc="Training NN", position=0) as pbar:
-                for epoch in range(epochs):
-                    # Shuffle the training data for each epoch
-                    indices = np.arange(len(y_train))
-                    np.random.shuffle(indices)
+                        for start_idx in range(0, len(indices), bs):
+                            end_idx = start_idx + bs
 
-                    for start_idx in range(0, len(indices), batch_size):
-                        end_idx = start_idx + batch_size
+                            # Ensure that the batch size doesn't exceed the dataset size
+                            end_idx = min(end_idx, len(indices))
 
-                        # Ensure that the batch size doesn't exceed the dataset size
-                        end_idx = min(end_idx, len(indices))
+                            # Subset training data
+                            batch_indices = indices[start_idx:end_idx]
+                            X_batch, y_batch = X[batch_indices], y[batch_indices]
 
-                        # Subset training data
-                        batch_indices = indices[start_idx:end_idx]
-                        X_batch, y_batch = X_train[batch_indices], y_train[batch_indices]
+                            # Train NN model on batch
+                            rocmlm.partial_fit(X_batch, y_batch)
 
-                        # Train NN model on batch
-                        model.partial_fit(X_batch, y_batch)
+                        # Calculate and store training loss
+                        train_loss = rocmlm.loss_
+                        train_loss_.append(train_loss)
 
-                    # Calculate and store training loss
-                    train_loss = model.loss_
-                    train_loss_.append(train_loss)
+                        # Calculate and store test loss
+                        test_loss = mean_squared_error(
+                            y_test, rocmlm.predict(X_test))
+                        test_loss_.append(test_loss)
 
-                    # Calculate and store test loss
-                    test_loss = mean_squared_error(y_test, model.predict(X_test))
-                    test_loss_.append(test_loss)
+                        # Store epoch
+                        epoch_.append(epoch + 1)
 
-                    # Store epoch
-                    epoch_.append(epoch + 1)
+                        # Update progress bar
+                        pbar.update(1)
 
-                    # Update progress bar
-                    pbar.update(1)
+                # End training timer
+                training_end_time = time.time()
 
-            # End training timer
-            training_end_time = time.time()
+                # Create loss curve dict
+                loss_curve = {"epoch": epoch_, "train_loss": train_loss_,
+                              "test_loss": test_loss_}
 
-            # Create loss curve dict
-            loss_curve = {"epoch": epoch_, "train_loss": train_loss_,
-                          "test_loss": test_loss_}
+            else:
+                # Start training timer
+                training_start_time = time.time()
 
-        else:
-            # Start training timer
-            training_start_time = time.time()
+                # Train ML model
+                rocmlm.fit(X, y)
 
-            # Train ML model
-            model.fit(X_train, y_train)
+                # End training timer
+                training_end_time = time.time()
 
-            # End training timer
-            training_end_time = time.time()
+                # Empty loss curve
+                loss_curve = None
 
-            # Empty loss curve
-            loss_curve = None
+            # Calculate training time
+            training_time = training_end_time - training_start_time
 
-        # Calculate training time
-        training_time = training_end_time - training_start_time
+            # Make predictions on the test dataset
+            y_pred_scaled = rocmlm.predict(X_test)
 
-        # Make predictions on the test dataset
-        y_pred_scaled = model.predict(X_test)
+            # Inverse transform predictions
+            y_pred_original = scaler_y.inverse_transform(y_pred_scaled)
 
-        # Test inference time on single random PT datapoint from the test dataset
-        rand_PT_point = X_test[np.random.choice(X_test.shape[0], 1, replace=False)]
+            # Inverse transform test dataset
+            y_test_original = scaler_y.inverse_transform(y_test)
 
-        inference_start_time = time.time()
-        single_PT_pred = model.predict(rand_PT_point)
-        inference_end_time = time.time()
+            # Calculate performance metrics to evaluate the model
+            rmse_test = np.sqrt(mean_squared_error(y_test_original, y_pred_original,
+                                                   multioutput="raw_values"))
 
-        inference_time = inference_end_time - inference_start_time
+            r2_test = r2_score(y_test_original, y_pred_original, multioutput="raw_values")
 
-        # Inverse transform predictions
-        y_pred_original = scaler_y_train.inverse_transform(y_pred_scaled)
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _kfold_itr() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return (None, None, None, None)
 
-        # Inverse transform test dataset
-        y_test_original = scaler_y_train.inverse_transform(y_test)
-
-        # Calculate performance metrics to evaluate the model
-        rmse_test = np.sqrt(mean_squared_error(y_test_original, y_pred_original,
-                                               multioutput="raw_values"))
-
-        r2_test = r2_score(y_test_original, y_pred_original, multioutput="raw_values")
-
-        return (loss_curve, rmse_test, r2_test, training_time, inference_time)
+        return (loss_curve, rmse_test, r2_test, training_time)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # process_kfold_results !!
+    # process kfold results !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_kfold_results(self, results):
         """
@@ -1150,93 +749,93 @@ class RocMLM:
         sids = self.sids
         kfolds = self.kfolds
         verbose = self.verbose
+        ml_algo = self.ml_algo
         M = self.shape_feature_square[0]
         w = self.shape_feature_square[1]
-        model_label = self.ml_model_label
-        training_targets = self.training_targets
-        model_label_full = self.ml_model_label_full
+        ml_algo_label = self.ml_algo_label
+        rocmlm_targets = self.rocmlm_targets
 
-        # Initialize empty lists for storing performance metrics
-        loss_curves = []
-        rmse_test_scores, r2_test_scores = [], []
-        training_times, inference_times = [], []
+        try:
+            # Initialize empty lists for storing performance metrics
+            loss_curves = []
+            training_times = []
+            rmse_test_scores, r2_test_scores = [], []
 
-        # Unpack results
-        for (loss_curve, rmse_test, r2_test, training_time, inference_time) in results:
-            loss_curves.append(loss_curve)
-            rmse_test_scores.append(rmse_test)
-            r2_test_scores.append(r2_test)
-            training_times.append(training_time)
-            inference_times.append(inference_time)
+            # Unpack results
+            for (loss_curve, rmse_test, r2_test, training_time) in results:
+                loss_curves.append(loss_curve)
+                rmse_test_scores.append(rmse_test)
+                r2_test_scores.append(r2_test)
+                training_times.append(training_time)
 
-        if "NN" in model_label:
-            self._visualize_loss_curve(loss_curves)
+            if "NN" in ml_algo:
+                self._visualize_loss_curve(loss_curves)
 
-        # Stack arrays
-        rmse_test_scores = np.stack(rmse_test_scores)
-        r2_test_scores = np.stack(r2_test_scores)
+            # Stack arrays
+            rmse_test_scores = np.stack(rmse_test_scores)
+            r2_test_scores = np.stack(r2_test_scores)
 
-        # Calculate performance values with uncertainties
-        rmse_test_mean = np.mean(rmse_test_scores, axis=0)
-        rmse_test_std = np.std(rmse_test_scores, axis=0)
-        r2_test_mean = np.mean(r2_test_scores, axis=0)
-        r2_test_std = np.std(r2_test_scores, axis=0)
-        training_time_mean = np.mean(training_times)
-        training_time_std = np.std(training_times)
-        inference_time_mean = np.mean(inference_times)
-        inference_time_std = np.std(inference_times)
+            # Calculate performance values with uncertainties
+            rmse_test_mean = np.mean(rmse_test_scores, axis=0)
+            rmse_test_std = np.std(rmse_test_scores, axis=0)
+            r2_test_mean = np.mean(r2_test_scores, axis=0)
+            r2_test_std = np.std(r2_test_scores, axis=0)
+            training_time_mean = np.mean(training_times)
+            training_time_std = np.std(training_times)
 
-        # Get sample label
-        if any(s in sids for s in ["PUM", "DMM", "PYR"]):
-            sample_label = "benchmark"
-        elif any("sm" in sample or "sr" in sample for sample in sids):
-            sample_label = f"SYNTH{M}"
-        elif any("st" in sample for sample in sids):
-            sample_label = f"SMAT{M}"
-        elif any("sm" in sample for sample in sids):
-            sample_label = f"SMAM{M}"
-        elif any("sb" in sample for sample in sids):
-            sample_label = f"SMAB{M}"
-        elif any("sr" in sample for sample in sids):
-            sample_label = f"SMAR{M}"
+            # Get sample label
+            if any("sm" in sample or "sr" in sample for sample in sids):
+                sample_label = f"SMA{M}"
+            elif any("st" in sample for sample in sids):
+                sample_label = f"SMAT{M}"
+            elif any("sm" in sample for sample in sids):
+                sample_label = f"SMAM{M}"
+            elif any("sb" in sample for sample in sids):
+                sample_label = f"SMAB{M}"
+            elif any("sr" in sample for sample in sids):
+                sample_label = f"SMAR{M}"
 
-        # Config and performance info
-        cv_info = {
-            "model": [model_label],
-            "sample": [sample_label],
-            "size": [(w - 1) ** 2],
-            "n_targets": [len(training_targets)],
-            "k_folds": [kfolds],
-            "training_time_mean": [round(training_time_mean, 5)],
-            "training_time_std": [round(training_time_std, 5)],
-            "inference_time_mean": [round(inference_time_mean, 5)],
-            "inference_time_std": [round(inference_time_std, 5)]
-        }
+            # Config and performance info
+            cv_info = {
+                "model": [ml_algo],
+                "sample": [sample_label],
+                "size": [(w - 1) ** 2],
+                "n_targets": [len(rocmlm_targets)],
+                "k_folds": [kfolds],
+                "training_time_mean": [round(training_time_mean, 5)],
+                "training_time_std": [round(training_time_std, 5)]
+            }
 
-        # Add performance metrics for each parameter to the dictionary
-        for i, target in enumerate(training_targets):
-            cv_info[f"rmse_test_mean_{target}"] = round(rmse_test_mean[i], 5)
-            cv_info[f"rmse_test_std_{target}"] = round(rmse_test_std[i], 5)
-            cv_info[f"r2_test_mean_{target}"] = round(r2_test_mean[i], 5)
-            cv_info[f"r2_test_std_{target}"] = round(r2_test_std[i], 5)
+            # Add performance metrics for each parameter to the dictionary
+            for i, target in enumerate(rocmlm_targets):
+                cv_info[f"rmse_test_mean_{target}"] = round(rmse_test_mean[i], 5)
+                cv_info[f"rmse_test_std_{target}"] = round(rmse_test_std[i], 5)
+                cv_info[f"r2_test_mean_{target}"] = round(r2_test_mean[i], 5)
+                cv_info[f"r2_test_std_{target}"] = round(r2_test_std[i], 5)
 
-        if verbose >= 1:
+            if verbose >= 1:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                # Print performance
+                print(f"{ml_algo_label} performance:")
+                print(f"    training time: {training_time_mean:.5f} ± "
+                      f"{training_time_std:.5f}")
+                print(f"    rmse test:")
+                for r, e, p in zip(rmse_test_mean, rmse_test_std, rocmlm_targets):
+                    print(f"        {p}: {r:.5f} ± {e:.5f}")
+                print(f"    r2 test:")
+                for r, e, p in zip(r2_test_mean, r2_test_std, rocmlm_targets):
+                    print(f"        {p}: {r:.5f} ± {e:.5f}")
+                print("+++++++++++++++++++++++++++++++++++++++++++++")
+
+            self.cv_info = cv_info
+
+        except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            # Print performance
-            print(f"{model_label_full} performance:")
-            print(f"    training time: {training_time_mean:.5f} ± {training_time_std:.5f}")
-            print(f"    inference time: {inference_time_mean:.5f} ± "
-                  f"{inference_time_std:.5f}")
-            print(f"    rmse test:")
-            for r, e, p in zip(rmse_test_mean, rmse_test_std, training_targets):
-                print(f"        {p}: {r:.5f} ± {e:.5f}")
-            print(f"    r2 test:")
-            for r, e, p in zip(r2_test_mean, r2_test_std, training_targets):
-                print(f"        {p}: {r:.5f} ± {e:.5f}")
-            print(f"    rmse test:")
-            print("+++++++++++++++++++++++++++++++++++++++++++++")
-
-        self.cv_info = cv_info
+            print(f"!!! ERROR in _process_kfold_results() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
 
         return None
 
@@ -1253,182 +852,211 @@ class RocMLM:
         target_train = self.target_train
         feature_train = self.feature_train
 
-        # Check for training features
-        if feature_train.size == 0:
-            raise Exception("No training features !")
+        try:
+            # Check for training features
+            if feature_train.size == 0:
+                raise Exception("No training features !")
 
-        # Check for training targets
-        if target_train.size == 0:
-            raise Exception("No training targets !")
+            # Check for training targets
+            if target_train.size == 0:
+                raise Exception("No training targets !")
 
-        # Scale training dataset
-        X_train, y_train, scaler_X_train, scaler_y_train, X_scaled_train, y_scaled_train = \
-            self._scale_arrays(feature_train, target_train)
+            # Scale training dataset
+            X, _, _, _, _, _ = self._scale_arrays(feature_train, target_train)
 
-        # Check for ml model
-        if self.ml_model is None:
-            raise Exception("No ML model! Call _configure_rocmlm() first ...")
+            # Check for ml model
+            if self.ml_algo is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
 
-        # K-fold cross validation
-        kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
+            # K-fold cross validation
+            kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
 
-        # Create list of args for mp pooling
-        fold_args = [(train_index, test_index) for _, (train_index, test_index) in
-                     enumerate(kf.split(X_train))]
+            # Create list of args for mp pooling
+            fold_args = [(train_idx, test_idx) for _, (train_idx, test_idx) in
+                         enumerate(kf.split(X))]
 
-        # Create a multiprocessing pool
-        with mp.Pool(processes=nprocs) as pool:
-            results = pool.map(self._iterate_kfold, fold_args)
+            # Create a multiprocessing pool
+            with mp.Pool(processes=nprocs) as pool:
+                results = pool.map(self._kfold_itr, fold_args)
 
-            # Wait for all processes
-            pool.close()
-            pool.join()
+                # Wait for all processes
+                pool.close()
+                pool.join()
 
-        self.ml_model_cross_validated = True
+            self.ml_model_cross_validated = True
 
-        # Process cross validation results
-        self._process_kfold_results(results)
+            # Process cross validation results
+            self._process_kfold_results(results)
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _kfold_cv() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
 
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # retrain !!
+    # fit training data !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _retrain(self):
+    def _fit_training_data(self):
         """
         """
         # Get self attributes
         seed = self.seed
         epochs = self.epochs
-        model = self.ml_model
-        targets = self.targets
-        verbose = self.verbose
+        rocmlm = self.rocmlm
+        ml_algo = self.ml_algo
         batchprop = self.batchprop
         model_prefix = self.model_prefix
-        model_label = self.ml_model_label
-        model_out_dir = self.model_out_dir
+        scaler_X_path = self.scaler_X_path
+        scaler_y_path = self.scaler_y_path
         target_array = self.target_train.copy()
         feature_array = self.feature_train.copy()
+        rocmlm_only_path = self.rocmlm_only_path
         shape_target_square = self.shape_target_square
         shape_feature_square = self.shape_feature_square
 
-        # Check for ml model
-        if self.ml_model is None:
-            raise Exception("No ML model! Call _configure_rocmlm() first ...")
+        try:
+            if self.rocmlm is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
 
-        # Check for ml model cross validated
-        if not self.ml_model_cross_validated:
-            raise Exception("ML model not cross validated! Call _kfold_cv() first ...")
+            if not self.ml_model_cross_validated:
+                raise Exception("ML model not cross validated! Call _kfold_cv() first ...")
 
-        # Check for training features
-        if feature_array.size == 0:
-            raise Exception("No training features !")
+            if feature_array.size == 0:
+                raise Exception("No training features !")
 
-        # Check for training targets
-        if target_array.size == 0:
-            raise Exception("No training targets !")
+            if target_array.size == 0:
+                raise Exception("No training targets !")
 
-        print(f"Retraining model {model_prefix} ...")
+            print(f"Retraining model {model_prefix} ...")
 
-        # Scale arrays
-        X, y, scaler_X, scaler_y, X_scaled, y_scaled = \
-            self._scale_arrays(feature_array, target_array)
+            # Scale arrays
+            _, _, scaler_X, scaler_y, X_scaled, y_scaled = \
+                self._scale_arrays(feature_array, target_array)
 
-        # Train model on entire training dataset
-        X_train, X_test, y_train, y_test = \
-            train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=seed)
+            # Train model on entire training dataset
+            X_train, X_test, y_train, y_test = \
+                train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=seed)
 
-        # Train ML model
-        if "NN" in model_label:
-            # Set batch size as a proportion of the training dataset size
-            batch_size = int(len(y_train) * batchprop)
+            # Train ML model
+            if "NN" in ml_algo:
+                # Set batch size as a proportion of the training dataset size
+                bs = max(int(len(y_train) * batchprop), 8)
 
-            # Ensure a minimum batch size
-            batch_size = max(batch_size, 8)
+                # Partial training
+                with tqdm(total=epochs, desc="Retraining NN", position=0) as pbar:
+                    for epoch in range(epochs):
+                        # Shuffle the training data for each epoch
+                        indices = np.arange(len(y_train))
+                        np.random.shuffle(indices)
 
-            # Partial training
-            with tqdm(total=epochs, desc="Retraining NN", position=0) as pbar:
-                for epoch in range(epochs):
-                    # Shuffle the training data for each epoch
-                    indices = np.arange(len(y_train))
-                    np.random.shuffle(indices)
+                        for start_idx in range(0, len(indices), bs):
+                            end_idx = start_idx + bs
 
-                    for start_idx in range(0, len(indices), batch_size):
-                        end_idx = start_idx + batch_size
+                            # Ensure that the batch size doesn't exceed the dataset size
+                            end_idx = min(end_idx, len(indices))
 
-                        # Ensure that the batch size doesn't exceed the dataset size
-                        end_idx = min(end_idx, len(indices))
+                            # Subset training data
+                            batch_indices = indices[start_idx:end_idx]
+                            X_batch, y_batch = X_train[batch_indices], y_train[batch_indices]
 
-                        # Subset training data
-                        batch_indices = indices[start_idx:end_idx]
-                        X_batch, y_batch = X_train[batch_indices], y_train[batch_indices]
+                            # Train NN model on batch
+                            rocmlm.partial_fit(X_batch, y_batch)
 
-                        # Train NN model on batch
-                        model.partial_fit(X_batch, y_batch)
+                        # Update progress bar
+                        pbar.update(1)
 
-                    # Update progress bar
-                    pbar.update(1)
+            else:
+                rocmlm.fit(X_train, y_train)
 
-        else:
-            model.fit(X_train, y_train)
+            print(":::::::::::::::::::::::::::::::::::::::::::::")
+            self.ml_model_trained = True
+            self.rocmlm_scaler_X = scaler_X
+            self.rocmlm_scaler_y = scaler_y
 
-        print(":::::::::::::::::::::::::::::::::::::::::::::")
-        self.ml_model_only = model
-        self.ml_model_trained = True
-        self.ml_model_scaler_X = scaler_X
-        self.ml_model_scaler_y = scaler_y
+            # Save pretrained rocmlm and scalers
+            with open(rocmlm_only_path, "wb") as file:
+                joblib.dump(rocmlm, file)
+            with open(scaler_X_path, "wb") as file:
+                joblib.dump(scaler_X, file)
+            with open(scaler_y_path, "wb") as file:
+                joblib.dump(scaler_y, file)
 
-        # Copy feature and target arrays
-        X = feature_array.copy()
-        y = target_array.copy()
+            # Add model size to cv_info
+            model_size = os.path.getsize(rocmlm_only_path)
+            model_size_mb = round(model_size / (1024 ** 2), 5)
+            self.cv_info["model_size_mb"] = model_size_mb
 
-        # Scale features array
-        X_scaled = scaler_X.transform(X)
+            # Copy feature and target arrays
+            X, y = feature_array.copy(), target_array.copy()
 
-        # Make predictions on features
-        pred_scaled = model.predict(X_scaled)
+            # Scale features array
+            X_scaled = scaler_X.transform(X)
 
-        # Inverse transform predictions
-        pred_original = scaler_y.inverse_transform(pred_scaled)
+            # Make predictions on features
+            pred_scaled = rocmlm.predict(X_scaled)
 
-        # Reshape arrays into squares for visualization
-        target_square = y.reshape(shape_target_square)
-        feature_square = X.reshape(shape_feature_square)
-        pred_square = pred_original.reshape(shape_target_square)
+            # Inverse transform predictions
+            pred_original = scaler_y.inverse_transform(pred_scaled)
 
-        # Update arrays
-        self.target_square = target_square
-        self.prediction_square = pred_square
-        self.feature_square = feature_square
+            # Reshape arrays into squares for visualization
+            target_square = y.reshape(shape_target_square)
+            feature_square = X.reshape(shape_feature_square)
+            pred_square = pred_original.reshape(shape_target_square)
+
+            # Update arrays
+            self.target_square = target_square
+            self.feature_square = feature_square
+            self.prediction_square = pred_square
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _fit_training_data() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
 
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # append to csv !!
+    # save rocmlm cv info !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _append_to_csv(self):
+    def _save_rocmlm_cv_info(self):
         """
         """
         # Get self attributes
         data_dict = self.cv_info
 
-        # Check for cross validation results
-        if not self.cv_info:
-            raise Exception("No cross validation! Call _kfold_cv() first ...")
+        try:
+            if not self.cv_info:
+                raise Exception("No cross validation! Call _kfold_cv() first ...")
 
-        # CSV filepath
-        filepath = f"assets/rocmlm-performance.csv"
+            # CSV filepath
+            filepath = f"assets/rocmlm-performance.csv"
 
-        # Check if the CSV file already exists
-        if not pd.io.common.file_exists(filepath):
-            df = pd.DataFrame(data_dict)
-        else:
-            df = pd.read_csv(filepath)
-            new_data = pd.DataFrame(data_dict)
-            df = pd.concat([df, new_data], ignore_index=True)
+            # Check if the CSV file already exists
+            if not pd.io.common.file_exists(filepath):
+                df = pd.DataFrame(data_dict)
+            else:
+                df = pd.read_csv(filepath)
+                new_data = pd.DataFrame(data_dict)
+                df = pd.concat([df, new_data], ignore_index=True)
 
-        df = df.sort_values(by=["model", "sample", "size"])
-        df.to_csv(filepath, index=False)
+            df = df.sort_values(by=["model", "sample", "size"])
+            df.to_csv(filepath, index=False)
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _save_rocmlm_cv_info() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
 
         return None
 
@@ -1445,10 +1073,10 @@ class RocMLM:
         sids = self.sids
         fig_dir = self.fig_dir
         model_prefix = self.model_prefix
-        training_targets = self.training_targets
+        rocmlm_targets = self.rocmlm_targets
 
         if type not in {"targets", "predictions", "diff", "prem"}:
-            raise ValueError("Unrecognized array image type !")
+            raise Exception("Unrecognized array image type !")
 
         # Only visualize dry and max hydrated samples
         if any(s in sids for s in ["PUM", "DMM", "PYR"]):
@@ -1463,7 +1091,7 @@ class RocMLM:
         # Check for existing plots
         for sid in sids:
             all_files_exist = True
-            for target in training_targets:
+            for target in rocmlm_targets:
                 path = f"{fig_dir}/{model_prefix}-{sid}-{target}-{type}.png"
                 if not os.path.exists(path):
                     all_files_exist = False
@@ -1481,8 +1109,8 @@ class RocMLM:
         """
         # Get self attributes
         fig_dir = self.fig_dir
-        model_label = self.ml_model_label
-        model_label_full = self.ml_model_label_full
+        ml_algo = self.ml_algo
+        model_label_full = self.ml_algo_label
 
         # Initialize empty dict for combined loss curves
         merged_curves = {}
@@ -1530,7 +1158,7 @@ class RocMLM:
 
         # Save the plot to a file
         os.makedirs(f"{fig_dir}", exist_ok=True)
-        plt.savefig(f"{fig_dir}/{model_label}-loss-curve.png")
+        plt.savefig(f"{fig_dir}/{ml_algo}-loss-curve.png")
 
         # Close plot
         plt.close()
@@ -1553,7 +1181,7 @@ class RocMLM:
         target_arrays = self.target_square
         feature_arrays = self.feature_square
         pred_arrays = self.prediction_square
-        training_targets = self.training_targets
+        rocmlm_targets = self.rocmlm_targets
         ml_model_trained = self.ml_model_trained
 
         # Get number of training features
@@ -1588,7 +1216,7 @@ class RocMLM:
                 target_array = target_arrays[s, :, :, :]
                 pred_array = pred_arrays[s, :, :, :]
 
-                for i, target in enumerate(training_targets):
+                for i, target in enumerate(rocmlm_targets):
                     # Get 2d arrays
                     P = feature_array[:, :, 0 + n_feats]
                     T = feature_array[:, :, 1 + n_feats]
@@ -1614,7 +1242,7 @@ class RocMLM:
                         palette = "seismic"
                         filename = f"{model_prefix}-{sid}-{target}-diff.png"
                     else:
-                        raise ValueError("Unrecognized array image type !")
+                        raise Exception("Unrecognized array image type !")
 
                     # Target labels
                     if target == "rho":
@@ -1910,13 +1538,12 @@ class RocMLM:
         fig_dir = self.fig_dir
         verbose = self.verbose
         data_dir = self.data_dir
-        geothresh = self.geothresh
         target_units = self.target_units
         model_prefix = self.model_prefix
         target_arrays = self.target_square
         feature_arrays = self.feature_square
         pred_arrays = self.prediction_square
-        training_targets = self.training_targets
+        rocmlm_targets = self.rocmlm_targets
         ml_model_trained = self.ml_model_trained
 
         # Get number of training features
@@ -1970,7 +1597,7 @@ class RocMLM:
                 target_array = target_arrays[s, :, :, :]
                 pred_array = pred_arrays[s, :, :, :]
 
-                for i, target in enumerate(training_targets):
+                for i, target in enumerate(rocmlm_targets):
                     # Get 2d arrays
                     P = feature_array[:, :, 0 + n_feats]
                     T = feature_array[:, :, 1 + n_feats]
@@ -1982,7 +1609,7 @@ class RocMLM:
                     elif type == "predictions":
                         square_array = p
                     else:
-                        raise ValueError("Unrecognized array image type !")
+                        raise Exception("Unrecognized array image type !")
 
                     # Check for all nans
                     if np.all(np.isnan(square_array)):
@@ -2133,9 +1760,9 @@ class RocMLM:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize model !!
+    # visualize rocmlm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize_model(self):
+    def visualize_rocmlm(self):
         """
         """
         # Get self attributes
@@ -2143,26 +1770,21 @@ class RocMLM:
         S = self.shape_feature_square[0]
         W = self.shape_feature_square[1]
 
-        # Only visualize largets models
-#        if ((S == 323 and W == 129) or
-#            (S == 3 and W == 129 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
-        if ((S == 248 and W == 65) or
-            (S == 3 and W == 65 and any(s in sids for s in ["PUM", "DMM", "PYR"]))):
-            try:
-                sids = self._check_rocmlm_images(type="targets")
-                if sids: self._visualize_array_image(sids, type="targets")
-                sids = self._check_rocmlm_images(type="predictions")
-                if sids: self._visualize_array_image(sids, type="predictions")
-                sids = self._check_rocmlm_images(type="diff")
-                if sids: self._visualize_array_image(sids, type="diff")
-                sids = self._check_rocmlm_images(type="prem")
-                if sids: self._visualize_prem(sids, type="predictions")
-            except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in visualize_model() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                traceback.print_exc()
+        try:
+            sids = self._check_rocmlm_images(type="targets")
+            if sids: self._visualize_array_image(sids, type="targets")
+            sids = self._check_rocmlm_images(type="predictions")
+            if sids: self._visualize_array_image(sids, type="predictions")
+            sids = self._check_rocmlm_images(type="diff")
+            if sids: self._visualize_array_image(sids, type="diff")
+            sids = self._check_rocmlm_images(type="prem")
+            if sids: self._visualize_prem(sids, type="predictions")
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in visualize_rocmlm() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
         else:
             return None
 
@@ -2177,27 +1799,16 @@ class RocMLM:
     def train_rocmlm(self):
         """
         """
-        # Check for pretrained model
-        if self.ml_model_trained:
-            return None
         max_retries = 3
         for retry in range(max_retries):
+            if self.ml_model_trained:
+                break
             try:
                 self._configure_rocmlm()
                 self._print_rocmlm_info()
                 self._kfold_cv()
-                self._retrain()
-                self._evaluate_lut_performance()
-                with open(self.ml_model_only_path, "wb") as file:
-                    joblib.dump(self.ml_model_only, file)
-                with open(self.ml_model_scaler_X_path, "wb") as file:
-                    joblib.dump(self.ml_model_scaler_X, file)
-                with open(self.ml_model_scaler_y_path, "wb") as file:
-                    joblib.dump(self.ml_model_scaler_y, file)
-                model_size = os.path.getsize(self.ml_model_only_path)
-                model_size_mb = round(model_size / (1024 ** 2), 5)
-                self.cv_info["model_size_mb"] = model_size_mb
-                self._append_to_csv()
+                self._fit_training_data()
+                self._save_rocmlm_cv_info()
             except Exception as e:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"!!! ERROR in train_rocmlm() !!!")
@@ -2211,14 +1822,6 @@ class RocMLM:
                     self.ml_model_training_error = True
                     self.ml_model_error = e
                     return None
-            try:
-                self.visualize_model()
-            except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in train_rocmlm() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                traceback.print_exc()
         return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2231,7 +1834,7 @@ class RocMLM:
         """
         """
         # Get self attributes
-        model = self.ml_model
+        model = self.ml_algo
         scaler_X = self.ml_model_scaler_X
         scaler_y = self.ml_model_scaler_y
         ml_model_trained = self.ml_model_trained
@@ -2261,9 +1864,9 @@ class RocMLM:
 
                     X = np.concatenate((xi_array, h2o_array, P_array, T_array), axis=1)
                 else:
-                    raise ValueError("The arrays xi, h2o, P, and T are not the same size !")
+                    raise Exception("The arrays xi, h2o, P, and T are not the same size !")
             else:
-                raise ValueError("One or more of xi, h2o, P, T does not exist !")
+                raise Exception("One or more of xi, h2o, P, T does not exist !")
 
             # Scale features array
             X_scaled = scaler_X.transform(X)
@@ -2293,7 +1896,7 @@ class RocMLM:
         """
         """
         # Get self attributes
-        model = self.ml_model
+        model = self.ml_algo
         scaler_X = self.ml_model_scaler_X
         scaler_y = self.ml_model_scaler_y
         ml_model_trained = self.ml_model_trained
@@ -2320,9 +1923,9 @@ class RocMLM:
 
                     X = np.concatenate((xi_array, P_array, T_array), axis=1)
                 else:
-                    raise ValueError("The arrays xi, P, and T are not the same size !")
+                    raise Exception("The arrays xi, P, and T are not the same size !")
             else:
-                raise ValueError("One or more of xi, P, T does not exist !")
+                raise Exception("One or more of xi, P, T does not exist !")
 
             # Scale features array
             X_scaled = scaler_X.transform(X)
@@ -2447,8 +2050,8 @@ def compose_rocmlm_img3_itr(args):
     fig_dir = rocmlm.fig_dir
     verbose = rocmlm.verbose
     model_prefix = rocmlm.model_prefix
-    ml_model_label = rocmlm.ml_model_label
-    training_targets = rocmlm.training_targets
+    ml_algo = rocmlm.ml_algo
+    rocmlm_targets = rocmlm.rocmlm_targets
 
     # Unique pid
     pid = os.getpid()
@@ -2463,12 +2066,12 @@ def compose_rocmlm_img3_itr(args):
     fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
 
     # Define composition paths
-    img3_diff = f"{fig_dir}/image3-{sid}-{ml_model_label}-{target}-diff.png"
-    img3_prof = f"{fig_dir}/image3-{sid}-{ml_model_label}-{target}-profile.png"
+    img3_diff = f"{fig_dir}/image3-{sid}-{ml_algo}-{target}-diff.png"
+    img3_prof = f"{fig_dir}/image3-{sid}-{ml_algo}-{target}-profile.png"
 
     # Check for existing plots
-    fig_1 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-diff.png"
-    fig_2 = f"{fig_dir}/image-{sid}-{ml_model_label}-{target}-profile.png"
+    fig_1 = f"{fig_dir}/image-{sid}-{ml_algo}-{target}-diff.png"
+    fig_2 = f"{fig_dir}/image-{sid}-{ml_algo}-{target}-profile.png"
     if (os.path.exists(fig_1) and os.path.exists(fig_2)):
         if os.path.exists(temp): os.remove(temp)
         return None
@@ -2499,7 +2102,7 @@ def compose_rocmlm_img9_itr(args):
     fig_dir = rocmlm.fig_dir
     verbose = rocmlm.verbose
     model_prefix = rocmlm.model_prefix
-    ml_model_label = rocmlm.ml_model_label
+    ml_algo = rocmlm.ml_algo
 
     # Unique pid
     pid = os.getpid()
@@ -2511,12 +2114,12 @@ def compose_rocmlm_img9_itr(args):
     temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
 
     # Define composition paths
-    img9_diff = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
-    img9_prof = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
+    img9_diff = f"{fig_dir}/image9-{sid}-{ml_algo}-diff.png"
+    img9_prof = f"{fig_dir}/image9-{sid}-{ml_algo}-profile.png"
 
     # Check for existing plots
-    fig_1 = f"{fig_dir}/image9-{sid}-{ml_model_label}-diff.png"
-    fig_2 = f"{fig_dir}/image9-{sid}-{ml_model_label}-profile.png"
+    fig_1 = f"{fig_dir}/image9-{sid}-{ml_algo}-diff.png"
+    fig_2 = f"{fig_dir}/image9-{sid}-{ml_algo}-profile.png"
     if (os.path.exists(fig_1) and os.path.exists(fig_2)):
         for file in [temp, temp_rho, temp_h2o, temp_melt]:
             if os.path.exists(file): os.remove(file)
@@ -2573,7 +2176,7 @@ def compose_rocmlm_img15_itr(args):
     fig_dir = rocmlm.fig_dir
     verbose = rocmlm.verbose
     model_prefix = rocmlm.model_prefix
-    ml_model_label = rocmlm.ml_model_label
+    ml_algo = rocmlm.ml_algo
 
     # Unique pid
     pid = os.getpid()
@@ -2587,12 +2190,12 @@ def compose_rocmlm_img15_itr(args):
     temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
 
     # Define composition paths
-    img15_diff = f"{fig_dir}/image15-{sid}-{ml_model_label}-diff.png"
-    img15_prof = f"{fig_dir}/image15-{sid}-{ml_model_label}-profile.png"
+    img15_diff = f"{fig_dir}/image15-{sid}-{ml_algo}-diff.png"
+    img15_prof = f"{fig_dir}/image15-{sid}-{ml_algo}-profile.png"
 
     # Check for existing plots
-    fig_1 = f"{fig_dir}/image15-{sid}-{ml_model_label}-diff.png"
-    fig_2 = f"{fig_dir}/image15-{sid}-{ml_model_label}-profile.png"
+    fig_1 = f"{fig_dir}/image15-{sid}-{ml_algo}-diff.png"
+    fig_2 = f"{fig_dir}/image15-{sid}-{ml_algo}-profile.png"
     if (os.path.exists(fig_1) and os.path.exists(fig_2)):
         for file in [temp, temp_rho, temp_h2o, temp_melt]:
             if os.path.exists(file): os.remove(file)
@@ -2655,7 +2258,7 @@ def compose_rocmlm_plots(rocmlm):
     fig_dir = rocmlm.fig_dir
     S = rocmlm.shape_feature_square[0]
     W = rocmlm.shape_feature_square[1]
-    training_targets = rocmlm.training_targets
+    rocmlm_targets = rocmlm.rocmlm_targets
 
     # Only visualize largets models
 #    if ((S == 323 and W == 129) or
@@ -2672,7 +2275,7 @@ def compose_rocmlm_plots(rocmlm):
                     re.search(r"sm.*loi007", sid)]
 
         # Create list of args for mp pooling
-        args_img3 = [(sid, target, rocmlm) for sid in sids for target in training_targets]
+        args_img3 = [(sid, target, rocmlm) for sid in sids for target in rocmlm_targets]
         args_img9 = [(sid, rocmlm) for sid in sids]
         args_img15 = [(sid, rocmlm) for sid in sids]
 
@@ -2840,7 +2443,7 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
     grouped_data = data.groupby(["model", "size"])
     min_time_indices = grouped_data["time"].idxmin()
     data = data.loc[min_time_indices]
-    data.reset_index(drop=True, inplace=True)
+    data.reset_idxex(drop=True, inplace=True)
 
     # Compute summary statistics
     summary_stats = data.groupby(["model"]).agg({
@@ -3002,7 +2605,7 @@ def visualize_rocmlm_performance(fig_dir="figs/other", filename="rocmlm-performa
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # train rocmlms !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def train_rocmlms(gfem_models, ml_models=["DT", "KN", "NN1", "NN2", "NN3"],
+def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN1", "NN2", "NN3"],
                   PT_steps=[16, 8, 4, 2, 1], X_steps=[16, 8, 4, 2, 1]):
     """
     """
@@ -3021,11 +2624,11 @@ def train_rocmlms(gfem_models, ml_models=["DT", "KN", "NN1", "NN2", "NN3"],
         for X_step in X_steps:
             for PT_step in PT_steps:
                 mlms = []
-                for model in ml_models:
+                for model in ml_algos:
                     rocmlm = RocMLM(gfem_models, model, X_step, PT_step)
                     if rocmlm.ml_model_trained:
-                        pretrained_rocmlm = joblib.load(rocmlm.rocmlm_path)
-                        mlms.append(pretrained_rocmlm)
+                        model = joblib.load(rocmlm.rocmlm_path)
+                        mlms.append(model)
                     else:
                         rocmlm.train_rocmlm()
                         mlms.append(rocmlm)
