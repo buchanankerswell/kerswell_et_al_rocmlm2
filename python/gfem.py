@@ -6,7 +6,6 @@
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import io
 import os
-import re
 import time
 import glob
 import shutil
@@ -15,13 +14,9 @@ import traceback
 import subprocess
 import numpy as np
 import pandas as pd
-from hymatz import HyMaTZ
 import multiprocessing as mp
 from contextlib import redirect_stdout
-from scipy.interpolate import griddata
 from scipy.interpolate import LinearNDInterpolator
-np.set_printoptions(precision=3, suppress=True)
-from sklearn.metrics import r2_score, mean_squared_error
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
@@ -29,7 +24,6 @@ from sklearn.metrics import r2_score, mean_squared_error
 import cv2
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from matplotlib.colors import hsv_to_rgb
 from PIL import Image, ImageDraw, ImageFont
 from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -68,7 +62,6 @@ class GFEMModel:
         self.pot_Ts = [1173, 1573, 1773]
 
         # Define features and targets (see werami_output_map for list of targets)
-        self.features = ["XI_FRAC", "LOI"]
         self.targets = ["density", "Vp", "Vs", "melt_fraction", "H2O", "molar_entropy",
                         "molar_volume", "molar_heat_capacity", "phase_assemblage",
                         "assemblage_index", "phase_assemblage_variance"]
@@ -299,6 +292,7 @@ class GFEMModel:
         self.xi = None
         self.loi = None
         self.results = {}
+        self.features = []
         self.sample_features = []
         self.norm_sample_comp = []
         self.pt_array = np.array([])
@@ -310,6 +304,12 @@ class GFEMModel:
         self.timeout = (res**2) * 3
         self.model_build_error = False
 
+        # Get normalized sample composition
+        self._get_normalized_sample_comp()
+
+        # Get sample features
+        self._get_sample_features()
+
         # Check for existing model build
         self._check_existing_model()
 
@@ -318,85 +318,6 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.0.           Helper Functions              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # print gfem info !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _print_gfem_info(self):
-        """
-        """
-        # Get self attributes
-        res = self.res
-        sid = self.sid
-        P_min = self.P_min
-        P_max = self.P_max
-        T_min = self.T_min
-        T_max = self.T_max
-        source = self.source
-        targets = self.targets
-        ox_gfem = self.ox_gfem
-        features = self.features
-        perplex_db = self.perplex_db
-        model_out_dir = self.model_out_dir
-
-        oxwrp = textwrap.fill(", ".join(ox_gfem), width=80)
-        tgwrp = textwrap.fill(", ".join(targets), width=80,
-                              subsequent_indent="                  ")
-        ftwrp = textwrap.fill(", ".join(features), width=80)
-
-        print("+++++++++++++++++++++++++++++++++++++++++++++")
-        print(f"GFEM model: {sid} {perplex_db}")
-        print("---------------------------------------------")
-        print(f"  PT resolution:  {res}")
-        print(f"  P range:        {P_min:.1f} - {P_max:.1f} GPa")
-        print(f"  T range:        {T_min:.0f} - {T_max:.0f} K")
-        print(f"  Sampleid:       {sid}")
-        print(f"  Source:         {source}")
-        print(f"  GFEM sys.:      {oxwrp}")
-        print(f"  Targets:        {tgwrp}")
-        print(f"  Features:       {ftwrp}")
-        print(f"  Thermo. data:   {perplex_db}")
-        print(f"  Model out dir:  {model_out_dir}")
-        print("  --------------------")
-
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check existing model !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_existing_model(self):
-        # Get self attributes
-        sid = self.sid
-        verbose = self.verbose
-        perplex_db = self.perplex_db
-        model_out_dir = self.model_out_dir
-
-        if os.path.exists(model_out_dir):
-            if (os.path.exists(f"{model_out_dir}/results.csv") and
-                os.path.exists(f"{model_out_dir}/assemblages.csv")):
-                self.model_built = True
-                if verbose >= 1:
-                    print(f"  Found {perplex_db} GFEM model for sample {sid} !")
-                try:
-                    self._get_normalized_sample_comp()
-                    self._get_sample_features()
-                    self._get_results()
-                    self._get_target_array()
-                    self._get_pt_array()
-                except Exception as e:
-                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    print(f"!!! ERROR in _check_existing_model() !!!")
-                    print(f"{e}")
-                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    traceback.print_exc()
-                    return None
-            else:
-                shutil.rmtree(model_out_dir)
-                os.makedirs(model_out_dir, exist_ok=True)
-        else:
-            os.makedirs(model_out_dir, exist_ok=True)
-
-        return None
-
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get normalized sample composition !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -484,7 +405,7 @@ class GFEMModel:
             traceback.print_exc()
             return None
 
-        return norm_comp
+        return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get sample features !!
@@ -495,13 +416,16 @@ class GFEMModel:
         # Get self attributes
         sid = self.sid
         source = self.source
-        features = self.features
 
         try:
             # Read the data file
             df = pd.read_csv(source)
 
-            # Subset the DataFrame based on the sample name
+            # Get sample features names
+            features = [col for col in df.columns if col != "SAMPLEID"]
+            self.features = features
+
+            # Subset the df based on the sample name
             subset_df = df[df["SAMPLEID"] == sid]
 
             if subset_df.empty:
@@ -520,224 +444,45 @@ class GFEMModel:
             traceback.print_exc()
             return None
 
-        return sample_features
+        return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # replace in file !!
+    # check existing model !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _replace_in_file(self, filepath, replacements):
-        """
-        """
-        try:
-            with open(filepath, "r") as file:
-                file_data = file.read()
+    def _check_existing_model(self):
+        # Get self attributes
+        sid = self.sid
+        verbose = self.verbose
+        perplex_db = self.perplex_db
+        model_out_dir = self.model_out_dir
 
-                for key, value in replacements.items():
-                    file_data = file_data.replace(key, value)
-
-            with open(filepath, "w") as file:
-                file.write(file_data)
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _replace_in_file() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+        if os.path.exists(model_out_dir):
+            if (os.path.exists(f"{model_out_dir}/results.csv") and
+                os.path.exists(f"{model_out_dir}/assemblages.csv")):
+                self.model_built = True
+                if verbose >= 1:
+                    print(f"  Found {perplex_db} GFEM model for sample {sid} !")
+                try:
+                    self._get_results()
+                    self._get_target_array()
+                    self._get_pt_array()
+                except Exception as e:
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    print(f"!!! ERROR in _check_existing_model() !!!")
+                    print(f"{e}")
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    traceback.print_exc()
+                    return None
+            else:
+                shutil.rmtree(model_out_dir)
+                os.makedirs(model_out_dir, exist_ok=True)
+        else:
+            os.makedirs(model_out_dir, exist_ok=True)
 
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # encode assemblages !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _encode_assemblages(self, assemblages):
-        """
-        """
-        # Get self attributes
-        model_out_dir = self.model_out_dir
-
-        try:
-            unique_assemblages = {}
-            encoded_assemblages = []
-
-            # Encoding unique phase assemblages
-            for assemblage in assemblages:
-                assemblage_tuple = tuple(sorted(assemblage))
-
-                if assemblage_tuple and not any(
-                        np.isnan(item) for item in assemblage_tuple if
-                        isinstance(item, (int, float))):
-                    if assemblage_tuple not in unique_assemblages:
-                        unique_assemblages[assemblage_tuple] = len(unique_assemblages) + 1
-
-            # Create dataframe
-            df = pd.DataFrame(list(unique_assemblages.items()),
-                              columns=["assemblage", "index"])
-
-            # Put spaces between phases
-            df["assemblage"] = df["assemblage"].apply(" ".join)
-
-            # Reorder columns
-            df = df[["index", "assemblage"]]
-
-            # Save to csv
-            assemblages_csv = f"{model_out_dir}/assemblages.csv"
-            df.to_csv(assemblages_csv, index=False)
-
-            # Encoding phase assemblage numbers
-            for assemblage in assemblages:
-                if assemblage == "":
-                    encoded_assemblages.append(np.nan)
-
-                else:
-                    encoded_assemblage = unique_assemblages[tuple(sorted(assemblage))]
-                    encoded_assemblages.append(encoded_assemblage)
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _encode_assemblages() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
-
-        return encoded_assemblages
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # process array !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _process_array(self, array, n_neighbors=1, threshold=5):
-        """
-        """
-        try:
-            # Create a copy of the input array to avoid modifying the original array
-            result_array = array.copy()
-
-            # Iterate through each element of the array
-            for i in range(len(result_array)):
-                for j in range(len(result_array[i])):
-                    # Define the neighborhood indices
-                    neighbors = []
-
-                    for x in range(i - n_neighbors, i + n_neighbors + 1):
-                        for y in range(j - n_neighbors, j + n_neighbors + 1):
-                            if (0 <= x < len(result_array) and
-                                0 <= y < len(result_array[i]) and
-                                (x != i or y != j)):
-                                neighbors.append((x, y))
-
-                    # Get neighborhood values
-                    surrounding_values = [result_array[x, y] for x, y in neighbors if not
-                                          np.isnan(result_array[x, y])]
-
-                    # Define anomalies
-                    if surrounding_values:
-                        mean_neighbors = np.mean(surrounding_values)
-                        std_neighbors = np.std(surrounding_values)
-                        anom_threshold = threshold * std_neighbors
-
-                        # Impute anomalies
-                        if abs(result_array[i, j] - mean_neighbors) > anom_threshold:
-                            result_array[i, j] = np.mean(surrounding_values)
-
-                        # Impute nans
-                        elif np.isnan(result_array[i, j]):
-                            nan_count = sum(1 for x, y in neighbors if
-                                            0 <= x < len(result_array) and
-                                            0 <= y < len(result_array[i]) and
-                                            np.isnan(result_array[x, y]))
-
-                            if nan_count >= int((((((n_neighbors * 2) + 1)**2) - 1) / 3)):
-                                result_array[i, j] = 0
-                            else:
-                                result_array[i, j] = np.mean(surrounding_values)
-                    else:
-                        result_array[i, j] = 0
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _process_array() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
-
-        return result_array.flatten()
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get 1d reference models !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_1d_reference_models(self, ref_model="prem"):
-        """
-        """
-        # Get self attributes
-        data_dir = self.data_dir
-
-        try:
-            if not os.path.exists(data_dir):
-                raise Exception(f"Data not found at {data_dir} !")
-
-            if ref_model not in ["prem", "stw105"]:
-                raise Exception(f"Unrecognized reference model {ref_model} !")
-
-            # Reference model paths and headers
-            if ref_model == "prem":
-                ref_path = f"{data_dir}/PREM_1s.csv"
-                ref_cols = ["radius", "depth", "density", "Vp", "Vph", "Vs", "Vsh", "eta",
-                            "Q_mu", "Q_kappa"]
-            else:
-                ref_path = f"{data_dir}/STW105.csv"
-                ref_cols = ["radius", "density", "Vp", "Vs", "unk1", "unk2", "Vph", "Vsh",
-                            "eta"]
-
-            columns_to_keep = ["depth", "P", "density", "Vp", "Vs"]
-
-            # Load reference model
-            if not os.path.exists(ref_path):
-                raise Exception(f"Refernce model {ref_model} not found at {ref_path} !")
-
-            # Read reference model
-            model = pd.read_csv(ref_path, header=None, names=ref_cols)
-
-            # Transform units
-            if ref_model == "stw105":
-                model["depth"] = (model["radius"].max() - model["radius"]) / 1e3
-                model["density"] = model["density"] / 1e3
-                model["Vp"] = model["Vp"] / 1e3
-                model["Vs"] = model["Vs"] / 1e3
-                model.sort_values(by=["depth"], inplace=True)
-
-            def calculate_pressure(row):
-                z = row["depth"]
-                depths = model[model["depth"] <= z]["depth"] * 1e3
-                rhos = model[model["depth"] <= z]["density"] * 1e3
-                rho_integral = np.trapz(rhos, x=depths)
-                pressure = 9.81 * rho_integral / 1e9
-                return pressure
-
-            model["P"] = model.apply(calculate_pressure, axis=1)
-
-            # Clean up df
-            model = model[columns_to_keep]
-            model = model.round(3)
-
-            # Invert STW105
-            if ref_model == "stw105":
-                model = model.sort_values(by="depth", ascending=True)
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_1d_reference_models() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
-
-        return model
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get 1d subduction geotherm !!
+    # get subduction geotherm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_subduction_geotherm(self, segment="Central_Cascadia", slab_position="slabmoho"):
         """
@@ -889,170 +634,9 @@ class GFEMModel:
 
         return geotherm
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get hymatz profile !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_hymatz_profile(self, mantle_potential=1573, water_capacity=100):
-        """
-        """
-        # Get self attributes
-        targets = self.targets
-
-        try:
-            if water_capacity not in np.linspace(0, 100, 11, dtype=int):
-                raise Exception(f"HyMaTZ water capacity must be between 0 and 100 !")
-
-            if target is not None and target not in ["density", "Vp", "Vs", "H2O"]:
-                raise Exception(f"Unrecognized HyMaTZ target '{target}'!")
-
-            hymatz_model = HyMaTZ(mantle_potential, "Pyrolite", water_capacity)
-            results = hymatz_model.results
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_hymatz_profile() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
-
-        return results
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # extract target along geotherm !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _extract_target_along_geotherm(self, target, geotherm):
-        """
-        """
-        # Get self attributes
-        results = self.results
-
-        try:
-            # Get GFEM PTs and targets
-            P_vals, T_vals, target_vals = results["P"], results["T"], results[target]
-            gfem_points = np.vstack((T_vals, P_vals)).T
-
-            # Get geotherm PTs
-            geo_P, geo_T = geotherm["P"], geotherm["T"]
-            geo_points = np.array([geo_T, geo_P]).T
-
-            # Create interpolator
-            interpolator = LinearNDInterpolator(gfem_points, target_vals)
-
-            # Interpolate target values at the geotherm PT points
-            target_interp = interpolator(geo_points)
-
-            # Save in dataframe
-            df = pd.DataFrame({"P": geo_P, "T": geo_T, target: target_interp})
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _extract_target_along_geotherm() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
-
-        return df
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # compare depth profiles !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _compare_depth_profiles(self, P_gfem, target_gfem, P_ref, target_ref):
-        """
-        """
-        # Get self attributes
-        P_min = self.P_min
-        P_max = self.P_max
-
-        try:
-            # New x values for interpolation
-            x_new = np.linspace(P_min, P_max, len(P_gfem))
-
-            # Interpolate profile
-            P_ref, target_ref = x_new, np.interp(x_new, P_ref, target_ref)
-
-            # Create cropping masks
-            mask_ref = (P_ref >= P_min) & (P_ref <= P_max)
-            mask_gfem = (P_gfem >= P_min) & (P_gfem <= P_max)
-
-            # Crop profiles
-            P_ref, target_ref = P_ref[mask_ref], target_ref[mask_ref]
-            P_gfem, target_gfem = P_gfem[mask_gfem], target_gfem[mask_gfem]
-
-            # Create nan and inf masks
-            mask = (np.isnan(target_gfem) | np.isnan(target_ref) |
-                    np.isinf(target_gfem) | np.isinf(target_ref))
-
-            # Remove nans and inf
-            P_ref, target_ref = P_ref[~mask], target_ref[~mask]
-            P_gfem, target_gfem = P_gfem[~mask], target_gfem[~mask]
-
-            # Calculate rmse and r2 along profiles
-            r2 = np.round(r2_score(target_ref, target_gfem), 3)
-            rmse = np.round(np.sqrt(mean_squared_error(target_ref, target_gfem)), 3)
-
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _compare_depth_profiles() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return P_gfem, target_gfem, P_ref, target_ref, None, None
-
-        return P_gfem, target_gfem, P_ref, target_ref, rmse, r2
-
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.1.          Perple_X Functions             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # run perplex program !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _run_perplex_program(self, program_path, config_file):
-        # Get self attributes
-        timeout = self.timeout
-        verbose = self.verbose
-        log_file = self.log_file
-        model_out_dir = self.model_out_dir
-
-        # Get relative program path
-        relative_program_path = f"../../{program_path}"
-
-        try:
-            # Set permissions
-            os.chmod(program_path, 0o755)
-
-            if verbose >= 1:
-                print(f"  Running {program_path} with {config_file} ...")
-
-            # Open the subprocess and redirect input from the input file
-            with open(config_file, "rb") as input_stream:
-                process = subprocess.Popen(
-                    [relative_program_path], stdin=input_stream,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    shell=True, cwd=model_out_dir)
-
-            # Wait for the process to complete and capture its output
-            stdout, stderr = process.communicate(timeout=timeout)
-
-            if verbose >= 2:
-                print(f"{stdout.decode()}")
-
-            # Write to logfile
-            with open(log_file, "a") as log:
-                log.write(stdout.decode())
-                log.write(stderr.decode())
-
-            if process.returncode != 0:
-                raise RuntimeError(f"Error with perplex program '{program_path}'!")
-
-            elif verbose >= 2:
-                print(f"{program_path} output:")
-                print(f"{stdout.decode()}")
-
-        except subprocess.CalledProcessError as e:
-            print(f"Error: {e}")
-
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # write perplex config !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1281,6 +865,7 @@ class GFEMModel:
                  f"0\n"                  # Zero to finish
                  f"N\n"                  # Change default variable range ?
                  f"\n"                   # Select the grid resolution (enter to continue)
+                 f"5\n"                  # Average immiscible melt (if applicable)
                  f"0\n"                  # Zero to exit
                  )
         elif perplex_db == "stx21":
@@ -1503,7 +1088,7 @@ class GFEMModel:
         perplex_db = self.perplex_db
         model_built = self.model_built
         model_out_dir = self.model_out_dir
-        norm_sample_comp = self._get_normalized_sample_comp()
+        norm_sample_comp = self.norm_sample_comp
 
         try:
             # Check if model is built
@@ -1541,6 +1126,123 @@ class GFEMModel:
             return None
 
         return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # print perplex info !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _print_perplex_info(self):
+        """
+        """
+        # Get self attributes
+        res = self.res
+        sid = self.sid
+        P_min = self.P_min
+        P_max = self.P_max
+        T_min = self.T_min
+        T_max = self.T_max
+        source = self.source
+        targets = self.targets
+        ox_gfem = self.ox_gfem
+        features = self.features
+        perplex_db = self.perplex_db
+        model_out_dir = self.model_out_dir
+
+        oxwrp = textwrap.fill(", ".join(ox_gfem), width=80)
+        tgwrp = textwrap.fill(", ".join(targets), width=80,
+                              subsequent_indent="                  ")
+        ftwrp = textwrap.fill(", ".join(features), width=80,
+                              subsequent_indent="                  ")
+
+        print("+++++++++++++++++++++++++++++++++++++++++++++")
+        print(f"Perple_X model: {sid} {perplex_db}")
+        print("---------------------------------------------")
+        print(f"  PT resolution:  {res}")
+        print(f"  P range:        {P_min:.1f} - {P_max:.1f} GPa")
+        print(f"  T range:        {T_min:.0f} - {T_max:.0f} K")
+        print(f"  Sampleid:       {sid}")
+        print(f"  Source:         {source}")
+        print(f"  GFEM sys.:      {oxwrp}")
+        print(f"  Targets:        {tgwrp}")
+        print(f"  Features:       {ftwrp}")
+        print(f"  Thermo. data:   {perplex_db}")
+        print(f"  Model out dir:  {model_out_dir}")
+        print("  --------------------")
+
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # replace in file !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _replace_in_file(self, filepath, replacements):
+        """
+        """
+        try:
+            with open(filepath, "r") as file:
+                file_data = file.read()
+
+                for key, value in replacements.items():
+                    file_data = file_data.replace(key, value)
+
+            with open(filepath, "w") as file:
+                file.write(file_data)
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _replace_in_file() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
+
+        return None
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # run command line program !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _run_command_line_program(self, program_path, config_file):
+        # Get self attributes
+        timeout = self.timeout
+        verbose = self.verbose
+        log_file = self.log_file
+        model_out_dir = self.model_out_dir
+
+        # Get relative program path
+        relative_program_path = f"../../{program_path}"
+
+        try:
+            # Set permissions
+            os.chmod(program_path, 0o755)
+
+            if verbose >= 1:
+                print(f"  Running {program_path} with {config_file} ...")
+
+            # Open the subprocess and redirect input from the input file
+            with open(config_file, "rb") as input_stream:
+                process = subprocess.Popen(
+                    [relative_program_path], stdin=input_stream,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    shell=True, cwd=model_out_dir)
+
+            # Wait for the process to complete and capture its output
+            stdout, stderr = process.communicate(timeout=timeout)
+
+            if verbose >= 2:
+                print(f"{stdout.decode()}")
+
+            # Write to logfile
+            with open(log_file, "a") as log:
+                log.write(stdout.decode())
+                log.write(stderr.decode())
+
+            if process.returncode != 0:
+                raise RuntimeError(f"Error with perplex program '{program_path}'!")
+
+            elif verbose >= 2:
+                print(f"{program_path} output:")
+                print(f"{stdout.decode()}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # run perplex build !!
@@ -1581,7 +1283,7 @@ class GFEMModel:
                                    "Anderson-Gruneisen     F"})
 
             # Run program
-            self._run_perplex_program(program_path, config_file)
+            self._run_command_line_program(program_path, config_file)
 
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -1635,7 +1337,7 @@ class GFEMModel:
                                    "Anderson-Gruneisen     F"})
 
             # Run program
-            self._run_perplex_program(program_path, config_file)
+            self._run_command_line_program(program_path, config_file)
 
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -1701,7 +1403,7 @@ class GFEMModel:
 
             for name, config in config_files.items():
                 # Run program
-                self._run_perplex_program(program_path, config)
+                self._run_command_line_program(program_path, config)
 
                 if name == "targets":
                     # Rename werami output
@@ -1757,7 +1459,7 @@ class GFEMModel:
             program_path = f"Perple_X/pssect"
 
             # Run program
-            self._run_perplex_program(program_path, config_file)
+            self._run_command_line_program(program_path, config_file)
 
             # Rename pssect assemblages output
             shutil.copy(f"{model_out_dir}/"
@@ -1804,6 +1506,9 @@ class GFEMModel:
 
         return None
 
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.2.        Post-process GFEM Models         !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # read perplex targets !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1938,6 +1643,62 @@ class GFEMModel:
         return assemblage_dict
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # encode assemblages !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _encode_assemblages(self, assemblages):
+        """
+        """
+        # Get self attributes
+        model_out_dir = self.model_out_dir
+
+        try:
+            unique_assemblages = {}
+            encoded_assemblages = []
+
+            # Encoding unique phase assemblages
+            for assemblage in assemblages:
+                assemblage_tuple = tuple(sorted(assemblage))
+
+                if assemblage_tuple and not any(
+                        np.isnan(item) for item in assemblage_tuple if
+                        isinstance(item, (int, float))):
+                    if assemblage_tuple not in unique_assemblages:
+                        unique_assemblages[assemblage_tuple] = len(unique_assemblages) + 1
+
+            # Create dataframe
+            df = pd.DataFrame(list(unique_assemblages.items()),
+                              columns=["assemblage", "index"])
+
+            # Put spaces between phases
+            df["assemblage"] = df["assemblage"].apply(" ".join)
+
+            # Reorder columns
+            df = df[["index", "assemblage"]]
+
+            # Save to csv
+            assemblages_csv = f"{model_out_dir}/assemblages.csv"
+            df.to_csv(assemblages_csv, index=False)
+
+            # Encoding phase assemblage numbers
+            for assemblage in assemblages:
+                if assemblage == "":
+                    encoded_assemblages.append(np.nan)
+
+                else:
+                    encoded_assemblage = unique_assemblages[tuple(sorted(assemblage))]
+                    encoded_assemblages.append(encoded_assemblage)
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _encode_assemblages() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
+
+        return encoded_assemblages
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # process perplex results !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_perplex_results(self):
@@ -2026,9 +1787,6 @@ class GFEMModel:
 
         return None
 
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .1.2.        Post-process GFEM Models         !!! ++
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get results !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2042,7 +1800,7 @@ class GFEMModel:
 
         try:
             if not model_built:
-                raise Exception("No GFEM model! Call build_model() first ...")
+                raise Exception("No GFEM model! Call build() first ...")
 
             # Get filepaths for gfem output
             filepath = f"{model_out_dir}/results.csv"
@@ -2050,7 +1808,7 @@ class GFEMModel:
             if not os.path.exists(filepath):
                 raise Exception("No results to read!")
 
-            if verbose >= 1:
+            if verbose >= 2:
                 print(f"  Reading results from {filepath} ...")
 
             # Read results
@@ -2071,6 +1829,67 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # process array !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _process_array(self, array, n_neighbors=1, threshold=5):
+        """
+        """
+        try:
+            # Create a copy of the input array to avoid modifying the original array
+            result_array = array.copy()
+
+            # Iterate through each element of the array
+            for i in range(len(result_array)):
+                for j in range(len(result_array[i])):
+                    # Define the neighborhood indices
+                    neighbors = []
+
+                    for x in range(i - n_neighbors, i + n_neighbors + 1):
+                        for y in range(j - n_neighbors, j + n_neighbors + 1):
+                            if (0 <= x < len(result_array) and
+                                0 <= y < len(result_array[i]) and
+                                (x != i or y != j)):
+                                neighbors.append((x, y))
+
+                    # Get neighborhood values
+                    surrounding_values = [result_array[x, y] for x, y in neighbors if not
+                                          np.isnan(result_array[x, y])]
+
+                    # Define anomalies
+                    if surrounding_values:
+                        mean_neighbors = np.mean(surrounding_values)
+                        std_neighbors = np.std(surrounding_values)
+                        anom_threshold = threshold * std_neighbors
+
+                        # Impute anomalies
+                        if abs(result_array[i, j] - mean_neighbors) > anom_threshold:
+                            result_array[i, j] = np.mean(surrounding_values)
+
+                        # Impute nans
+                        elif np.isnan(result_array[i, j]):
+                            nan_count = sum(1 for x, y in neighbors if
+                                            0 <= x < len(result_array) and
+                                            0 <= y < len(result_array[i]) and
+                                            np.isnan(result_array[x, y]))
+
+                            if nan_count >= int((((((n_neighbors * 2) + 1)**2) - 1) / 3)):
+                                result_array[i, j] = 0
+                            else:
+                                result_array[i, j] = np.mean(surrounding_values)
+                    else:
+                        result_array[i, j] = 0
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _process_array() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
+
+        return result_array.flatten()
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # get pt array !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_pt_array(self):
@@ -2083,12 +1902,12 @@ class GFEMModel:
 
         try:
             if not model_built:
-                raise Exception("No GFEM model! Call build_model() first ...")
+                raise Exception("No GFEM model! Call build() first ...")
 
             if not results:
                 raise Exception("No GFEM model results! Call get_results() first ...")
 
-            if verbose >= 1:
+            if verbose >= 2:
                 print(f"  Getting PT array ...")
 
             # Get P T arrays
@@ -2123,12 +1942,12 @@ class GFEMModel:
 
         try:
             if not model_built:
-                raise Exception("No GFEM model! Call build_model() first ...")
+                raise Exception("No GFEM model! Call build() first ...")
 
             if not results:
                 raise Exception("No GFEM model results! Call get_results() first ...")
 
-            if verbose >= 1:
+            if verbose >= 2:
                 print(f"  Getting target array ...")
 
             # Initialize empty list for target arrays
@@ -2160,6 +1979,43 @@ class GFEMModel:
 
         return None
 
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # extract target along geotherm !!
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _extract_target_along_geotherm(self, target, geotherm):
+        """
+        """
+        # Get self attributes
+        results = self.results
+
+        try:
+            # Get GFEM PTs and targets
+            P_vals, T_vals, target_vals = results["P"], results["T"], results[target]
+            gfem_points = np.vstack((T_vals, P_vals)).T
+
+            # Get geotherm PTs
+            geo_P, geo_T = geotherm["P"], geotherm["T"]
+            geo_points = np.array([geo_T, geo_P]).T
+
+            # Create interpolator
+            interpolator = LinearNDInterpolator(gfem_points, target_vals)
+
+            # Interpolate target values at the geotherm PT points
+            target_interp = interpolator(geo_points)
+
+            # Save in dataframe
+            df = pd.DataFrame({"P": geo_P, "T": geo_T, target: target_interp})
+
+        except Exception as e:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"!!! ERROR in _extract_target_along_geotherm() !!!")
+            print(f"{e}")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            traceback.print_exc()
+            return None
+
+        return df
+
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.3.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2188,10 +2044,10 @@ class GFEMModel:
         existing_figs = []
         for i, target in enumerate(targets):
             if gradient:
-                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-grad-{perplex_db}-"
+                path = (f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-grad-"
                         f"{type}.png")
             else:
-                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-{perplex_db}-"
+                path = (f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-"
                         f"{type}.png")
 
             check = os.path.exists(path)
@@ -2224,7 +2080,7 @@ class GFEMModel:
         # Check for existing plots
         existing_figs = []
         for i, target in enumerate(targets):
-            path = f"{fig_dir}/{sid}-{target.replace("_", "-")}-surf-{perplex_db}.png"
+            path = f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-surf.png"
 
             check = os.path.exists(path)
 
@@ -2259,29 +2115,29 @@ class GFEMModel:
         existing_figs = []
         for i, target in enumerate(targets):
             if P_min < 6:
-                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
-                        f"sub-slabtop-{perplex_db}.png")
+                path = (f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                        f"depth-profile-sub-slabtop.png")
                 check = os.path.exists(path)
 
                 if check:
                     existing_figs.append(check)
 
-                path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
-                        f"sub-slabmoho-{perplex_db}.png")
+                path = (f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                        f"depth-profile-sub-slabmoho.png")
                 check = os.path.exists(path)
 
                 if check:
                     existing_figs.append(check)
 
-            path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
-                    f"craton-{perplex_db}.png")
+            path = (f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                    f"depth-profile-craton.png")
             check = os.path.exists(path)
 
             if check:
                 existing_figs.append(check)
 
-            path = (f"{fig_dir}/{sid}-{target.replace("_", "-")}-depth-profile-"
-                    f"mor-{perplex_db}.png")
+            path = (f"{fig_dir}/{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                    f"depth-profile-mor.png")
             check = os.path.exists(path)
 
             if check:
@@ -2315,7 +2171,7 @@ class GFEMModel:
         for i, seg in enumerate(segs):
             if P_min < 6:
                 seg_lab = seg.replace("_", "-").lower()
-                path = (f"{fig_dir}/{sid}-slabtop-{seg_lab}-assemblages-{perplex_db}.png")
+                path = (f"{fig_dir}/{sid}-{perplex_db}-slabtop-{seg_lab}-assemblages.png")
 
                 check = os.path.exists(path)
 
@@ -2323,7 +2179,7 @@ class GFEMModel:
                     existing_figs.append(check)
 
                 seg_lab = seg.replace("_", "-").lower()
-                path = (f"{fig_dir}/{sid}-slabmoho-{seg_lab}-assemblages-{perplex_db}.png")
+                path = (f"{fig_dir}/{sid}-{perplex_db}-slabmoho-{seg_lab}-assemblages.png")
 
                 check = os.path.exists(path)
 
@@ -2331,7 +2187,7 @@ class GFEMModel:
                     existing_figs.append(check)
 
         for i, pot in enumerate(pot_Ts):
-            path = f"{fig_dir}/{sid}-craton-{pot}-assemblages-{perplex_db}.png"
+            path = f"{fig_dir}/{sid}-{perplex_db}-craton-{pot}-assemblages.png"
 
             check = os.path.exists(path)
 
@@ -2339,7 +2195,7 @@ class GFEMModel:
                 existing_figs.append(check)
 
         for i, pot in enumerate(pot_Ts):
-            path = f"{fig_dir}/{sid}-mor-{pot}-assemblages-{perplex_db}.png"
+            path = f"{fig_dir}/{sid}-{perplex_db}-mor-{pot}-assemblages.png"
 
             check = os.path.exists(path)
 
@@ -2382,7 +2238,7 @@ class GFEMModel:
         extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
 
         if not model_built:
-            raise Exception("No GFEM model! Call build_model() first ...")
+            raise Exception("No GFEM model! Call build() first ...")
 
         if not results:
             raise Exception("No GFEM model results! Call get_results() first ...")
@@ -2445,7 +2301,7 @@ class GFEMModel:
             target_label = target_labels_map[target]
 
             # Set filename
-            filename = f"{sid}-{target.replace("_", "-")}-{perplex_db}-{type}.png"
+            filename = f"{sid}-{perplex_db}-{target.replace("_", "-")}-{type}.png"
             if target not in ["assemblage_index", "phase_assemblage_variance"]:
                 title = f"{target_label} ({target_units_map[target]})"
             else:
@@ -2472,7 +2328,7 @@ class GFEMModel:
                 else:
                     square_target = np.full_like(edges_x, np.nan)
 
-                filename = f"{sid}-{target.replace("_", "-")}-grad-{perplex_db}-{type}.png"
+                filename = f"{sid}-{perplex_db}-{target.replace("_", "-")}-grad-{type}.png"
                 title = f"{target_label} Gradient"
 
             # Use discrete colorscale
@@ -2483,13 +2339,13 @@ class GFEMModel:
 
             # Reverse color scale
             if palette in ["grey"]:
-                if target in ["variance"]:
+                if target in ["phase_assemblage_variance"]:
                     color_reverse = True
                 else:
                     color_reverse = False
             else:
-                if target in ["variance"]:
-                    color_reverse = True
+                if target in ["phase_assemblage_variance"]:
+                    color_reverse = False
                 else:
                     color_reverse = True
 
@@ -2699,7 +2555,7 @@ class GFEMModel:
         T = results["T"].reshape(res + 1, res + 1)
 
         if not model_built:
-            raise Exception("No GFEM model! Call build_model() first ...")
+            raise Exception("No GFEM model! Call build() first ...")
 
         if not results:
             raise Exception("No GFEM model results! Call get_results() first ...")
@@ -2730,7 +2586,7 @@ class GFEMModel:
             target_label = target_labels_map[target]
 
             # Set filename
-            filename = f"{sid}-{target.replace("_", "-")}-surf-{perplex_db}.png"
+            filename = f"{sid}-{perplex_db}-{target.replace("_", "-")}-surf.png"
             if target not in ["assemblage_index", "phase_assemblage_variance"]:
                 title = f"{target_label} ({target_units_map[target]})"
             else:
@@ -2747,13 +2603,13 @@ class GFEMModel:
 
             # Reverse color scale
             if palette in ["grey"]:
-                if target in ["variance"]:
+                if target in ["phase_assemblage_variance"]:
                     color_reverse = True
                 else:
                     color_reverse = False
             else:
-                if target in ["variance"]:
-                    color_reverse = True
+                if target in ["phase_assemblage_variance"]:
+                    color_reverse = False
                 else:
                     color_reverse = True
 
@@ -2952,7 +2808,7 @@ class GFEMModel:
         target_labels_map = self.target_labels_map
 
         if not model_built:
-            raise Exception("No GFEM model! Call build_model() first ...")
+            raise Exception("No GFEM model! Call build() first ...")
 
         if not os.path.exists(data_dir):
             raise Exception(f"Data not found at {data_dir} !")
@@ -3007,12 +2863,12 @@ class GFEMModel:
                 if type == "sub":
                     for j, seg in enumerate(segs):
                         if slab_position == "slabtop":
-                            filename = (f"{sid}-{target.replace("_", "-")}-depth-profile-"
-                                        f"sub-slabtop-{perplex_db}.png")
+                            filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                                        f"depth-profile-sub-slabtop.png")
                             gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
                         elif slab_position == "slabmoho":
-                            filename = (f"{sid}-{target.replace("_", "-")}-depth-profile-"
-                                        f"sub-slabmoho-{perplex_db}.png")
+                            filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                                        f"depth-profile-sub-slabmoho.png")
                             gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
                         df_gt = self._extract_target_along_geotherm(target, gt)
                         seg_lab = seg.replace("_", " ").lower()
@@ -3020,8 +2876,8 @@ class GFEMModel:
                         Pprof.append(df_gt["P"])
                         tprof.append(df_gt[target])
                 elif type == "craton":
-                    filename = (f"{sid}-{target.replace("_", "-")}-depth-profile-"
-                                f"craton-{perplex_db}.png")
+                    filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                                f"depth-profile-craton.png")
                     for j, pot in enumerate(pot_Ts):
                         gt = self._get_mantle_geotherm(pot)
                         df_gt = self._extract_target_along_geotherm(target, gt)
@@ -3029,8 +2885,8 @@ class GFEMModel:
                         Pprof.append(df_gt["P"])
                         tprof.append(df_gt[target])
                 elif type == "mor":
-                    filename = (f"{sid}-{target.replace("_", "-")}-depth-profile-"
-                                f"mor-{perplex_db}.png")
+                    filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
+                                f"depth-profile-mor.png")
                     for j, pot in enumerate(pot_Ts):
                         gt = self._get_mantle_geotherm(
                             pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
@@ -3103,7 +2959,7 @@ class GFEMModel:
         model_out_dir = self.model_out_dir
 
         if not model_built:
-            raise Exception("No GFEM model! Call build_model() first ...")
+            raise Exception("No GFEM model! Call build() first ...")
 
         if not os.path.exists(fig_dir):
             os.makedirs(fig_dir, exist_ok=True)
@@ -3196,8 +3052,6 @@ class GFEMModel:
 
         # Assign unique colors to phases that meet modal_thresh
         num_colors = len(phase_names)
-        hues = np.linspace(0, 1, num_colors, endpoint=False)
-        colors = [hsv_to_rgb([hue, 0.8, 0.75]) for hue in hues]
         colormap = plt.colormaps["tab20"]
         colors = [colormap(i) for i in range(num_colors)]
         color_map = {col_name: colors[idx] for idx, col_name in enumerate(phase_names)}
@@ -3211,28 +3065,26 @@ class GFEMModel:
                 labels.append(seg_lab)
                 if slab_position == "slabtop":
                     tabfiles.append(f"{model_out_dir}/slabtop-{seg}.tab")
-                    filenames.append(f"{sid}-slabtop-{seg_lab}-assemblages-"
-                                     f"{perplex_db}.png")
+                    filenames.append(f"{sid}-{perplex_db}-slabtop-{seg_lab}-assemblages.png")
                     gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
                     gts.append(gt)
                 elif slab_position == "slabmoho":
                     tabfiles.append(f"{model_out_dir}/slabmoho-{seg}.tab")
-                    filenames.append(f"{sid}-slabmoho-{seg_lab}-assemblages-"
-                                     f"{perplex_db}.png")
+                    filenames.append(f"{sid}-{perplex_db}-slabmoho-{seg_lab}-assemblages.png")
                     gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
                     gts.append(gt)
         elif type == "craton":
             for pot in pot_Ts:
                 labels.append(pot)
                 tabfiles.append(f"{model_out_dir}/craton-{pot}.tab")
-                filenames.append(f"{sid}-craton-{pot}-assemblages-{perplex_db}.png")
+                filenames.append(f"{sid}-{perplex_db}-craton-{pot}-assemblages.png")
                 gt = self._get_mantle_geotherm(pot)
                 gts.append(gt)
         elif type == "mor":
             for pot in pot_Ts:
                 labels.append(pot)
                 tabfiles.append(f"{model_out_dir}/mor-{pot}.tab")
-                filenames.append(f"{sid}-mor-{pot}-assemblages-{perplex_db}.png")
+                filenames.append(f"{sid}-{perplex_db}-mor-{pot}-assemblages.png")
                 gt = self._get_mantle_geotherm(
                     pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
                     crust_thickness=7e3, litho_thickness=1e3)
@@ -3329,9 +3181,9 @@ class GFEMModel:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize model !!
+    # visualize !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize_model(self):
+    def visualize(self):
         """
         """
         # Get self attributes
@@ -3340,7 +3192,7 @@ class GFEMModel:
 
         try:
             if not model_built:
-                raise Exception("No GFEM model! Call build_model() first ...")
+                raise Exception("No GFEM model! Call build() first ...")
             if not results:
                 self._get_results()
                 self._get_target_array()
@@ -3371,7 +3223,7 @@ class GFEMModel:
                 self._visualize_geotherm_assemblages(type="sub", slab_position="slabmoho")
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in visualize_model() !!!")
+            print(f"!!! ERROR in visualize() !!!")
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
@@ -3382,9 +3234,9 @@ class GFEMModel:
     #+ .1.4.           Build GFEM Models             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # build model !!
+    # build !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def build_model(self):
+    def build(self):
         """
         """
         max_retries = 3
@@ -3392,13 +3244,13 @@ class GFEMModel:
             if self.model_built:
                 break
             try:
-                self._print_gfem_info()
+                self._print_perplex_info()
                 self._run_perplex()
                 self._process_perplex_results()
                 break
             except Exception as e:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in build_model() !!!")
+                print(f"!!! ERROR in build() !!!")
                 print(f"{e}")
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 traceback.print_exc()
@@ -3864,7 +3716,7 @@ def visualize_depth_profiles_comps(gfem_models, figwidth=6.3, figheight=5.5, fon
         fig.text(0.49, 0.50, "d)", fontsize=fontsize * 1.4)
 
         # Save the plot to a file
-        filename = f"depth-profile-comps-{perplex_db}.png"
+        filename = f"{perplex_db}-depth-profile-comps.png"
         plt.savefig(f"{fig_dir}/{filename}")
 
         # Close device
@@ -3919,7 +3771,7 @@ def gfem_iteration(args, queue):
         queue.put(stdout_buffer.getvalue())
 
         if not iteration.model_built:
-            iteration.build_model()
+            iteration.build()
             queue.put(stdout_buffer.getvalue())
 
     return iteration
@@ -3942,9 +3794,9 @@ def build_gfem_models(source, sampleids=None, perplex_db="hp602", res=128, Pmin=
         raise Exception(f"Source {source} does not exist!")
 
     models = []
-    smpwrp = textwrap.fill(", ".join(sampleids), width=80, subsequent_indent="  ")
-    print(f"Building {perplex_db} GFEM models for {len(sampleids)} samples:")
-    print(f"  {smpwrp}")
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    print(f"Building {perplex_db} GFEM models for {len(sampleids)} samples ...")
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     # Define number of processors
     if nprocs is None or nprocs > os.cpu_count():
@@ -4007,24 +3859,23 @@ def main():
     """
     try:
         gfems = {}
-        gts, res = "mor", 64
         sources = {"m": "assets/synth-mids.csv", "r": "assets/synth-rnds.csv"}
 
         # Build GFEM models
         for name, source in sources.items():
             sids = get_sampleids(source)
-            P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-            gfems[name + "hp"] = build_gfem_models(source, sids, "hp02", res,
-                                                   P_min, P_max, T_min, T_max, gts)
+            res, P_min, P_max, T_min, T_max = 64, 0.1, 8.1, 273, 1973
+            gfems[name + "hp"] = build_gfem_models(
+                source, sids, "hp02", res, P_min, P_max, T_min, T_max)
 
             P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
-            gfems[name + "stx"] = build_gfem_models(source, sids, "stx21", res,
-                                                    P_min, P_max, T_min, T_max, gts)
+            gfems[name + "stx"] = build_gfem_models(
+                source, sids, "stx21", res, P_min, P_max, T_min, T_max)
 
         # Visualize models
         for name, models in gfems.items():
             for m in models:
-                m.visualize_model()
+                m.visualize()
 
         # Compose plots
         for name, models in gfems.items():

@@ -16,48 +16,40 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Testing gfem models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#    res, src, samp = 128, "assets/synth-mids.csv", "sm005-loi005"
+#    res, src, samp = 32, "assets/synth-mids.csv", "sm005-loi005"
 #
 #    # hp model
 #    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
 #    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
-#    model_shallow.build_model()
-#    model_shallow.visualize_model()
+#    model_shallow.build()
+#    model_shallow.visualize()
 #
 #    # stx model
 #    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
 #    model_deep = GFEMModel("stx21", samp, src, res, P_min, P_max, T_min, T_max)
-#    model_deep.build_model()
-#    model_deep.visualize_model()
+#    model_deep.build()
+#    model_deep.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Build GFEM models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    res, src = 32, "assets/synth-mids.csv"
+    res, src = 64, "assets/synth-mids.csv"
     sids = get_sampleids(src)
-
+#
 #    # stx models
 #    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
 #    gfems = build_gfem_models(src, sids, "stx21", res, P_min, P_max, T_min, T_max)
 #
-#    # visualize models
-#    for m in gfems:
-#        m.visualize_model()
-
     # hp models
     P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-    gfems = build_gfem_models(src, sids[::8], "hp02", res, P_min, P_max, T_min, T_max)
-
-#    # visualize models
-#    for m in gfems:
-#        m.visualize_model()
+    gfems = build_gfem_models(src, sids[::22], "hp02", res, P_min, P_max, T_min, T_max)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Train RocMLMs
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    model = RocMLM(gfems)
-    model.train_rocmlm()
-    model.visualize_rocmlm()
+    model = RocMLM(gfems, "NN", tune=False)
+    model.train()
+    model.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Visualize training dataset design
@@ -65,6 +57,9 @@ def main():
     def visualize_training_dataset_design(model_shallow, model_deep):
         """
         """
+        if not os.path.exists("figs"):
+            os.makedirs("figs", exist_ok=True)
+
         res = model_shallow.res
         P_min_sh, P_max_sh = model_shallow.P_min, model_shallow.P_max
         P_min_dp, P_max_dp = model_deep.P_min, model_deep.P_max
@@ -80,7 +75,8 @@ def main():
         T_dp, P_dp = np.meshgrid(T_dp_grid, P_dp_grid)
 
         sub1 = model_shallow._get_subduction_geotherm("Kamchatka")
-        sub2 = model_shallow._get_subduction_geotherm("Central_Cascadia", position="top")
+        sub2 = model_shallow._get_subduction_geotherm("Central_Cascadia",
+                                                      slab_position="slabtop")
         mantle1 = model_deep._get_mantle_geotherm(693)
         mantle2 = model_shallow._get_mantle_geotherm(1773)
         mantle3 = model_deep._get_mantle_geotherm(1773)
@@ -141,7 +137,9 @@ def main():
         ax_inset.set_xlim(T_min_sh, T_max_sh)
         ax_inset.set_ylim(P_min_sh, P_max_sh)
 
-        plt.savefig("test.png")
+        plt.savefig("figs/test.png")
+
+#    visualize_training_dataset_design(model_shallow, model_deep)
 
 #    ####################################################################################
 #    Test rocmlm inference speed

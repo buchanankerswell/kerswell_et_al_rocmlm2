@@ -43,14 +43,11 @@ rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
 	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/rocmlm.py $(LOG)
 	@echo "=============================================" $(LOG)
 
-gfems: mixing_arrays hymatz
+gfems: mixing_arrays
 	@$(CONDAPYTHON) -u python/gfem.py $(LOG)
 
 mixing_arrays: initialize
 	@$(CONDAPYTHON) -u python/pca.py $(LOG)
-
-hymatz:
-	@$(CONDAPYTHON) -u python/hymatz.py $(LOG)
 
 initialize: $(LOGFILE) $(PYTHON) create_conda_env get_assets
 
