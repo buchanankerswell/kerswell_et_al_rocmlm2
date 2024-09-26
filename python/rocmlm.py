@@ -15,31 +15,23 @@ import traceback
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import multiprocessing as mp
+import concurrent.futures as cf
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from scipy.interpolate import interp1d
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import train_test_split
-from scipy.interpolate import RegularGridInterpolator
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_squared_error, r2_score
-
-warnings.filterwarnings("ignore", category=ConvergenceWarning)
-warnings.filterwarnings("ignore", category=UserWarning, message=".*tight_layout.*")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-import seaborn as sns
 import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
 import matplotlib.ticker as ticker
 from PIL import Image, ImageDraw, ImageFont
 from matplotlib.colors import ListedColormap, Normalize, SymLogNorm
@@ -85,8 +77,6 @@ class RocMLM:
         self.gfem_target_units_map = None
         self.gfem_target_labels_map = None
         self.gfem_target_digits_map = None
-
-        # Get GFEM model metadata
         self._get_gfem_model_metadata()
 
         # RocMLM and training arrays
@@ -101,23 +91,20 @@ class RocMLM:
         self.rocmlm_feature_array_shape_square = None
         self.rocmlm_features = ["XI_FRAC", "LOI"]
         self.rocmlm_targets = ["density", "Vp", "Vs"]
-#        self.rocmlm_targets = ["density", "Vp", "Vs", "H2O", "melt_fraction",
-#                               "molar_entropy", "molar_heat_capacity"]
-
-        # Get RocMLM training data
+#        self.rocmlm_targets = ["density", "Vp", "Vs", "melt_fraction", "H2O"]
         self._get_rocmlm_training_data()
 
         # RocMLM options
         self.kfolds = 5
-        self.epochs = int(1e3)
+        self.epochs = int(2e2)
         mask = np.any(np.isnan(self.rocmlm_target_array), axis=1)
-        self.batch_size = int(len(self.rocmlm_target_array[~mask,:]) * 0.2)
+        self.batch_size = int(len(self.rocmlm_target_array[~mask,:]) * 0.1)
         self.batch_size = max(self.batch_size, 8)
 
         # NN architecture
         L8, L16, L32 = int(8), int(16), int(32)
         nn_arch = (L8, L8, L8)
-#        nn_arch = (L32, L16, L8, L8, L16, L32)
+#        nn_arch = (L8, L8, L8, L8, L8, L8)
 
         # RocMLM labels
         self.rocmlm_label_map = {
@@ -146,8 +133,7 @@ class RocMLM:
                              f"F{self.rocmlm_feature_array_shape_square[3]}-"
                              f"{self.gfem_db}")
         self.fig_dir = (f"figs/rocmlm/{self.model_prefix}")
-        self.rocmlm_path = f"{self.model_out_dir}/{self.model_prefix}.pkl"
-        self.rocmlm_only_path = f"{self.model_out_dir}/{self.model_prefix}-model-only.pkl"
+        self.rocmlm_path = f"{self.model_out_dir}/{self.model_prefix}-pretrained.pkl"
         self.scaler_X_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_X.pkl"
         self.scaler_y_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_y.pkl"
 
@@ -160,12 +146,12 @@ class RocMLM:
         self.rocmlm_prediction_array_square = np.array([])
 
         # Rocmlm training checks
-        self.rocmlm_error = None
-        self.rocmlm_tuned = False
-        self.rocmlm_trained = False
-        self.rocmlm_hyperparams = None
-        self.rocmlm_training_error = False
-        self.rocmlm_cross_validated = False
+        self.model_error = None
+        self.model_tuned = False
+        self.model_trained = False
+        self.model_hyperparams = None
+        self.model_training_error = False
+        self.model_cross_validated = False
 
         # Set np array printing option
         np.set_printoptions(precision=3, suppress=True)
@@ -328,6 +314,13 @@ class RocMLM:
             self.rocmlm_target_array_shape_square = rocmlm_target_array_shape_square
             self.rocmlm_feature_array_shape_square = rocmlm_feature_array_shape_square
 
+            gfem_target_array_square = \
+                rocmlm_target_array.reshape(rocmlm_target_array_shape_square)
+            gfem_feature_array_square = \
+                rocmlm_feature_array.reshape(rocmlm_feature_array_shape_square)
+            self.gfem_target_array_square = gfem_target_array_square
+            self.gfem_feature_array_square = gfem_feature_array_square
+
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print(f"!!! ERROR in _get_rocmlm_training_data() !!!")
@@ -349,23 +342,20 @@ class RocMLM:
         rocmlm_path = self.rocmlm_path
         model_out_dir = self.model_out_dir
 
-        # Check for existing model build
-        if os.path.exists(model_out_dir):
-            if os.path.exists(rocmlm_path):
-                if verbose >= 1:
-                    print(f"Found pretrained model {rocmlm_path} !")
-                try:
-                    self.rocmlm_trained = True
-                    model = joblib.load(rocmlm_path)
-                except Exception as e:
-                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    print(f"!!! ERROR in _check_existing_model() !!!")
-                    print(f"{e}")
-                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                    traceback.print_exc()
-                    return None
-            else:
-                os.makedirs(model_out_dir, exist_ok=True)
+        model = None
+
+        if os.path.exists(rocmlm_path):
+            try:
+                if verbose >= 1: print(f"  Found pretrained model {rocmlm_path} !")
+                self.model_trained = True
+                self.load_pretrained_model(f"{rocmlm_path}")
+            except Exception as e:
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"!!! ERROR in _check_existing_model() !!!")
+                print(f"{e}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                traceback.print_exc()
+                return None
         else:
             os.makedirs(model_out_dir, exist_ok=True)
 
@@ -374,13 +364,42 @@ class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # load pretrained model
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def load_pretrained_model(file_path):
+    def load_pretrained_model(self, file_path):
         """
         """
+        # Get self attributes
+        verbose = self.verbose
+        rocmlm_path = self.rocmlm_path
+        scaler_X_path = self.scaler_X_path
+        scaler_y_path = self.scaler_y_path
+
         if os.path.exists(file_path):
             try:
-                print(f"  Loading RocMLM object from {file_path} ...")
-                model = joblib.load(file_path)
+                if verbose >= 1: print(f"  Loading RocMLM object from {file_path} ...")
+                rocmlm = joblib.load(rocmlm_path)
+                scaler_X = joblib.load(scaler_X_path)
+                scaler_y = joblib.load(scaler_y_path)
+                self._get_gfem_model_metadata()
+                self._get_rocmlm_training_data()
+                self.rocmlm = rocmlm
+
+                target_array = self.rocmlm_target_array.copy()
+                feature_array = self.rocmlm_feature_array.copy()
+                rocmlm_target_array_shape_square = self.rocmlm_target_array_shape_square
+
+                X, y = feature_array.copy(), target_array.copy()
+
+                X_scaled = scaler_X.transform(X)
+
+                pred_scaled = rocmlm.predict(X_scaled)
+
+                pred_original = scaler_y.inverse_transform(pred_scaled)
+
+                rocmlm_prediction_array_square = pred_original.reshape(
+                    rocmlm_target_array_shape_square)
+
+                self.rocmlm_prediction_array_square = rocmlm_prediction_array_square
+
             except Exception as e:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"!!! ERROR in load_pretrained_model() !!!")
@@ -391,7 +410,7 @@ class RocMLM:
         else:
             print(f"File {file_path} does not exist !")
 
-        return model
+        return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # scale arrays !!
@@ -400,32 +419,22 @@ class RocMLM:
         """
         """
         try:
-            # Reshape the features and targets arrays
             X = feature_array
             y = target_array
 
-            # Replace inf with nan
             X[~np.isfinite(X)] = np.nan
             y[~np.isfinite(y)] = np.nan
 
-            # Create nan mask
             mask = np.any(np.isnan(y), axis=1)
-
-            # Remove nans
             X, y = X[~mask,:], y[~mask,:]
 #            X, y = np.nan_to_num(X), np.nan_to_num(y)
 
-            # Check for infinity in input data
             if not np.isfinite(X).all() or not np.isfinite(y).all():
                 raise Exception("Input data contains NaN or infinity values !")
 
-            # Initialize scalers
             scaler_X, scaler_y = StandardScaler(), StandardScaler()
 
-            # Scale features array
             X_scaled = scaler_X.fit_transform(X)
-
-            # Scale the target array
             y_scaled = scaler_y.fit_transform(y)
 
         except Exception as e:
@@ -466,7 +475,6 @@ class RocMLM:
             if rocmlm_target_array.size == 0:
                 raise Exception("No training targets !")
 
-            # Scale training dataset
             _, _, _, _, X_scaled, y_scaled = self._scale_arrays(
                 rocmlm_feature_array, rocmlm_target_array)
 
@@ -474,7 +482,6 @@ class RocMLM:
                 print(f"  Configuring model {model_prefix} ...")
 
             if tune:
-                # Hyperparameter tuning with GridsearchCV
                 if verbose >= 1:
                     print(f"  Tuning model {model_prefix} ...")
 
@@ -498,15 +505,12 @@ class RocMLM:
                     model = MLPRegressor(
                         nn_arch, random_state=seed,
                         learning_rate_init=grid_search.best_params_["learning_rate_init"])
-                self.rocmlm_tuned = True
+                self.model_tuned = True
             else:
                 model = default_rocmlm_map[ml_algo]
 
-            # Get trained model
             self.rocmlm = model
-
-            # Get hyperparameters
-            self.rocmlm_hyperparams = model.get_params()
+            self.model_hyperparams = model.get_params()
 
         except Exception as e:
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -532,7 +536,7 @@ class RocMLM:
         rocmlm_targets = self.rocmlm_targets
         rocmlm_features = self.rocmlm_features
         rocmlm_label_map = self.rocmlm_label_map
-        rocmlm_hyperparams = self.rocmlm_hyperparams
+        model_hyperparams = self.model_hyperparams
         rocmlm_target_array = self.rocmlm_target_array
         rocmlm_feature_array = self.rocmlm_feature_array
 
@@ -551,7 +555,7 @@ class RocMLM:
         print(f"    features array shape: {rocmlm_feature_array.shape}")
         print(f"    targets array shape: {rocmlm_target_array.shape}")
         print(f"    hyperparameters:")
-        for key, value in rocmlm_hyperparams.items():
+        for key, value in model_hyperparams.items():
             print(f"        {key}: {value}")
         print("---------------------------------------------")
 
@@ -795,39 +799,25 @@ class RocMLM:
         rocmlm_feature_array = self.rocmlm_feature_array
 
         try:
-            # Check for training features
             if rocmlm_feature_array.size == 0:
                 raise Exception("No training features !")
 
-            # Check for training targets
             if rocmlm_target_array.size == 0:
                 raise Exception("No training targets !")
 
-            # Scale training dataset
             X, _, _, _, _, _ = self._scale_arrays(rocmlm_feature_array, rocmlm_target_array)
 
-            # Check for ml model
-            if self.ml_algo is None:
-                raise Exception("No ML model! Call _configure_rocmlm() first ...")
-
-            # K-fold cross validation
             kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
 
-            # Create list of args for mp pooling
             fold_args = [(train_idx, test_idx) for _, (train_idx, test_idx) in
                          enumerate(kf.split(X))]
 
-            # Create a multiprocessing pool
-            with mp.Pool(processes=nprocs) as pool:
-                results = pool.map(self._kfold_itr, fold_args)
+            with cf.ProcessPoolExecutor(max_workers=nprocs) as executor:
+                results = list(tqdm(executor.map(self._kfold_itr, fold_args),
+                                    total=len(fold_args), desc="Processing folds ..."))
 
-                # Wait for all processes
-                pool.close()
-                pool.join()
 
-            self.rocmlm_cross_validated = True
-
-            # Process cross validation results
+            self.model_cross_validated = True
             self._process_kfold_results(results)
 
         except Exception as e:
@@ -852,20 +842,19 @@ class RocMLM:
         rocmlm = self.rocmlm
         ml_algo = self.ml_algo
         batch_size = self.batch_size
+        rocmlm_path = self.rocmlm_path
         model_prefix = self.model_prefix
         scaler_X_path = self.scaler_X_path
         scaler_y_path = self.scaler_y_path
         target_array = self.rocmlm_target_array.copy()
         feature_array = self.rocmlm_feature_array.copy()
-        rocmlm_only_path = self.rocmlm_only_path
         rocmlm_target_array_shape_square = self.rocmlm_target_array_shape_square
-        rocmlm_feature_array_shape_square = self.rocmlm_feature_array_shape_square
 
         try:
             if self.rocmlm is None:
                 raise Exception("No ML model! Call _configure_rocmlm() first ...")
 
-            if not self.rocmlm_cross_validated:
+            if not self.model_cross_validated:
                 raise Exception("ML model not cross validated! Call _kfold_cv() first ...")
 
             if feature_array.size == 0:
@@ -912,12 +901,12 @@ class RocMLM:
                 rocmlm.fit(X_train, y_train)
 
             print(":::::::::::::::::::::::::::::::::::::::::::::")
-            self.rocmlm_trained = True
+            self.model_trained = True
             self.rocmlm_scaler_X = scaler_X
             self.rocmlm_scaler_y = scaler_y
 
             # Save pretrained rocmlm and scalers
-            with open(rocmlm_only_path, "wb") as file:
+            with open(rocmlm_path, "wb") as file:
                 joblib.dump(rocmlm, file)
             with open(scaler_X_path, "wb") as file:
                 joblib.dump(scaler_X, file)
@@ -936,15 +925,11 @@ class RocMLM:
             # Inverse transform predictions
             pred_original = scaler_y.inverse_transform(pred_scaled)
 
-            # Reshape arrays into squares for visualization
-            gfem_target_array_square = y.reshape(rocmlm_target_array_shape_square)
-            gfem_feature_array_square = X.reshape(rocmlm_feature_array_shape_square)
+            # Reshape array into square for visualization
             rocmlm_prediction_array_square = pred_original.reshape(
                 rocmlm_target_array_shape_square)
 
-            # Update arrays
-            self.gfem_target_array_square = gfem_target_array_square
-            self.gfem_feature_array_square = gfem_feature_array_square
+            # Update array
             self.rocmlm_prediction_array_square = rocmlm_prediction_array_square
 
         except Exception as e:
@@ -1166,12 +1151,12 @@ class RocMLM:
                 raise Exception("Unrecognized array image type !")
 
             # Check for existing plots
-            all_files_exist = True
+            check = True
             for target in rocmlm_targets:
                 path = (f"{fig_dir}/{model_prefix}-{sid}-{target.replace("_", "-")}-"
                         f"{type}.png")
                 if not os.path.exists(path):
-                    all_files_exist = False
+                    check = False
                     break
 
         except Exception as e:
@@ -1182,7 +1167,7 @@ class RocMLM:
             traceback.print_exc()
             return None
 
-        return all_files_exist
+        return check
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize loss curve !!
@@ -1256,13 +1241,12 @@ class RocMLM:
         """
         """
         # Get self attributes
-        cv_info = self.cv_info
         fig_dir = self.fig_dir
         verbose = self.verbose
         gfem_db = self.gfem_db
         model_prefix = self.model_prefix
+        model_trained = self.model_trained
         rocmlm_targets = self.rocmlm_targets
-        rocmlm_trained = self.rocmlm_trained
         target_units_map = self.target_units_map
         target_labels_map = self.target_labels_map
         target_digits_map = self.target_digits_map
@@ -1273,7 +1257,7 @@ class RocMLM:
         if type not in {"targets", "predictions", "diff"}:
             raise Exception("Unrecognized array image type !")
 
-        if not rocmlm_trained:
+        if not model_trained:
             raise Exception("No RocMLM model! Call train_rocmlm() first ...")
 
         if gfem_target_array_square is None or gfem_target_array_square.size == 0:
@@ -1328,6 +1312,8 @@ class RocMLM:
             pred_array = rocmlm_prediction_array_square[sid_idx, :, :, :]
 
             for i, target in enumerate(rocmlm_targets):
+                rmse, r2 = None, None
+
                 # Get 2d arrays
                 p = pred_array[:, :, i]
                 t = target_array[:, :, i]
@@ -1337,25 +1323,21 @@ class RocMLM:
 
                 if type == "predictions":
                     square_array = p
-                    rmse, r2 = None, None
-                    filename = (f"{model_prefix}-{sid}-{gfem_db}-"
+                    filename = (f"{model_prefix}-{sid}-"
                                 f"{target.replace("_", "-")}-predictions.png")
                 elif type == "targets":
                     square_array = t
-                    rmse, r2 = None, None
-                    filename = (f"{model_prefix}-{sid}-{gfem_db}-"
+                    filename = (f"{model_prefix}-{sid}-"
                                 f"{target.replace("_", "-")}-targets.png")
                 elif type == "diff":
                     palette = "seismic"
                     mask = np.isnan(t)
                     p[mask] = np.nan
-                    square_array = t - p
-                    r2 = cv_info[f"r2_test_mean_{target}"]
-                    rmse = cv_info[f"rmse_test_mean_{target}"]
-                    filename = (f"{model_prefix}-{sid}-{gfem_db}-"
+                    square_array = 100 * (t - p) / np.abs(t)
+                    r2 = r2_score(t, p)
+                    rmse = np.sqrt(mean_squared_error(t, p))
+                    filename = (f"{model_prefix}-{sid}-"
                                 f"{target.replace("_", "-")}-diff.png")
-                else:
-                    raise Exception("Unrecognized diff argument !")
 
                 # Target labels
                 target_units = target_units_map[target]
@@ -1559,7 +1541,7 @@ class RocMLM:
                 text_spacing_y = 0.1
 
                 # Add rmse and r2
-                if rmse is not None and r2 is not None:
+                if rmse and r2:
                     plt.text(text_margin_x, text_margin_y - (text_spacing_y * 0),
                              f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
                              fontsize=fontsize * 0.833, horizontalalignment="left",
@@ -1588,7 +1570,7 @@ class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # visualize !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize(self, skip=1):
+    def visualize(self, skip=8):
         """
         """
         # Get self attributes
@@ -1608,8 +1590,6 @@ class RocMLM:
             print(f"{e}")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             traceback.print_exc()
-        else:
-            return None
 
         return None
 
@@ -1624,7 +1604,7 @@ class RocMLM:
         """
         max_retries = 3
         for retry in range(max_retries):
-            if self.rocmlm_trained:
+            if self.model_trained:
                 break
             try:
                 self._configure_rocmlm()
@@ -1642,8 +1622,8 @@ class RocMLM:
                     print(f"Retrying in 5 seconds ...")
                     time.sleep(5)
                 else:
-                    self.rocmlm_training_error = True
-                    self.rocmlm_error = e
+                    self.model_training_error = True
+                    self.model_error = e
                     return None
         return None
 
@@ -1660,13 +1640,12 @@ class RocMLM:
         model = self.ml_algo
         scaler_X = self.rocmlm_scaler_X
         scaler_y = self.rocmlm_scaler_y
-        rocmlm_trained = self.rocmlm_trained
-
-        # Check for pretrained model
-        if not rocmlm_trained:
-            raise Exception("No RocMLM model! Call train_rocmlm() first ...")
+        model_trained = self.model_trained
 
         try:
+            if not model_trained:
+                raise Exception("No RocMLM model! Call train_rocmlm() first ...")
+
             for var in [xi, h2o, P, T]:
                 if not isinstance(var, (list, np.ndarray)):
                     raise TypeError(f"Inputs must be lists or numpy arrays !")
@@ -1716,369 +1695,7 @@ class RocMLM:
             return None
 
 #######################################################
-## .2.                Visualize                  !!! ##
-#######################################################
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# combine plots horizontally !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def combine_plots_horizontally(image1_path, image2_path, output_path, caption1, caption2,
-                               font_size=150, caption_margin=25, dpi=300):
-    """
-    """
-    # Open the images
-    image1 = Image.open(image1_path)
-    image2 = Image.open(image2_path)
-
-    # Determine the maximum height between the two images
-    max_height = max(image1.height, image2.height)
-
-    # Create a new image with twice the width and the maximum height
-    combined_width = image1.width + image2.width
-    combined_image = Image.new("RGB", (combined_width, max_height), (255, 255, 255))
-
-    # Set the DPI metadata
-    combined_image.info["dpi"] = (dpi, dpi)
-
-    # Paste the first image on the left
-    combined_image.paste(image1, (0, 0))
-
-    # Paste the second image on the right
-    combined_image.paste(image2, (image1.width, 0))
-
-    # Add captions
-    draw = ImageDraw.Draw(combined_image)
-    font = ImageFont.truetype("Arial", font_size)
-    caption_margin = caption_margin
-
-    # Add caption
-    draw.text((caption_margin, caption_margin), caption1, font=font, fill="black")
-
-    # Add caption "b"
-    draw.text((image1.width + caption_margin, caption_margin), caption2, font=font,
-              fill="black")
-
-    # Save the combined image with captions
-    combined_image.save(output_path, dpi=(dpi, dpi))
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# combine plots vertically !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def combine_plots_vertically(image1_path, image2_path, output_path, caption1, caption2,
-                             font_size=150, caption_margin=25, dpi=300):
-    """
-    """
-    # Open the images
-    image1 = Image.open(image1_path)
-    image2 = Image.open(image2_path)
-
-    # Determine the maximum width between the two images
-    max_width = max(image1.width, image2.width)
-
-    # Create a new image with the maximum width and the sum of the heights
-    combined_height = image1.height + image2.height
-    combined_image = Image.new("RGB", (max_width, combined_height), (255, 255, 255))
-
-    # Paste the first image on the top
-    combined_image.paste(image1, (0, 0))
-
-    # Paste the second image below the first
-    combined_image.paste(image2, (0, image1.height))
-
-    # Add captions
-    draw = ImageDraw.Draw(combined_image)
-    font = ImageFont.truetype("Arial", font_size)
-    caption_margin = caption_margin
-
-    # Add caption
-    draw.text((caption_margin, caption_margin), caption1, font=font, fill="black")
-
-    # Add caption "b"
-    draw.text((caption_margin, image1.height + caption_margin), caption2, font=font,
-              fill="black")
-
-    # Save the combined image with captions
-    combined_image.save(output_path, dpi=(dpi, dpi))
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# compose rocmlm img3 itr !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compose_rocmlm_img3_itr(args):
-    # Unpack args
-    sid, target, rocmlm = args
-
-    # Get rocmlm attributes
-    fig_dir = rocmlm.fig_dir
-    verbose = rocmlm.verbose
-    model_prefix = rocmlm.model_prefix
-    ml_algo = rocmlm.ml_algo
-    rocmlm_targets = rocmlm.rocmlm_targets
-
-    # Unique pid
-    pid = os.getpid()
-
-    # Define temp paths
-    temp = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
-
-    # Define fig paths
-    fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
-    fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
-    fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
-    fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
-
-    # Define composition paths
-    img3_diff = f"{fig_dir}/image3-{sid}-{ml_algo}-{target}-diff.png"
-    img3_prof = f"{fig_dir}/image3-{sid}-{ml_algo}-{target}-profile.png"
-
-    # Check for existing plots
-    fig_1 = f"{fig_dir}/image-{sid}-{ml_algo}-{target}-diff.png"
-    fig_2 = f"{fig_dir}/image-{sid}-{ml_algo}-{target}-profile.png"
-    if (os.path.exists(fig_1) and os.path.exists(fig_2)):
-        if os.path.exists(temp): os.remove(temp)
-        return None
-
-    if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
-
-    # Image3 diff
-    combine_plots_horizontally(fig_trg, fig_pred, temp, caption1="a)", caption2="b)")
-    combine_plots_horizontally(temp, fig_diff, img3_diff, caption1="", caption2="c)")
-
-    # Image3 profile
-    combine_plots_horizontally(fig_trg, fig_pred, temp, caption1="a)", caption2="b)")
-    combine_plots_horizontally(temp, fig_prem, img3_prof, caption1="", caption2="c)")
-
-    # Clean up temporary files created by this worker
-    if os.path.exists(temp): os.remove(temp)
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# compose rocmlm img9 itr !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compose_rocmlm_img9_itr(args):
-    # Unpack args
-    sid, rocmlm = args
-
-    # Get rocmlm attributes
-    fig_dir = rocmlm.fig_dir
-    verbose = rocmlm.verbose
-    model_prefix = rocmlm.model_prefix
-    ml_algo = rocmlm.ml_algo
-
-    # Unique pid
-    pid = os.getpid()
-
-    # Define temp paths
-    temp = f"{fig_dir}/temp-{pid}-{sid}.png"
-    temp_rho = f"{fig_dir}/temp-rho-{pid}-{sid}.png"
-    temp_h2o = f"{fig_dir}/temp-h2o-{pid}-{sid}.png"
-    temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
-
-    # Define composition paths
-    img9_diff = f"{fig_dir}/image9-{sid}-{ml_algo}-diff.png"
-    img9_prof = f"{fig_dir}/image9-{sid}-{ml_algo}-profile.png"
-
-    # Check for existing plots
-    fig_1 = f"{fig_dir}/image9-{sid}-{ml_algo}-diff.png"
-    fig_2 = f"{fig_dir}/image9-{sid}-{ml_algo}-profile.png"
-    if (os.path.exists(fig_1) and os.path.exists(fig_2)):
-        for file in [temp, temp_rho, temp_h2o, temp_melt]:
-            if os.path.exists(file): os.remove(file)
-        return None
-
-    # Image9 diff
-    captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)")]
-    for i, target in enumerate(["rho", "h2o", "melt"]):
-        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
-        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
-        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
-        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
-        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
-        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
-        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
-        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
-                                   caption2=captions[i][1])
-        combine_plots_horizontally(temp1, fig_diff, temp2, caption1="",
-                                   caption2=captions[i][2])
-
-    combine_plots_vertically(temp_rho, temp_h2o, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_melt, img9_diff, caption1="", caption2="")
-
-    for i, target in enumerate(["rho", "h2o", "melt"]):
-        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
-        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
-        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
-        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
-        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
-        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
-        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
-        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
-                                   caption2=captions[i][1])
-        combine_plots_horizontally(temp1, fig_prem, temp2, caption1="",
-                                   caption2=captions[i][2])
-
-    combine_plots_vertically(temp_rho, temp_h2o, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_melt, img9_prof, caption1="", caption2="")
-
-    # Clean up temporary files created by this worker
-    for file in [temp, temp1, temp2, temp_rho, temp_h2o, temp_melt]:
-        if os.path.exists(file): os.remove(file)
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# compose rocmlm img15 itr !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compose_rocmlm_img15_itr(args):
-    # Unpack args
-    sid, rocmlm = args
-
-    # Get rocmlm attributes
-    fig_dir = rocmlm.fig_dir
-    verbose = rocmlm.verbose
-    model_prefix = rocmlm.model_prefix
-    ml_algo = rocmlm.ml_algo
-
-    # Unique pid
-    pid = os.getpid()
-
-    # Define temp paths
-    temp = f"{fig_dir}/temp-{pid}-{sid}.png"
-    temp_rho = f"{fig_dir}/temp-rho-{pid}-{sid}.png"
-    temp_vp = f"{fig_dir}/temp-vp-{pid}-{sid}.png"
-    temp_vs = f"{fig_dir}/temp-vs-{pid}-{sid}.png"
-    temp_h2o = f"{fig_dir}/temp-h2o-{pid}-{sid}.png"
-    temp_melt = f"{fig_dir}/temp-melt-{pid}-{sid}.png"
-
-    # Define composition paths
-    img15_diff = f"{fig_dir}/image15-{sid}-{ml_algo}-diff.png"
-    img15_prof = f"{fig_dir}/image15-{sid}-{ml_algo}-profile.png"
-
-    # Check for existing plots
-    fig_1 = f"{fig_dir}/image15-{sid}-{ml_algo}-diff.png"
-    fig_2 = f"{fig_dir}/image15-{sid}-{ml_algo}-profile.png"
-    if (os.path.exists(fig_1) and os.path.exists(fig_2)):
-        for file in [temp, temp_rho, temp_h2o, temp_melt]:
-            if os.path.exists(file): os.remove(file)
-        return None
-
-    # Image15 diff
-    captions = [("a)", "b)", "c)"), ("d)", "e)", "f)"), ("g)", "h)", "i)"),
-                ("j)", "k)", "l)"), ("m)", "n)", "o)")]
-    for i, target in enumerate(["rho", "vp", "vs", "h2o", "melt"]):
-        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
-        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
-        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
-        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
-        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
-        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
-        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
-        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
-                                   caption2=captions[i][1])
-        combine_plots_horizontally(temp1, fig_diff, temp2, caption1="",
-                                   caption2=captions[i][2])
-
-    combine_plots_vertically(temp_rho, temp_vp, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_vs, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_h2o, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_melt, img15_diff, caption1="", caption2="")
-
-    for i, target in enumerate(["rho", "vp", "vs", "h2o", "melt"]):
-        if verbose >= 1: print(f"Composing {model_prefix}-{sid}-{target} ...")
-        fig_trg = f"{fig_dir}/{model_prefix}-{sid}-{target}-targets.png"
-        fig_pred = f"{fig_dir}/{model_prefix}-{sid}-{target}-predictions.png"
-        fig_diff = f"{fig_dir}/{model_prefix}-{sid}-{target}-diff.png"
-        fig_prem = f"{fig_dir}/{model_prefix}-{sid}-{target}-prem.png"
-        temp1 = f"{fig_dir}/temp-{pid}-{sid}-{target}.png"
-        temp2 = f"{fig_dir}/temp-{target}-{pid}-{sid}.png"
-        combine_plots_horizontally(fig_trg, fig_pred, temp1, caption1=captions[i][0],
-                                   caption2=captions[i][1])
-        combine_plots_horizontally(temp1, fig_prem, temp2, caption1="",
-                                   caption2=captions[i][2])
-
-    combine_plots_vertically(temp_rho, temp_vp, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_vs, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_h2o, temp, caption1="", caption2="")
-    combine_plots_vertically(temp, temp_melt, img15_prof, caption1="", caption2="")
-
-    # Clean up temporary files created by this worker
-    for file in [temp, temp1, temp2, temp_rho, temp_vp, temp_vs, temp_h2o, temp_melt]:
-        if os.path.exists(file): os.remove(file)
-
-    return None
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# compose rocmlm plots !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compose_rocmlm_plots(rocmlm):
-    """
-    """
-    # Get rocmlm attributes
-    gfem_sids = rocmlm.gfem_sids
-    nprocs = rocmlm.nprocs
-    fig_dir = rocmlm.fig_dir
-    S = rocmlm.rocmlm_feature_array_shape_square[0]
-    W = rocmlm.rocmlm_feature_array_shape_square[1]
-    rocmlm_targets = rocmlm.rocmlm_targets
-
-    # Only visualize largets models
-#    if ((S == 323 and W == 129) or
-#        (S == 3 and W == 129 and any(s in gfem_sids for s in ["PUM", "DMM", "PYR"]))):
-    if ((S == 248 and W == 65) or
-        (S == 3 and W == 65 and any(s in gfem_sids for s in ["PUM", "DMM", "PYR"]))):
-
-        # Only visualize dry and max hydrated samples
-        if any(s in gfem_sids for s in ["PUM", "DMM", "PYR"]):
-            pass
-        else:
-            gfem_sids = [sid for sid in gfem_sids if
-                    re.search(r"sm.*loi001", sid) or
-                    re.search(r"sm.*loi007", sid)]
-
-        # Create list of args for mp pooling
-        args_img3 = [(sid, target, rocmlm) for sid in gfem_sids for target in rocmlm_targets]
-        args_img9 = [(sid, rocmlm) for sid in gfem_sids]
-        args_img15 = [(sid, rocmlm) for sid in gfem_sids]
-
-        print(f"Composing RocMLM plots for {len(gfem_sids)} samples:")
-        print(gfem_sids)
-
-        # Create a multiprocessing pool
-        with mp.Pool(processes=nprocs) as pool:
-            pool.map(compose_rocmlm_img3_itr, args_img3)
-
-            # Wait for all processes
-            pool.close()
-            pool.join()
-
-        # Create a multiprocessing pool
-        with mp.Pool(processes=nprocs) as pool:
-            pool.map(compose_rocmlm_img9_itr, args_img9)
-
-            # Wait for all processes
-            pool.close()
-            pool.join()
-
-        # Create a multiprocessing pool
-        with mp.Pool(processes=nprocs) as pool:
-            pool.map(compose_rocmlm_img15_itr, args_img15)
-
-            # Wait for all processes
-            pool.close()
-            pool.join()
-
-        tmp_files = glob.glob(f"{fig_dir}/temp*.png")
-        for file in tmp_files: os.remove(file)
-    else:
-        return None
-
-    return None
-
-#######################################################
-## .3.              Train RocMLMs                !!! ##
+## .2.              Train RocMLMs                !!! ##
 #######################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # train rocmlms !!
@@ -2086,23 +1703,18 @@ def compose_rocmlm_plots(rocmlm):
 def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"]):
     """
     """
-    gfem_sids = [m.sid for m in gfem_models]
-
     try:
         if not gfem_models:
             raise Exception("No GFEM models to compile !")
 
-        rocmlms = []
+        models = []
         for algo in ml_algos:
-            rocmlm = RocMLM(gfem_models, algo)
-            if rocmlm.rocmlm_trained:
-                rocmlm = joblib.load(rocmlm.rocmlm_path)
+            model = RocMLM(gfem_models, algo)
+            if model.model_trained:
+                continue
             else:
-                rocmlm.train_rocmlm()
-                with open(rocmlm.rocmlm_path, "wb") as file:
-                    joblib.dump(rocmlm, file)
-
-            rocmlms.extend(rocmlm)
+                model.train_rocmlm()
+            models.extend(model)
 
     except Exception as e:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -2110,11 +1722,11 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"]):
         print(f"{e}")
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         traceback.print_exc()
+        return None
 
-    error_count = 0
-    for model in rocmlms:
-        if model.rocmlm_training_error:
-            error_count += 1
+    rocmlms = [model for model in models if not model.model_training_error]
+    error_count = len([model for model in models if model.model_training_error])
+
     if error_count > 0:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print(f"Total RocMLMs with errors: {error_count}")
@@ -2132,32 +1744,21 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"]):
 def main():
     """
     """
-    from gfem import get_sampleids, build_gfem_models
+    from gfem import build_gfem_models
     try:
         # Build GFEM models
         gfems = {}
-        sources = {"b": "assets/bench-pca.csv",
-                   "m": "assets/synth-mids.csv",
-                   "r": "assets/synth-rnds.csv"}
+        sources = {"m": "assets/synth-mids.csv", "r": "assets/synth-rnds.csv"}
+        db, res, P_min, P_max, T_min, T_max = "hp02", 64, 0.1, 8.1, 273, 1973
 
         for name, source in sources.items():
-            gfem_sids = get_sampleids(source, "all")
-            gfems[name] = build_gfem_models(source, gfem_sids, gfem_res=64)
+            gfems[name] = build_gfem_models(source, db, res, P_min, P_max, T_min, T_max)
 
-        # Combine synthetic models for RocMLM training
-        training_data = {"b": gfems["b"], "s": gfems["m"] + gfems["r"]}
+        training_data = gfems["m"] + gfems["r"]
+        rocmlms = train_rocmlms(models)
 
-        # Train RocMLMs
-        rocmlms = {}
-        for name, models in training_data.items():
-            rocmlms[name] = train_rocmlms(models)
-
-        # Visualize RocMLMs
-        visualize_rocmlm_performance()
-
-        for name, models in rocmlms.items():
-            for model in models:
-                compose_rocmlm_plots(model)
+        for model in rocmlms:
+            model.visualize()
 
     except Exception as e:
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -2173,5 +1774,4 @@ def main():
     return None
 
 if __name__ == "__main__":
-    mp.set_start_method("spawn")
     main()

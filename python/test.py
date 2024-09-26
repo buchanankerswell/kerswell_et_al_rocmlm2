@@ -4,8 +4,8 @@ import pandas as pd
 from rocmlm import RocMLM
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from gfem import GFEMModel, build_gfem_models
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from gfem import GFEMModel, get_sampleids, build_gfem_models
 
 def main():
     """
@@ -22,7 +22,7 @@ def main():
 #    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
 #    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
 #    model_shallow.build()
-#    model_shallow.visualize()
+#     model_shallow.visualize()
 #
 #    # stx model
 #    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
@@ -34,22 +34,27 @@ def main():
     # Build GFEM models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     res, src = 64, "assets/synth-mids.csv"
-    sids = get_sampleids(src)
-#
+
+    # hp models
+    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+    gfems = build_gfem_models(src, "hp02", res, P_min, P_max, T_min, T_max)
+
 #    # stx models
 #    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
 #    gfems = build_gfem_models(src, sids, "stx21", res, P_min, P_max, T_min, T_max)
-#
-    # hp models
-    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-    gfems = build_gfem_models(src, sids[::22], "hp02", res, P_min, P_max, T_min, T_max)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Train RocMLMs
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    model = RocMLM(gfems, "NN", tune=False)
-    model.train()
-    model.visualize()
+    model_nn = RocMLM(gfems, "NN", tune=False)
+    model_nn.train()
+    model_nn.visualize()
+    model_dt = RocMLM(gfems, "DT", tune=False)
+    model_dt.train()
+    model_dt.visualize()
+    model_kn = RocMLM(gfems, "KN", tune=False)
+    model_kn.train()
+    model_kn.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Visualize training dataset design
