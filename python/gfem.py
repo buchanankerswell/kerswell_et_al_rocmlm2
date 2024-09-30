@@ -7,6 +7,7 @@
 import os
 import time
 import glob
+import yaml
 import shutil
 import textwrap
 import traceback
@@ -30,17 +31,18 @@ from matplotlib.colors import ListedColormap
 #######################################################
 class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, perplex_db, sid, source, res=128, P_min=1, P_max=28,
-                 T_min=773, T_max=2273, verbose=1):
+    def __init__(self, perplex_db="hp02", sid="PYR", source="assets/benchmark-samples.csv",
+                 res=32, P_min=0.1, P_max=8.1, T_min=273, T_max=1973, config_yaml=None,
+                 verbose=1):
         """
         A class for constructing and managing a Gibbs Free Energy Minimization Model (GFEM).
+        GFEM Models are built with Perple_X v.7.0.9.
 
         Parameters:
             perplex_db (str): Thermodynamic dataset to be used in Perple_X
-            sid (str): Sample ID for the model. Must be found under the SAMPLEID
-              column in source.
+            sid (str): Sample ID for the model. Must be found in source.
             source (str): Data source (.csv file) containing sample ids and chemical
-              compositions.
+                          compositions.
             res (int, optional): Resolution of the model grid (default is 128).
             P_min (int, optional): Minimum pressure (default is 1 GPa).
             P_max (int, optional): Maximum pressure (default is 28 GPa).
@@ -51,143 +53,95 @@ class GFEMModel:
         Raises:
             Exception: If the specified thermodynamic dataset is unrecognized.
         """
-        self.res = res
-        self.sid = sid
-        self.P_min = P_min
-        self.P_max = P_max
-        self.T_min = T_min
-        self.T_max = T_max
-        self.source = source
+        if config_yaml:
+            with open(config_yaml, "r") as file:
+                config_data = yaml.safe_load(file)
+            perplex_options = config_data["perplex_options"]
+            self.res = perplex_options["res"]
+            self.sid = perplex_options["sid"]
+            self.P_min = perplex_options["P_min"]
+            self.P_max = perplex_options["P_max"]
+            self.T_min = perplex_options["T_min"]
+            self.T_max = perplex_options["T_max"]
+            self.source = perplex_options["source"]
+            self.perplex_db = perplex_options["perplex_db"]
+        else:
+            self.res = res
+            self.sid = sid
+            self.P_min = P_min
+            self.P_max = P_max
+            self.T_min = T_min
+            self.T_max = T_max
+            self.source = source
+            self.perplex_db = perplex_db
+
+        self.config_yaml = config_yaml
         self.verbose = verbose
-        self.perplex_db = perplex_db
+        self.model_built = False
+        self.timeout = (self.res**2) * 3
+        self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
+        self.log_file = f"{self.model_out_dir}/log-{self.sid}"
+        self.fig_dir = f"figs/{self.model_out_dir}"
 
         if perplex_db not in ["hp02", "hp11", "hp622", "hp633", "stx21"]:
             raise ValueError(f"Unrecognized thermodynamic dataset: {perplex_db}")
 
         self._load_global_options()
+        self._load_perplex_options()
+        self._load_target_maps()
         self._get_sample_features()
         self._get_normalized_sample_comp()
-        self._load_perplex_configuration()
-        self._load_target_maps()
+        self._generate_perplex_config_strings()
         self._check_for_existing_model()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_global_options(self):
         """
         Loads global options and configurations for the model, including:
-          - Random seed
-          - Timeout based on resolution
-          - Potential temperatures and segments for depth profiles
-          - Oxide components and targets (rock properties) for visualization
-          - Output directories for the model and figures
-        """
-        self.seed = 42
-        self.digits = 3
-        self.model_built = False
-        self.timeout = (self.res**2) * 3
-        self.pot_Ts = [1173, 1573, 1773]
-        self.segs = ["Central_Cascadia", "Kamchatka"]
-        self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "H2O"]
-        self.targets_to_visualize = ["density", "Vp", "Vs", "melt_fraction", "H2O"]
-        self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
-        self.log_file = f"{self.model_out_dir}/log-{self.sid}"
-        self.fig_dir = f"figs/{self.model_out_dir}"
-
-        # Plot settings
-        plt.rcParams.update({
-            "figure.dpi": 300,
-            "savefig.bbox": "tight",
-            "axes.facecolor": "0.9",
-            "legend.frameon": False,
-            "legend.facecolor": "0.9",
-            "legend.loc": "upper left",
-            "legend.fontsize": "small",
-            "figure.autolayout": True
-        })
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_sample_features(self):
-        """
-        Loads and extracts features for the given sample ID from the data source.
-
-        Extracts all columns except "SAMPLEID" from the dataset corresponding
-        to the sample ID (sid). If the sample ID is not found, an exception is raised.
-
-        Attributes:
-            features (list): List of feature names (column headers excluding "SAMPLEID").
-            sample_features (list): Flattened list of feature values for the given sample.
-
-        Raises:
-            ValueError: If the sample ID is not found in the dataset.
+            Random seed
+            Timeout based on resolution
+            Potential temperatures and segments for depth profiles
+            Oxide components and targets (rock properties) for visualization
+            Output directories for the model and figures
         """
         try:
-            df = pd.read_csv(self.source)
-            if self.sid not in df["SAMPLEID"].values:
-                raise ValueError(f"Sample {self.sid} not found in dataset {self.source}!")
+            if self.config_yaml:
+                with open(self.config_yaml, "r") as file:
+                    config_data = yaml.safe_load(file)
+                global_options = config_data["global_options"]
+            else:
+                global_options = {
+                    "seed": 42,
+                    "digits": 3,
+                    "pot_Ts": [1173, 1573, 1773],
+                    "segs": ["Central_Cascadia", "Kamchatka"],
+                    "targets_to_visualize": ["density", "Vp", "Vs", "melt_fraction", "H2O"]
+                }
 
-            self.features = [col for col in df.columns if col != "SAMPLEID"]
-            self.sample_features = df.loc[
-                df["SAMPLEID"] == self.sid, self.features].values.flatten().tolist()
+            # Assign values from global options
+            self.seed = global_options["seed"]
+            self.digits = global_options["digits"]
+            self.pot_Ts = global_options["pot_Ts"]
+            self.segs = global_options["segs"]
+            self.targets_to_visualize = global_options["targets_to_visualize"]
 
-        except Exception as e:
-            print(f"Error in _get_sample_features():\n  {e}")
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_normalized_sample_comp(self):
-        """
-        Normalizes the sample composition based on oxides from the PCA and the GFEM model.
-
-        This method retrieves the sample composition for the specified sample ID (`sid`),
-        ensures that the oxides in the GFEM model (`ox_gfem`) match those in the PCA,
-        and normalizes the sample composition to a total of 100 wt.% (excluding H2O).
-
-        Attributes:
-            norm_sample_comp (list): List of normalized sample composition values.
-            ox_gfem (list): List of oxides reordered to match the PCA dataset.
-
-        Raises:
-            ValueError: If the sample ID is not found or if the PCA does not contain
-            enough oxides to match the GFEM model.
-        """
-        try:
-            df = pd.read_csv(self.source)
-            ox_pca = df.loc[:, "SAMPLEID":"PC1"].columns[1:-1]  # Get all oxides in PCA
-            if len(self.ox_gfem) > len(ox_pca):
-                raise ValueError("Not enough oxides in PCA to satisfy ox_gfem!")
-
-            # Define oxide ordering and sort
-            ox_order = ["K2O", "NA2O", "CAO", "FEO", "MGO", "AL2O3", "SIO2", "TIO2", "CR2O3"]
-            ox_mapping = {oxide: idx for idx, oxide in enumerate(ox_order)}
-            ox_pca = sorted(ox_pca, key=lambda x: ox_mapping.get(x, float("inf")))
-            ox_gfem = sorted(self.ox_gfem, key=lambda x: ox_mapping.get(x, float("inf")))
-
-            subset_df = df[df["SAMPLEID"] == self.sid]
-            if subset_df.empty:
-                raise ValueError(f"Sample {self.sid} not found in dataset {self.source}!")
-
-            self.ox_gfem = ox_gfem
-            self.h2o = float(subset_df["H2O"].iloc[0])
-            self.xi = float(subset_df["XI_FRAC"].iloc[0])
-
-            # Get sample composition
-            sample_comp = [float(subset_df[oxide].iloc[0])
-                           if oxide in subset_df.columns else 0 for oxide in ox_pca]
-
-            # Normalize if required
-            if len(sample_comp) != len(ox_gfem):
-                sample_comp = [sample_comp[ox_pca.index(o)]
-                               if o in ox_pca else 0 for o in ox_gfem]
-            tot_comp = sum(c for c, o in zip(sample_comp, ox_gfem) if o != "H2O" and c > 0)
-            self.norm_sample_comp = [
-                round((c / tot_comp) * 100, self.digits) if c > 0 and o != "H2O" else c
-                for c, o in zip(sample_comp, ox_gfem)
-            ]
+            # Plot settings
+            plt.rcParams.update({
+                "figure.dpi": 300,
+                "savefig.bbox": "tight",
+                "axes.facecolor": "0.9",
+                "legend.frameon": False,
+                "legend.facecolor": "0.9",
+                "legend.loc": "upper left",
+                "legend.fontsize": "small",
+                "figure.autolayout": True
+            })
 
         except Exception as e:
-            print(f"Error in _get_normalized_sample_comp():\n  {e}")
+            print(f"Error in _load_perplex_options():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _load_perplex_configuration(self):
+    def _load_perplex_options(self):
         """
         Loads configuration settings for Perple_X based on the selected dataset.
 
@@ -197,96 +151,97 @@ class GFEMModel:
             ValueError: If the dataset configuration is invalid or missing.
         """
         try:
-            oxides_list = {"K2O": "K2O", "NA2O": "Na2O", "CAO": "CaO", "FEO": "FeO",
-                           "MGO": "MgO", "AL2O3": "Al2O3", "SIO2": "SiO2", "TIO2": "TiO2",
-                           "CR2O3": "Cr2O3", "H2O": "H2O"}
-            oxides = [oxides_list[key] for key in oxides_list if key in self.ox_gfem]
-            oxides_string = "\n".join(oxides)
-            if self.perplex_db not in ["hp11", "hp622", "hp633"]:
-                oxides_string = oxides_string.upper()
-
-            dataset_configs = {
-                "hp02": {
-                    "T_melt": 1100,
-                    "melt_is_fluid": "T",
-                    "melt_mod": "melt(HGPH)",
-                    "fluid_in_properties": "N",
-                    "fluid_in_assemblages": "Y",
-                    "td_data_file": f"assets/hp02-td",
-                    "sl_data_file": f"assets/hp-sl",
-                    "em_exclude": ["anL", "enL", "foL", "fo8L", "foHL", "diL", "woGL", "liz",
-                                   "ak", "pswo", "wo"],
-                    "sl_include": ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)", "Sp(HP)",
-                                   "Gt(HGP)", "Maj", "feldspar", "cAmph(G)", "Chl(W)",
-                                   "Atg(PN)", "A-phase", "B", "T", "melt(HGPH)"]
-                },
-                "hp11": {
-                    "T_melt": 1100,
-                    "melt_is_fluid": "T",
-                    "melt_mod": "melt(HGPH)",
-                    "fluid_in_properties": "N",
-                    "fluid_in_assemblages": "Y",
-                    "td_data_file": f"assets/hp11-td",
-                    "sl_data_file": f"assets/hp-sl",
-                    "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
-                                   "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
-                                   "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
-                                   "cen", "glt", "cgh", "dsp", "fctd"],
-                    "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                                   "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                                   "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                   "Anth", "melt(HGPH)"]
-                },
-                "hp622": {
-                    "T_melt": 1100,
-                    "melt_is_fluid": "T",
-                    "melt_mod": "melt(HGPH)",
-                    "fluid_in_properties": "N",
-                    "fluid_in_assemblages": "Y",
-                    "td_data_file": f"assets/hp622-td",
-                    "sl_data_file": f"assets/hp-sl",
-                    "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
-                                   "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
-                                   "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
-                                   "cen", "glt", "cgh", "dsp", "fctd"],
-                    "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                                   "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                                   "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                   "Anth", "melt(HGPH)"]
-                },
-                "hp633": {
-                    "T_melt": 1100,
-                    "melt_is_fluid": "T",
-                    "melt_mod": "melt(HGPH)",
-                    "fluid_in_properties": "N",
-                    "fluid_in_assemblages": "Y",
-                    "td_data_file": f"assets/hp633-td",
-                    "sl_data_file": f"assets/hp-sl",
-                    "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
-                                   "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
-                                   "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
-                                   "cen", "glt", "cgh", "dsp", "fctd"],
-                    "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                                   "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                                   "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                   "Anth", "melt(HGPH)"]
-                },
-                "stx21": {
-                    "T_melt": "default",
-                    "melt_is_fluid": "T",
-                    "melt_mod": None,
-                    "fluid_in_properties": "N",
-                    "fluid_in_assemblages": "Y",
-                    "td_data_file": f"assets/stx21-td",
-                    "sl_data_file": f"assets/stx21-sl",
-                    "em_exclude": ["ca-pv"],
-                    "sl_include": ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring",
-                                   "Opx", "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
+            if self.config_yaml:
+                with open(self.config_yaml, "r") as file:
+                    config_data = yaml.safe_load(file)
+                perplex_options = config_data["perplex_options"]
+                self.ox_gfem = perplex_options["ox_gfem"]
+                perplex_datasets = config_data["perplex_datasets"]
+            else:
+                self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "H2O"]
+                perplex_datasets = {
+                    "hp02": {
+                        "T_melt": 1100,
+                        "melt_is_fluid": "T",
+                        "melt_mod": "melt(HGPH)",
+                        "fluid_in_properties": "N",
+                        "fluid_in_assemblages": "Y",
+                        "td_data_file": f"assets/hp02-td",
+                        "sl_data_file": f"assets/hp-sl",
+                        "em_exclude": ["anL", "enL", "foL", "fo8L", "foHL", "diL", "woGL",
+                                       "liz", "ak", "pswo", "wo"],
+                        "sl_include": ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)",
+                                       "Sp(HP)", "Gt(HGP)", "Maj", "feldspar", "cAmph(G)",
+                                       "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                                       "melt(HGPH)"]
+                    },
+                    "hp11": {
+                        "T_melt": 1100,
+                        "melt_is_fluid": "T",
+                        "melt_mod": "melt(HGPH)",
+                        "fluid_in_properties": "N",
+                        "fluid_in_assemblages": "Y",
+                        "td_data_file": f"assets/hp11-td",
+                        "sl_data_file": f"assets/hp-sl",
+                        "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
+                                       "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
+                                       "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
+                                       "cen", "glt", "cgh", "dsp", "fctd"],
+                        "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
+                                       "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
+                                       "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                                       "Anth", "melt(HGPH)"]
+                    },
+                    "hp622": {
+                        "T_melt": 1100,
+                        "melt_is_fluid": "T",
+                        "melt_mod": "melt(HGPH)",
+                        "fluid_in_properties": "N",
+                        "fluid_in_assemblages": "Y",
+                        "td_data_file": f"assets/hp622-td",
+                        "sl_data_file": f"assets/hp-sl",
+                        "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
+                                       "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
+                                       "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
+                                       "cen", "glt", "cgh", "dsp", "fctd"],
+                        "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
+                                       "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
+                                       "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                                       "Anth", "melt(HGPH)"]
+                    },
+                    "hp633": {
+                        "T_melt": 1100,
+                        "melt_is_fluid": "T",
+                        "melt_mod": "melt(HGPH)",
+                        "fluid_in_properties": "N",
+                        "fluid_in_assemblages": "Y",
+                        "td_data_file": f"assets/hp633-td",
+                        "sl_data_file": f"assets/hp-sl",
+                        "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
+                                       "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
+                                       "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
+                                       "cen", "glt", "cgh", "dsp", "fctd"],
+                        "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
+                                       "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
+                                       "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
+                                       "Anth", "melt(HGPH)"]
+                    },
+                    "stx21": {
+                        "T_melt": "default",
+                        "melt_is_fluid": "T",
+                        "melt_mod": "",
+                        "fluid_in_properties": "N",
+                        "fluid_in_assemblages": "Y",
+                        "td_data_file": f"assets/stx21-td",
+                        "sl_data_file": f"assets/stx21-sl",
+                        "em_exclude": ["ca-pv"],
+                        "sl_include": ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring",
+                                       "Opx", "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
+                    }
                 }
-            }
 
             # Get the configuration for the selected database
-            config = dataset_configs[self.perplex_db]
+            config = perplex_datasets[self.perplex_db]
             if not config:
                 raise ValueError(f"Unknown database {self.perplex_db}")
 
@@ -301,113 +256,8 @@ class GFEMModel:
             self.fluid_in_properties = config["fluid_in_properties"]
             self.fluid_in_assemblages = config["fluid_in_assemblages"]
 
-            # Generate configuration strings
-            if "hp" in self.perplex_db:
-                self.build_config = (
-                    f"{self.sid}\n"
-                    f"td-data\n"
-                    f"build-options\n"
-                    f"N\n"
-                    f"2\n"
-                    f"N\n"
-                    f"N\n"
-                    f"N\n"
-                    f"{oxides_string}\n\n"
-                    f"5\n"
-                    f"N\n"
-                    f"2\n"
-                    f"{self.T_min} {self.T_max}\n"
-                    f"{self.P_min * 1e4} {self.P_max * 1e4}\n"
-                    f"Y\n"
-                    f"{' '.join(map(str, self.norm_sample_comp))}\n"
-                    f"N\n"
-                    f"Y\n"
-                    f"N\n"
-                    f"{'\n'.join(self.em_exclude)}\n\n"
-                    f"Y\n"
-                    f"solution-models\n"
-                    f"{'\n'.join(self.sl_include)}\n\n"
-                    f"{self.sid}\n"
-                )
-
-                self.werami_target_config = (
-                    f"{self.sid}\n"
-                    f"2\n"
-                    f"36\n"
-                    f"1\n"
-                    f"{self.fluid_in_properties}\n"
-                    f"N\n\n"
-                    f"2\n"
-                    f"7\n"
-                    f"{self.melt_mod}\n"
-                    f"24\n"
-                    f"0\n"
-                    f"N\n\n"
-                    f"5\n"
-                    f"0\n"
-                )
-
-                self.werami_phase_config = (
-                    f"{self.sid}\n"
-                    f"2\n"
-                    f"25\n"
-                    f"N\n"
-                    f"{self.fluid_in_assemblages}\n"
-                    f"N\n\n"
-                    f"0\n"
-                )
-
-            elif self.perplex_db == "stx21":
-                self.build_config = (
-                    f"{self.sid}\n"
-                    f"td-data\n"
-                    f"build-options\n"
-                    f"N\n"
-                    f"2\n"
-                    f"N\n"
-                    f"N\n"
-                    f"N\n"
-                    f"{oxides_string}\n\n"
-                    f"N\n"
-                    f"2\n"
-                    f"{self.T_min} {self.T_max}\n"
-                    f"{self.P_min * 1e4} {self.P_max * 1e4}\n"
-                    f"Y\n"
-                    f"{' '.join(map(str, self.norm_sample_comp))}\n"
-                    f"N\n"
-                    f"Y\n"
-                    f"N\n"
-                    f"{'\n'.join(self.em_exclude)}\n\n"
-                    f"Y\n"
-                    f"solution-models\n"
-                    f"{'\n'.join(self.sl_include)}\n\n"
-                    f"{self.sid}\n"
-                )
-
-                self.werami_target_config = (
-                    f"{self.sid}\n"
-                    f"2\n"
-                    f"36\n"
-                    f"1\n"
-                    f"N\n\n"
-                    f"2\n"
-                    f"24\n"
-                    f"0\n"
-                    f"N\n\n"
-                    f"0\n"
-                )
-
-                self.werami_phase_config = (
-                    f"{self.sid}\n"
-                    f"2\n"
-                    f"25\n"
-                    f"N\n"
-                    f"N\n\n"
-                    f"0\n"
-                )
-
         except Exception as e:
-            print(f"Error in _load_perplex_configuration():\n  {e}")
+            print(f"Error in _load_perplex_options():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_target_maps(self):
@@ -582,7 +432,213 @@ class GFEMModel:
             self.targets = [t for t in self.target_labels_map.keys() if t not in ["P", "T"]]
 
         except Exception as e:
-            print(f"Error in _load_perplex_configuration():\n  {e}")
+            print(f"Error in _load_target_maps():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_sample_features(self):
+        """
+        Loads and extracts features for the given sample ID from the data source.
+
+        Extracts all columns except "SAMPLEID" from the dataset corresponding
+        to the sample ID (sid). If the sample ID is not found, an exception is raised.
+
+        Attributes:
+            features (list): List of feature names (column headers excluding "SAMPLEID").
+            sample_features (list): Flattened list of feature values for the given sample.
+
+        Raises:
+            ValueError: If the sample ID is not found in the dataset.
+        """
+        try:
+            df = pd.read_csv(self.source)
+
+            if self.sid not in df["SAMPLEID"].values:
+                raise ValueError(f"Sample {self.sid} not found in dataset {self.source}!")
+
+            self.features = [col for col in df.columns if col != "SAMPLEID"]
+            self.sample_features = df.loc[
+                df["SAMPLEID"] == self.sid, self.features].values.flatten().tolist()
+
+        except Exception as e:
+            print(f"Error in _get_sample_features():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_normalized_sample_comp(self):
+        """
+        Normalizes the sample composition based on oxides from the PCA and the GFEM model.
+
+        This method retrieves the sample composition for the specified sample ID (`sid`),
+        ensures that the oxides in the GFEM model (`ox_gfem`) match those in the PCA,
+        and normalizes the sample composition to a total of 100 wt.% (excluding H2O).
+
+        Attributes:
+            norm_sample_comp (list): List of normalized sample composition values.
+            ox_gfem (list): List of oxides reordered to match the PCA dataset.
+
+        Raises:
+            ValueError: If the sample ID is not found or if the PCA does not contain
+            enough oxides to match the GFEM model.
+        """
+        try:
+            df = pd.read_csv(self.source)
+
+            # Get numeric columns
+            ox_pca = list(df.select_dtypes(include=[float, int]).columns)
+
+            if len(self.ox_gfem) > len(ox_pca):
+                raise ValueError("Not enough oxides in PCA to satisfy ox_gfem!")
+
+            # Define oxide ordering and sort
+            ox_order = ["K2O", "NA2O", "CAO", "FEO", "MGO", "AL2O3", "SIO2", "TIO2", "CR2O3"]
+            ox_mapping = {oxide: idx for idx, oxide in enumerate(ox_order)}
+            ox_pca = sorted(ox_pca, key=lambda x: ox_mapping.get(x, float("inf")))
+            ox_gfem = sorted(self.ox_gfem, key=lambda x: ox_mapping.get(x, float("inf")))
+
+            subset_df = df[df["SAMPLEID"] == self.sid]
+            if subset_df.empty:
+                raise ValueError(f"Sample {self.sid} not found in dataset {self.source}!")
+
+            self.ox_gfem = ox_gfem
+            self.h2o = float(subset_df["H2O"].iloc[0]) if "H2O" in ox_pca else None
+            self.xi = float(subset_df["XI_FRAC"].iloc[0]) if "XI_FRAC" in ox_pca else None
+
+            # Get sample composition
+            sample_comp = [float(subset_df[oxide].iloc[0])
+                           if oxide in subset_df.columns else 0 for oxide in ox_pca]
+
+            # Normalize if required
+            if len(sample_comp) != len(ox_gfem):
+                sample_comp = [sample_comp[ox_pca.index(o)]
+                               if o in ox_pca else 0 for o in ox_gfem]
+            tot_comp = sum(c for c, o in zip(sample_comp, ox_gfem) if o != "H2O" and c > 0)
+            self.norm_sample_comp = [
+                round((c / tot_comp) * 100, self.digits) if c > 0 and o != "H2O" else c
+                for c, o in zip(sample_comp, ox_gfem)
+            ]
+
+        except Exception as e:
+            print(f"Error in _get_normalized_sample_comp():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _generate_perplex_config_strings(self):
+        """
+        """
+        try:
+            oxides_list = {"K2O": "K2O", "NA2O": "Na2O", "CAO": "CaO", "FEO": "FeO",
+                           "MGO": "MgO", "AL2O3": "Al2O3", "SIO2": "SiO2", "TIO2": "TiO2",
+                           "CR2O3": "Cr2O3", "H2O": "H2O"}
+            oxides = [oxides_list[key] for key in oxides_list if key in self.ox_gfem]
+            oxides_string = "\n".join(oxides)
+            if self.perplex_db not in ["hp11", "hp622", "hp633"]:
+                oxides_string = oxides_string.upper()
+
+            # Generate configuration strings
+            if "hp" in self.perplex_db:
+                self.build_config = (
+                    f"{self.sid}\n"
+                    f"td-data\n"
+                    f"build-options\n"
+                    f"N\n"
+                    f"2\n"
+                    f"N\n"
+                    f"N\n"
+                    f"N\n"
+                    f"{oxides_string}\n\n"
+                    f"5\n"
+                    f"N\n"
+                    f"2\n"
+                    f"{self.T_min} {self.T_max}\n"
+                    f"{self.P_min * 1e4} {self.P_max * 1e4}\n"
+                    f"Y\n"
+                    f"{' '.join(map(str, self.norm_sample_comp))}\n"
+                    f"N\n"
+                    f"Y\n"
+                    f"N\n"
+                    f"{'\n'.join(self.em_exclude)}\n\n"
+                    f"Y\n"
+                    f"solution-models\n"
+                    f"{'\n'.join(self.sl_include)}\n\n"
+                    f"{self.sid}\n"
+                )
+
+                self.werami_target_config = (
+                    f"{self.sid}\n"
+                    f"2\n"
+                    f"36\n"
+                    f"1\n"
+                    f"{self.fluid_in_properties}\n"
+                    f"N\n\n"
+                    f"2\n"
+                    f"7\n"
+                    f"{self.melt_mod}\n"
+                    f"24\n"
+                    f"0\n"
+                    f"N\n\n"
+                    f"5\n"
+                    f"0\n"
+                )
+
+                self.werami_phase_config = (
+                    f"{self.sid}\n"
+                    f"2\n"
+                    f"25\n"
+                    f"N\n"
+                    f"{self.fluid_in_assemblages}\n"
+                    f"N\n\n"
+                    f"0\n"
+                )
+
+            elif self.perplex_db == "stx21":
+                self.build_config = (
+                    f"{self.sid}\n"
+                    f"td-data\n"
+                    f"build-options\n"
+                    f"N\n"
+                    f"2\n"
+                    f"N\n"
+                    f"N\n"
+                    f"N\n"
+                    f"{oxides_string}\n\n"
+                    f"N\n"
+                    f"2\n"
+                    f"{self.T_min} {self.T_max}\n"
+                    f"{self.P_min * 1e4} {self.P_max * 1e4}\n"
+                    f"Y\n"
+                    f"{' '.join(map(str, self.norm_sample_comp))}\n"
+                    f"N\n"
+                    f"Y\n"
+                    f"N\n"
+                    f"{'\n'.join(self.em_exclude)}\n\n"
+                    f"Y\n"
+                    f"solution-models\n"
+                    f"{'\n'.join(self.sl_include)}\n\n"
+                    f"{self.sid}\n"
+                )
+
+                self.werami_target_config = (
+                    f"{self.sid}\n"
+                    f"2\n"
+                    f"36\n"
+                    f"1\n"
+                    f"N\n\n"
+                    f"2\n"
+                    f"24\n"
+                    f"0\n"
+                    f"N\n\n"
+                    f"0\n"
+                )
+
+                self.werami_phase_config = (
+                    f"{self.sid}\n"
+                    f"2\n"
+                    f"25\n"
+                    f"N\n"
+                    f"N\n\n"
+                    f"0\n"
+                )
+
+        except Exception as e:
+            print(f"Error in _generate_perplex_config_strings():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_for_existing_model(self):
@@ -604,15 +660,19 @@ class GFEMModel:
             if (os.path.exists(f"{self.model_out_dir}/results.csv") and
                 os.path.exists(f"{self.model_out_dir}/assemblages.csv")):
                 self.model_built = True
+
                 if self.verbose >= 1:
                     print(f"  Found {self.perplex_db} GFEM model for sample {self.sid}!")
+
                 try:
                     self._get_results()
                     self._get_target_array()
                     self._get_pt_array()
+
                 except Exception as e:
                     print(f"Error in _check_for_existing_model():\n  {e}")
                     traceback.print_exc()
+
             else:
                 shutil.rmtree(self.model_out_dir)
                 os.makedirs(self.model_out_dir, exist_ok=True)
@@ -626,11 +686,11 @@ class GFEMModel:
         """
         Retrieves the subduction geotherm data for a specified segment and slab position.
 
-        Args:
-            segment (str): The name of the subduction segment
-              (default is "Central_Cascadia").
-            slab_position (str): Position of the slab
-              (either "slabmoho" or "slabtop"; default is "slabmoho").
+        Parameters:
+            segment (str): The name of the subduction segment (default is
+                           "Central_Cascadia").
+            slab_position (str): Position of the slab (either "slabmoho" or "slabtop";
+                                 default is "slabmoho").
 
         Returns:
             pd.DataFrame: A DataFrame containing the pressure (P) and temperature (T) data
@@ -686,7 +746,7 @@ class GFEMModel:
         """
         Calculates the geotherm for a 1D layered lithospheric cooling model.
 
-        Args:
+        Parameters:
             Qs (float): Surface heat flux (W/m²).
             Ts (float): Surface temperature (K).
             A1 (float): Heat production in layer 1 (W/m³).
@@ -700,16 +760,16 @@ class GFEMModel:
 
         Returns:
             pd.DataFrame: A DataFrame containing pressure (P) and temperature (T) values
-                           for the calculated geotherm.
+                          for the calculated geotherm.
 
         Raises:
             Exception: If any error occurs during geotherm calculation.
         """
         try:
             array_size = (self.res + 1) * 10
-            litho_P_gradient = 35e3 # Lithostatic P gradient (m/GPa)
-            Z_min = self.P_min * litho_P_gradient # Min depth (m)
-            Z_max = self.P_max * litho_P_gradient # Max depth (m)
+            litho_P_gradient = 35e3
+            Z_min = self.P_min * litho_P_gradient
+            Z_max = self.P_max * litho_P_gradient
             z = np.linspace(Z_min, Z_max, array_size)
 
             # Initialize temperature array
@@ -763,8 +823,10 @@ class GFEMModel:
         try:
             shutil.copy(self.td_data_file, f"{self.model_out_dir}/td-data")
             shutil.copy(self.sl_data_file, f"{self.model_out_dir}/solution-models")
+
         except FileNotFoundError as e:
             print(f"Error: One or more source files not found:\n  {e}")
+
         except Exception as e:
             print(f"An error occurred while copying files:\n  {e}")
 
@@ -804,10 +866,13 @@ class GFEMModel:
                 f"auto_refine_file       F\n"
                 f"seismic_data_file      F\n"
             )
+
             with open(f"{self.model_out_dir}/build-options", "w") as file:
                 file.write(build_options)
+
             with open(f"{self.model_out_dir}/perplex_plot_option.dat", "w") as file:
                 file.write("numeric_field_label T")
+
         except IOError as e:
             print(f"Error writing BUILD options files:\n  {e}")
 
@@ -826,6 +891,7 @@ class GFEMModel:
         try:
             with open(f"{self.model_out_dir}/build-config", "w") as file:
                 file.write(self.build_config)
+
         except IOError as e:
             print(f"Error writing BUILD configuration file:\n  {e}")
 
@@ -843,6 +909,7 @@ class GFEMModel:
         try:
             with open(f"{self.model_out_dir}/vertex-minimize", "w") as file:
                 file.write(f"{self.sid}")
+
         except IOError as e:
             print(f"Error writing VERTEX configuration file:\n  {e}")
 
@@ -862,8 +929,10 @@ class GFEMModel:
         try:
             with open(f"{self.model_out_dir}/werami-targets", "w") as file:
                 file.write(self.werami_target_config)
+
             with open(f"{self.model_out_dir}/werami-phases", "w") as file:
                 file.write(self.werami_phase_config)
+
         except IOError as e:
             print(f"Error writing WERAMI configuration files: {e}")
 
@@ -976,6 +1045,7 @@ class GFEMModel:
         try:
             with open(f"{self.model_out_dir}/pssect-draw", "w") as file:
                 file.write(f"{self.sid}\nN")
+
         except IOError as e:
             print(f"Error writing PSSECT configuration file:\n  {e}")
 
@@ -1084,7 +1154,7 @@ class GFEMModel:
         of each key in the `replacements` dictionary with its corresponding value,
         and writes the modified content back to the same file.
 
-        Args:
+        Parameters:
             filepath (str): The path to the file in which replacements should be made.
             replacements (dict): A dictionary where keys are strings to be replaced and
                                  values are the strings to replace them with.
@@ -1115,7 +1185,7 @@ class GFEMModel:
         logs them, and checks the return code to determine if the program executed
         successfully.
 
-        Args:
+        Parameters:
             program_path (str): The path to the executable program to run.
             config_file (str): The path to the configuration file to use as input.
 
@@ -1512,7 +1582,7 @@ class GFEMModel:
         of assemblages to indices in a CSV file. It returns a list of encoded
         indices for the input assemblages.
 
-        Args:
+        Parameters:
             assemblages (list): A list of assemblages, where each assemblage
                                 is a list of components.
 
@@ -1730,14 +1800,14 @@ class GFEMModel:
         geotherm. The output is a DataFrame containing the P, T, and interpolated
         target values.
 
-        Args:
+        Parameters:
             target (str): The name of the target variable to extract.
             geotherm (DataFrame): A DataFrame containing columns "P" and "T" representing
                                   the pressure and temperature along the geotherm.
 
         Returns:
             DataFrame: A DataFrame with columns "P", "T", and the specified target variable,
-                        containing interpolated values along the geotherm.
+                       containing interpolated values along the geotherm.
 
         Raises:
             Exception: If there is an error in extracting or interpolating the target values.
@@ -1775,7 +1845,7 @@ class GFEMModel:
         should be included. It returns a boolean indicating if all required
         images are present.
 
-        Args:
+        Parameters:
             type (str): The type of image to check (default is "sub").
             gradient (bool): If True, checks for gradient images; otherwise, checks
                              for standard images (default is False).
@@ -2386,7 +2456,7 @@ class GFEMModel:
         targets_exclude = [
             "phase_assemblage", "assebmlage_index", "phase_assemblage_variance"]
         targets_to_visualize = [t for t in targets_to_visualize if t not in targets_exclude]
-        sids = ["sm000-loi000", f"sm{str(res).zfill(3)}-loi000"]
+        sids = ["sm000-h2o000", f"sm{str(res).zfill(3)}-h2o000"]
         df_mids = pd.read_csv("assets/synth-mids.csv")
         df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["H2O"] == 0)]
         bend = df_synth_bench["SAMPLEID"].iloc[0]
@@ -2734,7 +2804,7 @@ def get_sampleids(filepath, batch="all", n_batches=8):
     This function reads a specified CSV file containing sample data and extracts
     the SAMPLEID column. It raises an exception if the file does not exist.
 
-    Args:
+    Parameters:
         filepath (str): The path to the CSV file containing sample data.
         batch (str, optional): The batch identifier (default is "all").
         n_batches (int, optional): The total number of batches (default is 8).
@@ -2766,16 +2836,16 @@ def gfem_itr(args):
     It attempts to build the model if it has not been built yet. Any errors during
     the process are caught and reported.
 
-    Args:
+    Parameters:
         args (tuple): A tuple containing the following elements:
-            - perplex_db (str): The database for Perple_X.
-            - sampleid (str): The identifier for the sample.
-            - source (str): The source of the data.
-            - res (str): Resolution of the model.
-            - Pmin (float): Minimum pressure for the model.
-            - Pmax (float): Maximum pressure for the model.
-            - Tmin (float): Minimum temperature for the model.
-            - Tmax (float): Maximum temperature for the model.
+            perplex_db (str): The database for Perple_X.
+            sampleid (str): The identifier for the sample.
+            source (str): The source of the data.
+            res (str): Resolution of the model.
+            Pmin (float): Minimum pressure for the model.
+            Pmax (float): Maximum pressure for the model.
+            Tmin (float): Minimum temperature for the model.
+            Tmax (float): Maximum temperature for the model.
 
     Returns:
         GFEMModel: An initialized GFEMModel instance, or None if an error occurs.
@@ -2803,7 +2873,7 @@ def build_gfem_models(source, perplex_db="hp02", res=64, Pmin=0.1, Pmax=28, Tmin
     This function reads sample IDs from a specified source, validates them,
     and builds GFEM models in parallel using a specified number of processes.
 
-    Args:
+    Parameters:
         source (str): Path to the source file containing sample IDs.
         perplex_db (str): The database for Perple_X (default is "hp02").
         res (int): Resolution for the models (default is 64).
@@ -2812,9 +2882,9 @@ def build_gfem_models(source, perplex_db="hp02", res=64, Pmin=0.1, Pmax=28, Tmin
         Tmin (float): Minimum temperature for the model (default is 773).
         Tmax (float): Maximum temperature for the model (default is 2273).
         sampleids (list, optional): List of sample IDs to process.
-          If None, all IDs are read from the source.
+                                    If None, all IDs are read from the source.
         nprocs (int): Number of processes for parallel execution
-          (default is number of CPUs - 2).
+                      (default is number of CPUs - 2).
         verbose (int): Verbosity level for logging (default is 1).
 
     Returns:
@@ -2891,7 +2961,7 @@ def main():
                 elif db == "stx21":
                     P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
                     # Filter sample IDs for the stx21 database
-                    sids = [s for s in sids if "loi000" in s]
+                    sids = [s for s in sids if "h2o000" in s]
 
                 # Build GFEM models for the current source and database
                 build_gfem_models(src, db, res, P_min, P_max, T_min, T_max, sids)
