@@ -5,17 +5,14 @@
 # utilities !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import os
-import math
 import warnings
 import traceback
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from sklearn.cluster import KMeans
 from sklearn.impute import KNNImputer
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -35,806 +32,980 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 #######################################################
 class MixingArray:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # init !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, res=14, res_loi=8, verbose=1):
-        # Input
+    def __init__(self, res=14, res_h2o=8, verbose=1):
+        """
+        """
         self.res = res + 1
-        self.res_loi = res_loi
+        self.res_h2o = res_h2o
         self.verbose = verbose
 
+        self._load_global_options()
+
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #+ .1.0.           Helper Functions              !!! ++
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _load_global_options(self):
+        """
+        """
         # Mixing array sampling
         self.k = 1.5
         self.seed = 42
         self.digits = 3
-        self.max_loi = 14
+        self.max_h2o = 14
         self.D_tio2 = 5e-2
         self.mc_sample = 1
+        self.n_pca_components = 2
         self.weighted_random = True
 
         # Earthchem data
         self.trace = ["CR", "NI"]
         self.volatiles = ["H2O", "CO2", "LOI"]
-        self.earthchem_raw = pd.DataFrame()
-        self.earthchem_pca = pd.DataFrame()
-        self.earthchem_imputed = pd.DataFrame()
-        self.earthchem_filtered = pd.DataFrame()
         self.metadata = ["SAMPLEID", "SOURCE", "ROCKNAME"]
         self.ox_exclude = ["FE2O3", "P2O5", "NIO", "MNO", "H2O", "CO2"]
         self.ox_pca = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "K2O", "NA2O", "TIO2", "CR2O3"]
         self.ox_data = ["SIO2", "AL2O3", "CAO", "MGO", "FEOT", "K2O", "NA2O", "TIO2",
                         "FE2O3", "CR2O3", "FE2O3T", "FEO", "NIO", "MNO", "P2O5"]
 
-        # PCA results
-        self.scaler = None
-        self.pca_model = None
-        self.n_pca_components = 2
-        self.pca_results = np.array([])
-
-        # Mixing array results
-        self.top_arrays = None
-        self.mixing_arrays = None
-        self.bottom_arrays = None
-        self.synthetic_data_written = False
-        self.mixing_array_tops = np.array([])
-        self.mixing_array_bots = np.array([])
-        self.mixing_array_endpoints = np.array([])
-
-        # Errors
-        self.error = None
-        self.mixing_array_error = False
-
         # Paths
         self.fig_dir = "figs/mixing_array"
 
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .1.0.           Helper Functions              !!! ++
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # read earthchem data !!
+        # Plot settings
+        plt.rcParams.update({
+            "figure.dpi": 300,
+            "savefig.bbox": "tight",
+            "axes.facecolor": "0.9",
+            "legend.frameon": False,
+            "legend.facecolor": "0.9",
+            "legend.loc": "upper left",
+            "legend.fontsize": "small",
+            "figure.autolayout": True
+        })
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _read_earthchem_data(self):
         """
+        Reads and processes Earthchem data from a specified file.
+
+        This function reads an Earthchem dataset file, processes it by selecting
+        columns for metadata, oxide data, volatile components, and trace elements,
+        then calculates classic mantle array ratios (Mg/Si and Al/Si). The
+        processed data is stored in `self.earthchem_raw`.
+
+        Updates:
+            self.earthchem_raw: DataFrame containing the processed Earthchem data.
+
+        Raises:
+            Exception: If the Earthchem data file is not found.
         """
-        # Get self attributes
-        trace = self.trace
-        digits = self.digits
-        ox_data = self.ox_data
-        metadata = self.metadata
-        volatiles = self.volatiles
-        filename = "earthchem-combined-deschamps-2013.txt"
-        ox_methods = [string + "METH" for string in ox_data]
-        trace_methods = [string + "METH" for string in trace]
-        volatiles_methods = [string + "METH" for string in volatiles]
+        try:
+            filename = "earthchem-combined-deschamps-2013.txt"
+            if not filename:
+                raise Exception("No Earthchem data found!")
 
-        # Check for earthchem data
-        if not filename:
-            raise Exception("No Earthchem data found!")
+            # Get METHOD column for each oxide component
+            ox_methods = [string + "METH" for string in self.ox_data]
+            trace_methods = [string + "METH" for string in self.trace]
+            volatiles_methods = [string + "METH" for string in self.volatiles]
 
-        # Initialize dataframes
-        dataframes = {}
-        df_name = []
+            print("Reading Earthchem data ...")
+            data = pd.read_csv(f"assets/{filename}", delimiter="\t")
+            data.columns = data.columns.str.replace(" ", "")
 
-        print("Reading Earthchem data ...")
+            # Select relevant columns and round oxide data
+            cols_to_keep = (self.metadata + self.ox_data + ox_methods + self.volatiles +
+                            volatiles_methods + self.trace + trace_methods)
+            data = data[cols_to_keep]
+            data[self.ox_data] = data[self.ox_data].round(self.digits)
 
-        # Read data
-        data = pd.read_csv(f"assets/{filename}", delimiter="\t")
+            # Calculate mantle array ratios (e.g., Deschamps et al., 2013, Lithos)
+            data["R_MGSI"] = round(data["MGO"] / data["SIO2"], self.digits)
+            data["R_ALSI"] = round(data["AL2O3"] / data["SIO2"], self.digits)
 
-        # Rename columns
-        data.columns = [col.replace(" ", "") for col in data.columns]
+            # Update self attribute
+            self.earthchem_raw = data.copy()
 
-        # Select columns
-        data = data[metadata + ox_data + ox_methods + volatiles +
-                    volatiles_methods + trace + trace_methods]
+        except Exception as e:
+            print(f"Error in _read_earthchem_data():\n  {e}")
 
-        # Round values
-        data[ox_data] = data[ox_data].round(digits)
-
-        # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
-        data["R_MGSI"] = round(data["MGO"] / data["SIO2"], digits)
-        data["R_ALSI"] = round(data["AL2O3"] / data["SIO2"], digits)
-
-        # Update self attribute
-        self.earthchem_raw = data.copy()
-
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # convert to cr2o3 !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _convert_to_cr2o3(self, df):
         """
+        Converts Cr to Cr2O3 in the given DataFrame and handles potential
+        unit misreporting.
+
+        This function identifies rows where Cr2O3 is misreported (i.e., values of
+        Cr2O3 greater than SiO2) and transfers the misreported Cr2O3 values to
+        Cr, replacing Cr2O3 with NaN. If Cr2O3 is missing but Cr exists, it
+        converts Cr to Cr2O3 using a specific factor (1.4615) and rounds
+        the result.
+
+        Inputs:
+            df (DataFrame): The input DataFrame with Cr and Cr2O3 columns.
+
+        Outputs:
+            DataFrame: A modified DataFrame with corrected Cr2O3 and Cr values.
+
+        Updates:
+            Rounds converted Cr2O3 values to `self.digits`.
+
+        Raises:
+            Exception: If any error occurs during processing.
         """
-        # Get self attributes
-        digits = self.digits
+        try:
+            data = df.copy()
 
-        # Copy df
-        data = df.copy()
+            # Handle misreported Cr2O3 > SiO2
+            condition = data["CR2O3"] > data["SIO2"]
+            data.loc[condition, "CR"] = data.loc[condition]["CR2O3"]
+            data.loc[condition, "CR2O3"] = np.nan
 
-        # Check for misreported units
-        condition = data["CR2O3"] > data["SIO2"]
-        data.loc[condition, "CR"] = data.loc[condition]["CR2O3"]
-        data.loc[condition, "CR2O3"] = np.nan
+            # If CR2O3 exists, set CR to NaN
+            condition = data["CR2O3"].notna()
+            data.loc[condition, "CR"] = np.nan
 
-        # If CR2O3 exists
-        condition = data["CR2O3"].notna()
-        data.loc[condition, "CR"] = np.nan
+            # Convert CR to CR2O3 if CR2O3 is NaN but CR exists
+            condition = data["CR2O3"].isna() & data["CR"].notna()
+            data.loc[condition, "CR2O3"] = round(
+                data.loc[condition]["CR"] / 1e4 * 1.4615, self.digits)
+            data.loc[condition, "CR"] = np.nan
 
-        # If CR exists but not CR2O3
-        condition = data["CR2O3"].isna() & data["CR"].notna()
-        data.loc[condition, "CR2O3"] = round(
-            data.loc[condition]["CR"] / 1e4 * 1.4615, digits)
-        data.loc[condition, "CR"] = np.nan
+        except Exception as e:
+            print(f"Error in _convert_to_cr2o3():\n  {e}")
+            return None
 
         return data
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # convert to nio !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _convert_to_nio(self, df):
         """
+        Converts Ni to NiO in the given DataFrame and handles potential unit
+        misreporting.
+
+        This function checks for misreported NiO values (e.g., NiO > SiO2) and
+        transfers them to Ni, setting NiO to NaN. If NiO is missing but Ni exists,
+        it converts Ni to NiO using a specific factor (1.2725) and rounds the
+        result to the defined number of digits.
+
+        Inputs:
+            df (DataFrame): The input DataFrame with Ni and NiO columns.
+
+        Outputs:
+            DataFrame: A modified DataFrame with corrected NiO and Ni values.
+
+        Updates:
+            Rounds converted NiO values to `self.digits`.
+
+        Raises:
+            Exception: If any error occurs during processing.
         """
-        # Get self attributes
-        digits = self.digits
+        try:
+            data = df.copy()
 
-        # Copy df
-        data = df.copy()
+            # Handle misreported NiO > SiO2
+            condition = data["NIO"] > data["SIO2"]
+            data.loc[condition, "NI"] = data.loc[condition]["NIO"]
+            data.loc[condition, "NIO"] = np.nan
 
-        # Check for misreported units
-        condition = data["NIO"] > data["SIO2"]
-        data.loc[condition, "NI"] = data.loc[condition]["NIO"]
-        data.loc[condition, "NIO"] = np.nan
+            # If NiO exists, set Ni to NaN
+            condition = data["NIO"].notna()
+            data.loc[condition, "NI"] = np.nan
 
-        # If NIO exists
-        condition = data["NIO"].notna()
-        data.loc[condition, "NI"] = np.nan
+            # Convert Ni to NiO if NiO is NaN but Ni exists
+            condition = data["NIO"].isna() & data["NI"].notna()
+            data.loc[condition, "NIO"] = round(
+                data.loc[condition]["NI"] / 1e4 * 1.2725, self.digits)
+            data.loc[condition, "NI"] = np.nan
 
-        # If NI exists but not NIO
-        condition = data["NIO"].isna() & data["NI"].notna()
-        data.loc[condition, "NIO"] = round(data.loc[condition]["NI"] / 1e4 * 1.2725, digits)
-        data.loc[condition, "NI"] = np.nan
+        except Exception as e:
+            print(f"Error in _convert_to_nio():\n  {e}")
+            return None
 
         return data
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # convert to fe2o3t !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _convert_to_fe2o3t(self, df):
         """
+        Converts iron oxide measurements (FeO, Fe2O3, FEOT) into a single
+        Fe2O3T column while handling missing values and potential unit
+        misreporting.
+
+        The method processes the DataFrame as follows:
+        1. If FE2O3T exists, sets FeO, Fe2O3, and FEOT to NaN.
+        2. If only FE2O3 exists, converts it to FE2O3T.
+        3. If only FeO exists, converts it to FE2O3T using a factor (0.89998).
+        4. If FEOT exists, it is used to compute FE2O3T.
+        5. Handles cases where multiple columns exist, prioritizing FE2O3T.
+
+        Inputs:
+            df (DataFrame): A DataFrame with FeO, Fe2O3, FEOT, and FE2O3T columns.
+
+        Outputs:
+            DataFrame: A modified DataFrame with FE2O3T populated, and FeO, Fe2O3,
+            FEOT set to NaN after conversion.
+
+        Raises:
+            Exception: If any error occurs during processing.
         """
-        # Get self attributes
-        digits = self.digits
+        try:
+            data = df.copy()
 
-        # Copy df
-        data = df.copy()
+            # If FE2O3T exists set all Fe to nan except FE2O3T
+            condition = data["FE2O3T"].notna()
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        # If FE2O3T exists set all Fe to nan except FE2O3T
-        condition = data["FE2O3T"].notna()
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            # If FE2O3 exists but not FE2O3T, FEO, or FEOT
+            condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() &
+                         data["FEO"].isna() & data["FEOT"].isna())
+            data.loc[condition, ["FE2O3T"]] = data.loc[condition]["FE2O3"]
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        # If FE2O3 exists but not FE2O3T, FEO, or FEOT
-        condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() & data["FEO"].isna() &
-                     data["FEOT"].isna())
-        data.loc[condition, ["FE2O3T"]] = data.loc[condition]["FE2O3"]
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            # If FEO exists but not FE2O3, FE2O3T, or FEOT
+            condition = (data["FE2O3"].isna() & data["FE2O3T"].isna() &
+                         data["FEO"].notna() & data["FEOT"].isna())
+            data.loc[condition, ["FE2O3T"]] = round(
+                data.loc[condition]["FEO"] / 0.89998, self.digits)
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        # If FEO exists but not FE2O3, FE2O3T, or FEOT
-        condition = (data["FE2O3"].isna() & data["FE2O3T"].isna() & data["FEO"].notna() &
-                     data["FEOT"].isna())
-        data.loc[condition, ["FE2O3T"]] = round(data.loc[condition]["FEO"] / 0.89998, digits)
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            # If FEOT exists but not FE2O3, FE2O3T, or FEO
+            condition = (data["FE2O3"].isna() & data["FE2O3T"].isna() &
+                         data["FEO"].isna() & data["FEOT"].notna())
+            data.loc[condition, ["FE2O3T"]] = round(
+                data.loc[condition]["FEOT"] / 0.89998, self.digits)
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-       # If FEOT exists but not FE2O3, FE2O3T, or FEO
-        condition = (data["FE2O3"].isna() & data["FE2O3T"].isna() & data["FEO"].isna() &
-                     data["FEOT"].notna())
-        data.loc[condition, ["FE2O3T"]] = round(
-            data.loc[condition]["FEOT"] / 0.89998, digits)
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            # If FEO and FEOT exists but not FE2O3 or FE2O3T
+            condition = (data["FE2O3"].isna() & data["FE2O3T"].isna() &
+                         data["FEO"].notna() & data["FEOT"].notna())
+            data.loc[condition, ["FE2O3T"]] = round(
+                data.loc[condition]["FEOT"] / 0.89998, self.digits)
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        # If FEO and FEOT exists but not FE2O3 or FE2O3T
-        condition = (data["FE2O3"].isna() & data["FE2O3T"].isna() & data["FEO"].notna() &
-                     data["FEOT"].notna())
-        data.loc[condition, ["FE2O3T"]] = round(
-            data.loc[condition]["FEOT"] / 0.89998, digits)
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            # If FE2O3 and FEO exist but not FE2O3T or FEOT
+            condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() &
+                         data["FEO"].notna() & data["FEOT"].isna())
+            data.loc[condition, ["FE2O3T"]] = round(
+                data.loc[condition]["FE2O3"] + data.loc[condition]["FEO"] / 0.89998,
+                self.digits)
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        # If FE2O3 and FEO exist but not FE2O3T or FEOT
-        condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() & data["FEO"].notna() &
-                     data["FEOT"].isna())
-        data.loc[condition, ["FE2O3T"]] = round(data.loc[condition]["FE2O3"] +
-                                                data.loc[condition]["FEO"] / 0.89998, digits)
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            # If FE2O3 and FEOT exist but not FE2O3T or FEO
+            condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() &
+                         data["FEO"].isna() & data["FEOT"].notna())
+            data.loc[condition, "FE2O3T"] = data.loc[condition, "FE2O3"]
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        # If FE2O3 and FEOT exist but not FE2O3T or FEO
-        condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() & data["FEO"].isna() &
-                     data["FEOT"].notna())
-        data.loc[condition, "FE2O3T"] = data.loc[condition, "FE2O3"]
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+            ## If FE2O3, FEO and FEOT exist but not FE2O3T
+            condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() &
+                         data["FEO"].notna() & data["FEOT"].notna())
+            data.loc[condition, ["FE2O3T"]] = round(
+                data.loc[condition]["FEOT"] / 0.89998, self.digits)
+            data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
-        ## If FE2O3, FEO and FEOT exist but not FE2O3T
-        condition = (data["FE2O3"].notna() & data["FE2O3T"].isna() & data["FEO"].notna() &
-                     data["FEOT"].notna())
-        data.loc[condition, ["FE2O3T"]] = round(
-            data.loc[condition]["FEOT"] / 0.89998, digits)
-        data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
+        except Exception as e:
+            print(f"Error in _convert_to_fe2o3t():\n  {e}")
+            return None
 
         return data
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # normalize volatile free !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _normalize_volatile_free(self, df):
         """
+        Normalizes oxide data to a volatile-free basis, ensuring the sum of oxides
+        falls within a defined threshold range.
+
+        This method performs the following steps:
+        1. Calculates the total oxide content (with and without volatiles).
+        2. Filters out samples based on the total oxide threshold (default: 97–103%).
+        3. Normalizes oxide data to a 100% volatile-free basis.
+        4. Re-calculates the total oxide content after normalization.
+
+        Inputs:
+            df (DataFrame): A DataFrame containing oxide and volatile data.
+
+        Outputs:
+            DataFrame: A DataFrame with normalized oxide data on a volatile-free basis.
+
+        Raises:
+            Exception: If any error occurs during processing.
         """
-        # Get self attributes
-        digits = self.digits
-        ox_data = self.ox_data
-        volatiles = self.volatiles
+        try:
+            data = df.copy()
 
-        # Copy df
-        data = df.copy()
+            # Sum oxides with and without volatiles
+            data["total_ox"] = data[self.ox_data].sum(axis=1).round(self.digits)
+            data["total_loi"] = data[
+                self.ox_data + self.volatiles].sum(axis=1).round(self.digits)
 
-        # Sum oxides with and without volatiles
-        data["total_ox"] = data[ox_data].sum(axis=1).round(digits)
-        data["total_loi"] = data[ox_data + volatiles].sum(axis=1).round(digits)
+            # Set total threshold
+            total_threshold = [97, 103]
 
-        # Set total threshold
-        total_threshold = [97, 103]
+            # Check for samples within of threshold
+            condition = (((data["total_ox"] >= total_threshold[0]) &
+                          (data["total_ox"] <= total_threshold[1])) |
+                         ((data["total_loi"] >= total_threshold[0]) &
+                          (data["total_loi"] <= total_threshold[1])))
 
-        # Check for samples within of threshold
-        condition = (((data["total_ox"] >= total_threshold[0]) &
-                      (data["total_ox"] <= total_threshold[1])) |
-                     ((data["total_loi"] >= total_threshold[0]) &
-                      (data["total_loi"] <= total_threshold[1])))
+            # Filter data
+            data = data.loc[condition]
 
-        # Filter data
-        data = data.loc[condition]
+            # Normalize to volatile free basis
+            data[self.ox_data] = round(
+                data[self.ox_data].div(data["total_ox"], axis=0) * 100, self.digits)
 
-        # Normalize to volatile free basis
-        data[ox_data] = round(data[ox_data].div(data["total_ox"], axis=0) * 100, digits)
+            # Re-sum oxides with and without volatiles
+            data["total_ox"] = data[self.ox_data].sum(axis=1).round(self.digits)
+            data["total_loi"] = data[
+                self.ox_data + self.volatiles].sum(axis=1).round(self.digits)
 
-        # Re-sum oxides with and without volatiles
-        data["total_ox"] = data[ox_data].sum(axis=1).round(digits)
-        data["total_loi"] = data[ox_data + volatiles].sum(axis=1).round(digits)
+        except Exception as e:
+            print(f"Error in _normalize_volatile_free():\n  {e}")
+            return None
 
         return data
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # convert to feot !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _convert_to_feot(self, df):
         """
+        Converts FeO and Fe2O3 values into FeOT (total iron as FeO) by applying conversion
+        formulas based on the available iron oxide data.
+
+        This method processes the following scenarios:
+        1. If FEOT exists, it sets all other Fe forms (FeO, Fe2O3, FE2O3T) to NaN.
+        2. If FEO exists and FEOT is missing, it calculates FEOT from FEO.
+        3. If FE2O3 exists and FEOT is missing, it converts FE2O3 to FEOT.
+        4. If FE2O3T exists and FEOT is missing, it converts FE2O3T to FEOT.
+        5. Various combinations of FeO, Fe2O3, and FE2O3T are handled similarly.
+
+        Inputs:
+            df (DataFrame): A DataFrame containing FeO, Fe2O3, FE2O3T, and FEOT values.
+
+        Outputs:
+            DataFrame: A DataFrame where Fe values are normalized to FEOT, with other Fe
+            forms set to NaN.
+
+        Raises:
+            Exception: If any error occurs during processing.
         """
-        # Get self attributes
-        digits = self.digits
+        try:
+            data = df.copy()
 
-        # Copy df
-        data = df.copy()
+            # If FEOT exists set all Fe to nan except FEOT
+            condition = data["FEOT"].notna()
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FEOT exists set all Fe to nan except FEOT
-        condition = data["FEOT"].notna()
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FEO exists but not FEOT, FE2O3, or FE2O3T
+            condition = (data["FEO"].notna() & data["FEOT"].isna() &
+                         data["FE2O3"].isna() & data["FE2O3T"].isna())
+            data.loc[condition, ["FEOT"]] = data.loc[condition]["FEO"]
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FEO exists but not FEOT, FE2O3, or FE2O3T
-        condition = (data["FEO"].notna() & data["FEOT"].isna() & data["FE2O3"].isna() &
-                     data["FE2O3T"].isna())
-        data.loc[condition, ["FEOT"]] = data.loc[condition]["FEO"]
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FE2O3 exists but not FEO, FEOT, or FE2O3T
+            condition = (data["FEO"].isna() & data["FEOT"].isna() &
+                         data["FE2O3"].notna() & data["FE2O3T"].isna())
+            data.loc[condition, ["FEOT"]] = round(
+                data.loc[condition]["FE2O3"] * 0.89998, self.digits)
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FE2O3 exists but not FEO, FEOT, or FE2O3T
-        condition = (data["FEO"].isna() & data["FEOT"].isna() & data["FE2O3"].notna() &
-                     data["FE2O3T"].isna())
-        data.loc[condition, ["FEOT"]] = round(data.loc[condition]["FE2O3"] * 0.89998, digits)
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FE2O3T exists but not FEO, FEOT, or FE2O3
+            condition = (data["FEO"].isna() & data["FEOT"].isna() &
+                         data["FE2O3"].isna() & data["FE2O3T"].notna())
+            data.loc[condition, ["FEOT"]] = round(
+                data.loc[condition]["FE2O3T"] * 0.89998, self.digits)
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FE2O3T exists but not FEO, FEOT, or FE2O3
-        condition = (data["FEO"].isna() & data["FEOT"].isna() & data["FE2O3"].isna() &
-                     data["FE2O3T"].notna())
-        data.loc[condition, ["FEOT"]] = round(
-            data.loc[condition]["FE2O3T"] * 0.89998, digits)
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FE2O3 and FE2O3T exists but not FEO or FEOT
+            condition = (data["FEO"].isna() & data["FEOT"].isna() &
+                         data["FE2O3"].notna() & data["FE2O3T"].notna())
+            data.loc[condition, ["FEOT"]] = round(
+                data.loc[condition]["FE2O3T"] * 0.89998, self.digits)
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FE2O3 and FE2O3T exists but not FEO or FEOT
-        condition = (data["FEO"].isna() & data["FEOT"].isna() & data["FE2O3"].notna() &
-                     data["FE2O3T"].notna())
-        data.loc[condition, ["FEOT"]] = round(
-            data.loc[condition]["FE2O3T"] * 0.89998, digits)
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FEO and FE2O3 exist but not FEOT or FE2O3T
+            condition = (data["FEO"].notna() & data["FEOT"].isna() &
+                         data["FE2O3"].notna() & data["FE2O3T"].isna())
+            data.loc[condition, ["FEOT"]] = round(
+                data.loc[condition]["FEO"] + data.loc[condition]["FE2O3"] * 0.89998,
+                self.digits)
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FEO and FE2O3 exist but not FEOT or FE2O3T
-        condition = (data["FEO"].notna() & data["FEOT"].isna() & data["FE2O3"].notna() &
-                     data["FE2O3T"].isna())
-        data.loc[condition, ["FEOT"]] = round(data.loc[condition]["FEO"] +
-                                              data.loc[condition]["FE2O3"] * 0.89998, digits)
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FEO and FE2O3T exist but not FEOT or FE2O3
+            condition = (data["FEO"].notna() & data["FEOT"].isna() &
+                         data["FE2O3"].isna() & data["FE2O3T"].notna())
+            data.loc[condition, "FEOT"] = data.loc[condition, "FEO"]
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FEO and FE2O3T exist but not FEOT or FE2O3
-        condition = (data["FEO"].notna() & data["FEOT"].isna() & data["FE2O3"].isna() &
-                     data["FE2O3T"].notna())
-        data.loc[condition, "FEOT"] = data.loc[condition, "FEO"]
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+            # If FEO, FE2O3 and FE2O3T exist but not FEOT
+            condition = (data["FEO"].notna() & data["FEOT"].isna() &
+                         data["FE2O3"].notna() & data["FE2O3T"].notna())
+            data.loc[condition, ["FEOT"]] = round(
+                data.loc[condition]["FE2O3T"] * 0.89998, self.digits)
+            data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
-        # If FEO, FE2O3 and FE2O3T exist but not FEOT
-        condition = (data["FEO"].notna() & data["FEOT"].isna() & data["FE2O3"].notna() &
-                     data["FE2O3T"].notna())
-        data.loc[condition, ["FEOT"]] = round(
-            data.loc[condition]["FE2O3T"] * 0.89998, digits)
-        data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
+        except Exception as e:
+            print(f"Error in _convert_to_feot():\n  {e}")
+            return None
 
         return data
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # process data !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_earthchem_data(self):
         """
+        Processes raw EarthChem data by filtering, converting, normalizing, and
+        summarizing rock samples.
+
+        This method performs the following steps:
+        - Filters out samples missing required oxide values (SIO2, MGO, AL2O3, CAO).
+        - Excludes specific rock types from analysis and assigns samples to general
+          rock type categories.
+        - Removes outliers based on the interquartile range (IQR) method.
+        - Converts elemental compositions (Cr to CR2O3, Ni to NIO, Fe oxides to FE2O3T,
+          and FEOT).
+        - Normalizes data to a volatile-free basis and cleans up redundant columns.
+        - Consolidates methods into a single column and arranges data by specific rules.
+        - Filters samples based on alteration ratios (R_MGSI, R_ALSI).
+        - Summarizes and saves numeric data (counts, min, max, mean, etc.) to a CSV file.
+        - Optionally, prints a summary of the combined and filtered samples if verbose
+          mode is enabled.
+
+        Attributes updated:
+            self.earthchem_filtered : pandas.DataFrame
+                The processed EarthChem data after filtering, conversion, and summarization.
+
+        Raises:
+            Exception: If any error occurs during processing.
         """
-        # Get self attributes
-        digits = self.digits
-        ox_data = self.ox_data
-        verbose = self.verbose
-        volatiles = self.volatiles
-        data = self.earthchem_raw.copy()
+        try:
+            data = self.earthchem_raw.copy()
 
-        # Rock names meta groups
-        peridotite = ["peridotite", "harzburgite", "lherzolite", "dunite", "wehrlite",
-                      "abyssal peridotite", "ultramafic rock", "harzburgite-lherzholite",
-                      "harzburgite-dunite"]
-        pyroxenite = ["pyroxenite", "websterite", "hornblendite", "clinopyroxenite",
-                      "orthopyroxenite"]
-        serpentinite = ["serpentinite", "serpentinized peridotite",
-                        "serpentinized harzburgite", "serpentinite muds",
-                        "serpentinized lherzolite", "antigorite serpentinite",
-                        "serpentinized mylonite"]
-        metamorphic = ["amphibolite", "blueschist", "meta-basalt", "eclogite",
-                       "meta-gabbro", "metabasite", "hydrated peridotite",
-                       "chlorite harzburgite"]
-        xenolith = ["peridotite-xenolith", "pyroxenite-xenolith", "eclogite-xenolith"]
-        other = ["limburgite", "chromitite", "unknown", "olivine-rich troctolite",
-                 "hydrated cumulate"]
+            # Rock names meta groups
+            peridotite = ["peridotite", "harzburgite", "lherzolite", "dunite", "wehrlite",
+                          "abyssal peridotite", "ultramafic rock", "harzburgite-lherzholite",
+                          "harzburgite-dunite"]
+            pyroxenite = ["pyroxenite", "websterite", "hornblendite", "clinopyroxenite",
+                          "orthopyroxenite"]
+            serpentinite = ["serpentinite", "serpentinized peridotite",
+                            "serpentinized harzburgite", "serpentinite muds",
+                            "serpentinized lherzolite", "antigorite serpentinite",
+                            "serpentinized mylonite"]
+            metamorphic = ["amphibolite", "blueschist", "meta-basalt", "eclogite",
+                           "meta-gabbro", "metabasite", "hydrated peridotite",
+                           "chlorite harzburgite"]
+            xenolith = ["peridotite-xenolith", "pyroxenite-xenolith", "eclogite-xenolith"]
+            other = ["limburgite", "chromitite", "unknown", "olivine-rich troctolite",
+                     "hydrated cumulate"]
 
-        # Keep only samples with required oxides
-        condition = data[["SIO2", "MGO", "AL2O3", "CAO"]].notna().all(axis=1)
-        data = data.loc[condition]
+            # Keep only samples with required oxides
+            condition = data[["SIO2", "MGO", "AL2O3", "CAO"]].notna().all(axis=1)
+            data = data.loc[condition]
 
-        # Drop certain rocks
-        data = data[~data["ROCKNAME"].isin(
-            xenolith + metamorphic + other + pyroxenite + serpentinite +
-            ["wehrlite", "wehlerite", "peridotite", "dunite"])]
+            # Drop certain rocks
+            data = data[~data["ROCKNAME"].isin(
+                xenolith + metamorphic + other + pyroxenite + serpentinite +
+                ["wehrlite", "wehlerite", "peridotite", "dunite"])]
 
-        # Add new rock type column
-        conditions = [data["ROCKNAME"].isin(peridotite),
-                      data["ROCKNAME"].isin(pyroxenite),
-                      data["ROCKNAME"].isin(serpentinite),
-                      data["ROCKNAME"].isin(metamorphic),
-                      data["ROCKNAME"].isin(xenolith),
-                      data["ROCKNAME"].isin(other)]
-        values = ["peridotite", "pyroxenite", "serpentinite", "metamorphic", "xenolith",
-                  "other"]
-        data["ROCKTYPE"] = np.select(conditions, values, default="other")
+            # Add new rock type column
+            conditions = [data["ROCKNAME"].isin(peridotite),
+                          data["ROCKNAME"].isin(pyroxenite),
+                          data["ROCKNAME"].isin(serpentinite),
+                          data["ROCKNAME"].isin(metamorphic),
+                          data["ROCKNAME"].isin(xenolith),
+                          data["ROCKNAME"].isin(other)]
+            values = ["peridotite", "pyroxenite", "serpentinite", "metamorphic", "xenolith",
+                      "other"]
+            data["ROCKTYPE"] = np.select(conditions, values, default="other")
 
-        # Function to remove outliers based on IQR
-        def remove_outliers(group, threshold):
-            Q1, Q3 = group[ox_data].quantile(0.25), group[ox_data].quantile(0.75)
-            IQR = Q3 - Q1
-            lower_bound, upper_bound = Q1 - threshold * IQR, Q3 + threshold * IQR
-            outlier_rows = ((group[ox_data] < lower_bound) |
-                            (group[ox_data] > upper_bound)).any(axis=1)
-            return group[~outlier_rows]
+            # Function to remove outliers based on IQR
+            def remove_outliers(group, threshold):
+                Q1 = group[self.ox_data].quantile(0.25)
+                Q3 = group[self.ox_data].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound, upper_bound = Q1 - threshold * IQR, Q3 + threshold * IQR
+                outlier_rows = ((group[self.ox_data] < lower_bound) |
+                                (group[self.ox_data] > upper_bound)).any(axis=1)
+                return group[~outlier_rows]
 
-        # Remove outliers for each rock type
-        data = (data.groupby("ROCKNAME", group_keys=False)[data.columns.tolist()]
-                .apply(remove_outliers, 1.5))
+            # Remove outliers for each rock type
+            data = (data.groupby("ROCKNAME", group_keys=False)[data.columns.tolist()]
+                    .apply(remove_outliers, 1.5))
 
-        # Convert all Cr to CR2O3
-        data = self._convert_to_cr2o3(data)
+            # Convert all Cr to CR2O3
+            data = self._convert_to_cr2o3(data)
 
-        # Convert all Ni to NIO
-        data = self._convert_to_nio(data)
+            # Convert all Ni to NIO
+            data = self._convert_to_nio(data)
 
-        # Convert all Fe oxides to FE2O3T
-        data = self._convert_to_fe2o3t(data)
+            # Convert all Fe oxides to FE2O3T
+            data = self._convert_to_fe2o3t(data)
 
-        # Normalize to volatile free basis
-        data = self._normalize_volatile_free(data)
+            # Normalize to volatile free basis
+            data = self._normalize_volatile_free(data)
 
-        # Convert all Fe oxides to FEOT
-        data = self._convert_to_feot(data)
+            # Convert all Fe oxides to FEOT
+            data = self._convert_to_feot(data)
 
-        # Drop totals
-        data = data.drop(["total_ox", "total_loi"], axis=1)
+            # Drop totals
+            data = data.drop(["total_ox", "total_loi"], axis=1)
 
-        # Drop all NA columns
-        data = data.dropna(axis=1, how="all")
+            # Drop all NA columns
+            data = data.dropna(axis=1, how="all")
 
-        # Rename FEOT
-        data = data.rename(columns={"FEOT": "FEO"})
+            # Rename FEOT
+            data = data.rename(columns={"FEOT": "FEO"})
 
-        # Consolidate unique methods
-        cols = [col for col in data.columns if "METH" in col]
-        unique_methods = data[cols].apply(lambda x: ", ".join(x.dropna().unique()), axis=1)
-        data["METHODS"] = unique_methods.str.upper()
+            # Consolidate unique methods
+            cols = [col for col in data.columns if "METH" in col]
+            unique_methods = data[cols].apply(
+                lambda x: ", ".join(x.dropna().unique()), axis=1)
+            data["METHODS"] = unique_methods.str.upper()
 
-        # Drop individual methods
-        data = data.drop(cols, axis=1)
+            # Drop individual methods
+            data = data.drop(cols, axis=1)
 
-        # Arrange columns by dtype
-        cols = (data.select_dtypes(include=["int", "float"]).columns.tolist() +
-                data.select_dtypes(exclude=["int", "float"]).columns.tolist())
-        data = data[cols]
+            # Arrange columns by dtype
+            cols = (data.select_dtypes(include=["int", "float"]).columns.tolist() +
+                    data.select_dtypes(exclude=["int", "float"]).columns.tolist())
+            data = data[cols]
 
-        # Arrange rows by SIO2
-        data = data.sort_values(by=["SIO2", "MGO"], ascending=[True, False],
-                                ignore_index=True)
+            # Arrange rows by SIO2
+            data = data.sort_values(by=["SIO2", "MGO"], ascending=[True, False],
+                                    ignore_index=True)
 
-        # Drop highly altered samples
-        condition = ((data["R_MGSI"] >= 0.6) & (data["R_MGSI"] <= 1.4) &
-                     (data["R_ALSI"] <= 0.3))
-        data = data.loc[condition]
+            # Drop highly altered samples
+            condition = ((data["R_MGSI"] >= 0.6) & (data["R_MGSI"] <= 1.4) &
+                         (data["R_ALSI"] <= 0.3))
+            data = data.loc[condition]
 
-        # Update self attribute
-        self.earthchem_filtered = data.copy()
+            # Update self attribute
+            self.earthchem_filtered = data.copy()
 
-        # Save info
-        numeric_columns = data.select_dtypes(include="number").columns
-        data[numeric_columns] = data[numeric_columns].apply(pd.to_numeric, errors="coerce")
-        numeric_info = []
-        for column in numeric_columns:
-            numeric_info.append({
-                "column": column,
-                "measured": data[column].count(),
-                "missing": data[column].isnull().sum(),
-                "min": data[column].min().round(3),
-                "max": data[column].max().round(3),
-                "mean": data[column].mean().round(3),
-                "median": data[column].median().round(3),
-                "std": data[column].std().round(3),
-                "iqr": round(data[column].quantile(0.75) -
-                             data[column].quantile(0.25), digits)
-            })
-        info_df = pd.DataFrame(numeric_info)
-        info_df.to_csv("assets/earthchem-counts.csv", index=False)
+            # Save info
+            numeric_columns = data.select_dtypes(include="number").columns
+            data[numeric_columns] = data[numeric_columns].apply(
+                pd.to_numeric, errors="coerce")
+            numeric_info = []
+            for column in numeric_columns:
+                numeric_info.append({
+                    "column": column,
+                    "measured": data[column].count(),
+                    "missing": data[column].isnull().sum(),
+                    "min": data[column].min().round(3),
+                    "max": data[column].max().round(3),
+                    "mean": data[column].mean().round(3),
+                    "median": data[column].median().round(3),
+                    "std": data[column].std().round(3),
+                    "iqr": round(data[column].quantile(0.75) -
+                                 data[column].quantile(0.25), self.digits)
+                })
+            info_df = pd.DataFrame(numeric_info)
+            info_df.to_csv("assets/earthchem-counts.csv", index=False)
 
-        if verbose >= 1:
-            # Print info
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"Combined and filtered samples summary:")
-            print("+++++++++++++++++++++++++++++++++++++++++++++")
-            print(data.info())
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print("Sample sources:")
-            print("+++++++++++++++++++++++++++++++++++++++++++++")
-            for source, count in data["SOURCE"].value_counts().items():
-                print(f"[{count}] {source}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print("Rock names:")
-            print("+++++++++++++++++++++++++++++++++++++++++++++")
-            for name, count in data["ROCKNAME"].value_counts().items():
-                print(f"[{count}] {name}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print("Rock types:")
-            print("+++++++++++++++++++++++++++++++++++++++++++++")
-            for type, count in data["ROCKTYPE"].value_counts().items():
-                print(f"[{count}] {type}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            if self.verbose >= 1:
+                # Print info
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"Combined and filtered samples summary:")
+                print("+++++++++++++++++++++++++++++++++++++++++++++")
+                print(data.info())
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print("Sample sources:")
+                print("+++++++++++++++++++++++++++++++++++++++++++++")
+                for source, count in data["SOURCE"].value_counts().items():
+                    print(f"[{count}] {source}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print("Rock names:")
+                print("+++++++++++++++++++++++++++++++++++++++++++++")
+                for name, count in data["ROCKNAME"].value_counts().items():
+                    print(f"[{count}] {name}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print("Rock types:")
+                print("+++++++++++++++++++++++++++++++++++++++++++++")
+                for type, count in data["ROCKTYPE"].value_counts().items():
+                    print(f"[{count}] {type}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
-        return None
+        except Exception as e:
+            print(f"Error in _process_earthchem_data():\n  {e}")
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # normalize sample composition !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _normalize_sample_composition(self, row):
         """
+        Normalizes a sample composition by excluding specified oxides and rescaling
+        the remainder.
+
+        This method performs the following steps:
+        - Filters out excluded oxides based on the `ox_exclude` list.
+        - Sets negative component values to zero.
+        - Calculates the total of the remaining (non-excluded) components.
+        - Normalizes the components to ensure their total sums to 100.
+        - Handles cases where no oxides are excluded by returning the
+          unnormalized composition.
+
+        Parameters:
+            row : pandas.Series
+                A row containing oxide values for a single sample, with column names
+                corresponding to oxide names.
+
+        Returns:
+            list:
+                A list of normalized oxide compositions, where excluded oxides have been
+                removed and the remaining components are rescaled to sum to 100.
+
+        Raises:
+            Exception: If any error occurs during the normalization process.
         """
-        # Get self attributes
-        digits = self.digits
-        ox_pca = self.ox_pca
-        ox_exclude = self.ox_exclude
-        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
+        try:
+            ox_sub = [oxide for oxide in self.ox_pca if oxide not in self.ox_exclude]
 
-        # Get sample composition
-        sample_composition = row[ox_pca].values
+            # Get sample composition
+            sample_composition = row[self.ox_pca].values
 
-        # No normalizing for all components
-        if not ox_exclude:
-            return sample_composition
+            # No normalizing for all components
+            if not self.ox_exclude:
+                return sample_composition
 
-        # Check input
-        if len(sample_composition) != len(ox_pca):
-            error_message = (f"The input sample list must have exactly {len(ox_pca)} "
-                             f"components!\n{ox_pca}")
+            # Filter components
+            subset_sample = [comp for comp, oxide in zip(sample_composition, self.ox_pca)
+                             if oxide in ox_sub]
 
-            raise ValueError(error_message)
+            # Set negative compositions to zero
+            subset_sample = [comp if comp >= 0 else 0 for comp in subset_sample]
 
-        # Filter components
-        subset_sample = [comp for comp, oxide in zip(sample_composition, ox_pca)
-                         if oxide in ox_sub]
+            # Get total oxides
+            total_subset_comps = sum([comp for comp in subset_sample if comp != 0])
 
-        # Set negative compositions to zero
-        subset_sample = [comp if comp >= 0 else 0 for comp in subset_sample]
+            # Normalize
+            normalized_comps = [
+                round(((comp / total_subset_comps) * 100 if comp != 0 else 0),
+                      self.digits) for comp, oxide in zip(subset_sample, ox_sub)]
 
-        # Get total oxides
-        total_subset_concentration = sum([comp for comp in subset_sample if comp != 0])
+        except Exception as e:
+            print(f"Error in _normalize_sample_composition():\n  {e}")
+            return None
 
-        # Normalize
-        normalized_concentrations = [
-            round(((comp / total_subset_concentration) * 100 if comp != 0 else 0), digits)
-            for comp, oxide in zip(subset_sample, ox_sub)]
+        return normalized_comps
 
-        return normalized_concentrations
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # samples to csv !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _samples_to_csv(self, sampleids, source, filename):
-        """
-        """
-        # Check for file
-        if not os.path.exists(source):
-            raise Exception("Sample data source does not exist!")
-
-        # Read data
-        df = pd.read_csv(source)
-
-        # Subset samples
-        samples = df[df["SAMPLEID"].isin(sampleids) & (df["LOI"] == 0)]
-
-        # Write csv
-        if os.path.exists(filename):
-            df_bench = pd.read_csv(filename)
-            df_bench = df_bench[~df_bench["SAMPLEID"].isin(sampleids)]
-            df_bench = pd.concat([df_bench, samples])
-            df_bench.to_csv(filename, index=False)
-        else:
-            samples.to_csv(filename, index=False)
-
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # process benchmark samples pca !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_benchmark_samples_pca(self):
         """
+        Processes benchmark samples for PCA analysis by normalizing compositions,
+        calculating ratios, and fitting PCA models.
+
+        This method performs the following steps:
+        - Reads benchmark sample data from a CSV file.
+        - Calculates classic mantle array ratios (R_MGSI and R_ALSI) based on oxide
+          compositions.
+        - Normalizes sample compositions while excluding specified oxides.
+        - Standardizes the data using a pre-fitted scaler.
+        - Fits the PCA model to the standardized benchmark samples.
+        - Updates the benchmark DataFrame with principal component scores.
+        - Calculates additional melt fractions and ratios (F_MELT_BATCH, XI_BATCH,
+          F_MELT_FRAC, XI_FRAC).
+        - Selects relevant columns for the final DataFrame.
+        - Saves the processed benchmark data to a new CSV file.
+
+        Attributes updated:
+            None: This method does not modify any attributes directly, but it generates
+            a processed DataFrame that is saved to a CSV file.
+
+        Raises:
+            Exception: If any error occurs during the processing of benchmark samples.
         """
-        res = self.res
-        pca = self.pca_model
-        scaler = self.scaler
-        digits = self.digits
-        D_tio2 = self.D_tio2
-        ox_pca = self.ox_pca
-        ox_exclude = self.ox_exclude
-        metadata = ["SAMPLEID"]
-        n_pca_components = self.n_pca_components
-        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
-        other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
-                      "F_MELT_FRAC", "XI_FRAC"]
+        try:
+            metadata = ["SAMPLEID"]
+            ox_sub = [oxide for oxide in self.ox_pca if oxide not in self.ox_exclude]
+            other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
+                          "F_MELT_FRAC", "XI_FRAC"]
 
-        df_bench_path = "assets/benchmark-samples.csv"
-        df_bench_pca_path = "assets/bench-pca.csv"
+            df_bench_path = "assets/benchmark-samples.csv"
+            df_bench_pca_path = "assets/bench-pca.csv"
 
-        # Get dry synthetic endmember compositions
-        df_mids = pd.read_csv("assets/synth-mids.csv")
-        df_dry = df_mids[df_mids["LOI"] == 0]
-        sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
-        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
-
-        # Read benchmark samples
-        if os.path.exists(df_bench_path):
-            # Get max TiO2 from mixing array endpoints
-            ti_init = df_synth_bench["TIO2"].max()
+            # Get dry synthetic endmember compositions
+            df_mids = pd.read_csv("assets/synth-mids.csv")
+            df_dry = df_mids[df_mids["H2O"] == 0]
+            sids = [df_dry["SAMPLEID"].head(1).values[0],
+                    df_dry["SAMPLEID"].tail(1).values[0]]
+            df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["H2O"] == 0)]
 
             # Read benchmark samples
-            df_bench = pd.read_csv(df_bench_path)
+            if os.path.exists(df_bench_path):
+                # Get max TiO2 from mixing array endpoints
+                ti_init = df_synth_bench["TIO2"].max()
 
-            # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
-            df_bench["R_MGSI"] = round(df_bench["MGO"] / df_bench["SIO2"], digits)
-            df_bench["R_ALSI"] = round(df_bench["AL2O3"] / df_bench["SIO2"], digits)
+                # Read benchmark samples
+                df_bench = pd.read_csv(df_bench_path)
 
-            # Normalize compositions
-            normalized_values = df_bench.apply(self._normalize_sample_composition, axis=1)
-            df_bench[ox_sub] = normalized_values.apply(pd.Series)
-            df_bench[ox_exclude] = float(0)
+                # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
+                df_bench["R_MGSI"] = round(df_bench["MGO"] / df_bench["SIO2"], self.digits)
+                df_bench["R_ALSI"] = round(df_bench["AL2O3"] / df_bench["SIO2"], self.digits)
 
-            # Standardize data
-            df_bench_scaled = scaler.transform(df_bench[ox_pca])
+                # Normalize compositions
+                normalized_values = df_bench.apply(
+                    self._normalize_sample_composition, axis=1)
+                df_bench[ox_sub] = normalized_values.apply(pd.Series)
+                df_bench[self.ox_exclude] = float(0)
 
-            # Fit PCA to benchmark samples
-            principal_components = pca.transform(df_bench_scaled)
+                # Standardize data
+                df_bench_scaled = self.scaler.transform(df_bench[self.ox_pca])
 
-            # Update dataframe
-            pca_columns = [f"PC{i+1}" for i in range(n_pca_components)]
-            df_bench[pca_columns] = principal_components
+                # Fit PCA to benchmark samples
+                principal_components = self.pca_model.transform(df_bench_scaled)
 
-            # Round numerical data
-            df_bench[ox_pca + pca_columns] = df_bench[ox_pca + pca_columns].round(3)
+                # Update dataframe
+                pca_columns = [f"PC{i+1}" for i in range(self.n_pca_components)]
+                df_bench[pca_columns] = principal_components
 
-            # Calculate F melt
-            df_bench["R_TIO2"] = round(df_bench["TIO2"] / ti_init, 3)
-            df_bench["F_MELT_BATCH"] = round(
-                ((D_tio2 / df_bench["R_TIO2"]) - D_tio2) / (1 - D_tio2), 3)
-            df_bench["XI_BATCH"] = round(1 - df_bench["F_MELT_BATCH"], 3)
-            df_bench["F_MELT_FRAC"] = round(
-                1 - df_bench["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), 3)
-            df_bench["XI_FRAC"] = round(1 - df_bench["F_MELT_FRAC"], 3)
+                # Round numerical data
+                df_bench[self.ox_pca + pca_columns] = df_bench[
+                    self.ox_pca + pca_columns].round(self.digits)
 
-            # Select columns
-            df_bench = df_bench[metadata + ox_pca + ["LOI"] + pca_columns + other_cols]
+                # Calculate F melt
+                df_bench["R_TIO2"] = round(df_bench["TIO2"] / ti_init, self.digits)
+                df_bench["F_MELT_BATCH"] = round(
+                    ((self.D_tio2 / df_bench["R_TIO2"]) - self.D_tio2) /
+                    (1 - self.D_tio2), self.digits)
+                df_bench["XI_BATCH"] = round(1 - df_bench["F_MELT_BATCH"], self.digits)
+                df_bench["F_MELT_FRAC"] = round(
+                    1 - df_bench["R_TIO2"]**(1 / ((1 / self.D_tio2) - 1)), self.digits)
+                df_bench["XI_FRAC"] = round(1 - df_bench["F_MELT_FRAC"], self.digits)
 
-            # Save to csv
-            df_bench.to_csv(df_bench_pca_path, index=False)
+                # Select columns
+                df_bench = df_bench[
+                    metadata + self.ox_pca + ["H2O"] + pca_columns + other_cols]
 
-        return None
+                # Save to csv
+                df_bench.to_csv(df_bench_pca_path, index=False)
+
+        except Exception as e:
+            print(f"Error in _process_benchmark_samples_pca():\n  {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.1.         Create Mixing Arrays            !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # run pca !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _run_pca(self):
         """
+        Executes PCA analysis on filtered EarthChem data to reduce dimensionality and
+        impute missing values.
+
+        This method performs the following steps:
+        - Checks for the existence of filtered EarthChem data; raises an exception if not
+          found.
+        - Sorts the data by SiO2 and MgO compositions.
+        - Imputes missing oxide values using KNN imputer grouped by rock name.
+        - Normalizes the compositions of the imputed data, excluding specified oxides.
+        - Initializes and applies a standard scaler to the normalized data.
+        - Initializes PCA with the specified number of components and fits the model to the
+          standardized data.
+        - Outputs a summary of the PCA results, including explained variance and cumulative
+          explained variance if verbose mode is enabled.
+        - Transforms the standardized data to obtain principal components and updates the
+          original DataFrame.
+        - Rounds the numerical data in the resulting DataFrame for better readability.
+        - Saves the PCA results in an attribute for later use.
+
+        Attributes updated:
+            self.scaler : StandardScaler
+                The fitted scaler used for standardizing data.
+            self.pca_model : PCA
+                The fitted PCA model after running the analysis.
+            self.pca_results : numpy.ndarray
+                The principal component scores for the samples.
+            self.earthchem_pca : pandas.DataFrame
+                The updated DataFrame containing original data and PCA results.
+
+        Raises:
+            Exception: If any error occurs during PCA execution, including missing data or
+              imputation failures.
         """
-        # Get self attributes
-        digits = self.digits
-        verbose = self.verbose
-        ox_data = self.ox_data
-        ox_pca = self.ox_pca
-        ox_exclude = self.ox_exclude
-        data = self.earthchem_filtered.copy()
-        n_pca_components = self.n_pca_components
-        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
+        try:
+            data = self.earthchem_filtered.copy()
+            ox_sub = [oxide for oxide in self.ox_pca if oxide not in self.ox_exclude]
 
-        # Check for earthchem data
-        if data.empty:
-            raise Exception("No Earthchem data found! Call _read_earthchem_data() first ...")
+            # Check for earthchem data
+            if data.empty:
+                raise Exception(
+                    "No Earthchem data found! Call _read_earthchem_data() first ...")
 
-        # Sort by composition
-        data = data.sort_values(by=["SIO2", "MGO"], ascending=[True, False],
-                                ignore_index=True)
+            # Sort by composition
+            data = data.sort_values(by=["SIO2", "MGO"], ascending=[True, False],
+                                    ignore_index=True)
 
-        print("Imputing missing oxides ...")
+            print("Imputing missing oxides ...")
 
-        # Group by rockname and apply KNN imputer
-        imputed_dataframes = []
-        for rockname, subset in data.groupby("ROCKNAME"):
-            subset = subset.reset_index(drop=True)
+            # Group by rockname and apply KNN imputer
+            imputed_dataframes = []
+            for rockname, subset in data.groupby("ROCKNAME"):
+                subset = subset.reset_index(drop=True)
 
-            for col in ox_pca:
-                column_to_impute = subset[[col]]
-                imputer = KNNImputer(weights="distance")
-                imputed_values = imputer.fit_transform(column_to_impute).round(digits)
-                subset[col] = imputed_values
+                for col in self.ox_pca:
+                    column_to_impute = subset[[col]]
+                    imputer = KNNImputer(weights="distance")
+                    imputed_values = imputer.fit_transform(
+                        column_to_impute).round(self.digits)
+                    subset[col] = imputed_values
 
-            imputed_dataframes.append(subset)
+                imputed_dataframes.append(subset)
 
-        # Recombine imputed subsets
-        imputed_data = pd.concat(imputed_dataframes, ignore_index=True)
+            # Recombine imputed subsets
+            imputed_data = pd.concat(imputed_dataframes, ignore_index=True)
 
-        # Normalize compositions
-        normalized_values = data.apply(self._normalize_sample_composition, axis=1)
-        data[ox_sub] = normalized_values.apply(pd.Series)
-        data[ox_exclude] = float(0)
+            # Normalize compositions
+            normalized_values = data.apply(self._normalize_sample_composition, axis=1)
+            data[ox_sub] = normalized_values.apply(pd.Series)
+            data[self.ox_exclude] = float(0)
 
-        # Initialize scaler
-        scaler = StandardScaler()
+            # Initialize scaler
+            scaler = StandardScaler()
 
-        # Standardize data
-        data_scaled = scaler.fit_transform(data[ox_pca])
+            # Standardize data
+            data_scaled = scaler.fit_transform(data[self.ox_pca])
 
-        # Update attribute
-        self.scaler = scaler
+            # Update attribute
+            self.scaler = scaler
 
-        # Initialize PCA
-        pca = PCA(n_components=n_pca_components)
+            # Initialize PCA
+            pca = PCA(n_components=self.n_pca_components)
 
-        print(f"Running PCA to reduce to {n_pca_components} dimensions ...")
+            print(f"Running PCA to reduce to {self.n_pca_components} dimensions ...")
 
-        # PCA modeling
-        pca.fit(data_scaled)
+            # PCA modeling
+            pca.fit(data_scaled)
 
-        # Update self attribute
-        self.pca_model = pca
+            # Update self attribute
+            self.pca_model = pca
 
-        if verbose >= 1:
-            # Print summary
-            print("+++++++++++++++++++++++++++++++++++++++++++++")
-            print("PCA summary:")
-            print(f"  PCA oxides: {ox_sub}")
-            print(f"  number of samples: {pca.n_samples_}")
-            print(f"  PCA components: {n_pca_components}")
-            print( "  explained variance:")
-            for i, value in enumerate(pca.explained_variance_ratio_):
-                print(f"      PC{i+1}: {round(value, digits)}")
-            print("  cumulative explained variance:")
-            cumulative_variance = pca.explained_variance_ratio_.cumsum()
-            for i, value in enumerate(cumulative_variance):
-                print(f"      PC{i+1}: {round(value, digits)}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            if self.verbose >= 1:
+                # Print summary
+                print("+++++++++++++++++++++++++++++++++++++++++++++")
+                print("PCA summary:")
+                print(f"  PCA oxides: {ox_sub}")
+                print(f"  number of samples: {pca.n_samples_}")
+                print(f"  PCA components: {self.n_pca_components}")
+                print( "  explained variance:")
+                for i, value in enumerate(pca.explained_variance_ratio_):
+                    print(f"      PC{i+1}: {round(value, self.digits)}")
+                print("  cumulative explained variance:")
+                cumulative_variance = pca.explained_variance_ratio_.cumsum()
+                for i, value in enumerate(cumulative_variance):
+                    print(f"      PC{i+1}: {round(value, self.digits)}")
+                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
-        # Transform the data to obtain the principal components
-        principal_components = pca.transform(data_scaled)
+            # Transform the data to obtain the principal components
+            principal_components = pca.transform(data_scaled)
 
-        # Update self attribute
-        self.pca_results = principal_components
+            # Update self attribute
+            self.pca_results = principal_components
 
-        # Update dataframe
-        pca_columns = [f"PC{i+1}" for i in range(n_pca_components)]
-        data[pca_columns] = principal_components
+            # Update dataframe
+            pca_columns = [f"PC{i+1}" for i in range(self.n_pca_components)]
+            data[pca_columns] = principal_components
 
-        # Round numerical data
-        data[ox_pca + pca_columns] = data[ox_pca + pca_columns].round(3)
+            # Round numerical data
+            data[self.ox_pca + pca_columns] = data[self.ox_pca + pca_columns].round(3)
 
-        # Update self attribute
-        self.earthchem_pca = data.copy()
+            # Update self attribute
+            self.earthchem_pca = data.copy()
 
-        return None
+        except Exception as e:
+            print(f"Error in _run_pca():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # add loi !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _add_loi(self, df):
+    def _add_h2o(self, df):
         """
+        Adds a range of H2O values to the provided DataFrame, duplicating samples
+        for each H2O value and updating the SAMPLEID accordingly.
+
+        This method performs the following steps:
+        - Constructs a linear array of H2O values from 0 to the specified maximum
+          H2O content, with a resolution defined by `res_h2o`.
+        - Duplicates each sample ID in the DataFrame to accommodate the new H2O values.
+        - Assigns the generated H2O values to the newly duplicated rows in the DataFrame.
+        - Updates the SAMPLEID to include a suffix indicating the H2O iteration count,
+          formatted with leading zeros.
+
+        Attributes updated:
+            df : pandas.DataFrame
+                The modified DataFrame containing the original samples and additional
+                H2O values, with updated SAMPLEIDs.
+
+        Returns:
+            pandas.DataFrame: The updated DataFrame with H2O values added.
+
+        Raises:
+            Exception: If any error occurs during the addition of H2O values, including
+            issues with indexing or DataFrame operations.
         """
-        # Get self attributes
-        res = self.res
-        digits = self.digits
-        max_loi = self.max_loi
-        res_loi = self.res_loi
-        ox_exclude = self.ox_exclude
-        ox_pca = self.ox_pca + ["LOI"]
-        ox_sub = [oxide for oxide in ox_pca if oxide not in ox_exclude]
+        try:
+            ox_pca = self.ox_pca + ["H2O"]
+            ox_sub = [oxide for oxide in ox_pca if oxide not in self.ox_exclude]
 
-        # Create linear array of ad hoc loi
-        loi = np.linspace(0.0, max_loi, res_loi).round(digits)
-        sid_append = np.arange(0, len(loi))
+            # Create linear array of ad hoc h2o
+            h2o = np.linspace(0.0, self.max_h2o, self.res_h2o).round(self.digits)
+            sid_append = np.arange(0, len(h2o))
 
-        # Duplicate each sampleid
-        df = df.reindex(df.index.repeat(res_loi))
+            # Duplicate each sampleid
+            df = df.reindex(df.index.repeat(self.res_h2o))
 
-        # Add loi to each sampleid
-        df["LOI"] = np.tile(loi, len(df) // len(loi))
-        df["SAMPLEID"] = (
-            df["SAMPLEID"] +
-            df.groupby(level=0).cumcount().map(lambda x: f"-loi{str(x).zfill(3)}"))
+            # Add h2o to each sampleid
+            df["H2O"] = np.tile(h2o, len(df) // len(h2o))
+            df["SAMPLEID"] = (
+                df["SAMPLEID"] +
+                df.groupby(level=0).cumcount().map(lambda x: f"-h2o{str(x).zfill(3)}"))
+
+        except Exception as e:
+            print(f"Error in _add_h2o():\n  {e}")
+            return None
 
         return df
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # create mixing arrays !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def create_mixing_array(self):
         """
+        Create a mixing array from EarthChem data using PCA (Principal Component Analysis).
+
+        This method reads EarthChem data, processes it, and performs PCA to extract
+        principal components. It calculates endpoints, tops, and bottoms for a mixing
+        array based on the PCA results. Additionally, it generates synthetic data for
+        mixing lines and exports the results to CSV files.
+
+        Steps involved:
+            1. Read and process EarthChem data.
+            2. Run PCA on the processed data.
+            3. Define sample centroids based on PCA components.
+            4. Calculate the endpoints, tops, and bottoms of mixing arrays for each rock
+               type.
+            5. Generate mixing lines between endpoints and store them.
+            6. Create synthetic data for the mixing arrays and save to CSV files.
+            7. Ensure non-negative oxide values in the results.
+            8. Calculate and add additional properties like R_MGSI, R_ALSI, and H2O.
+
+        Raises:
+            Exception: If an invalid quadrant is detected during endpoint calculation.
+
+        Returns:
+            None: The method modifies instance attributes to store the resulting mixing
+            arrays and writes the data to CSV files without returning any values.
+
+        Notes:
+            - This method relies on several instance variables, such as
+              `self.n_pca_components`, `self.earthchem_pca`, `self.scaler`, and
+              `self.pca_model`, among others.
+            - The results are saved to files in the 'assets' directory, specifically:
+              - `earthchem-pca.csv`
+              - `synth-mids.csv`
+              - `synth-tops.csv`
+              - `synth-bots.csv`
         """
-        # Get earthchem data
-        self._read_earthchem_data()
-
-        # Process earthchem data
-        self._process_earthchem_data()
-
-        # Run PCA
-        self._run_pca()
-
-        # Get self attributes
-        k = self.k
-        res = self.res
-        seed = self.seed
-        D_tio2 = self.D_tio2
-        digits = self.digits
-        scaler = self.scaler
-        pca = self.pca_model
-        verbose = self.verbose
-        ox_pca = self.ox_pca
-        metadata = self.metadata
-        mc_sample = self.mc_sample
-        data = self.earthchem_pca.copy()
-        weighted_random = self.weighted_random
-        principal_components = self.pca_results
-        n_pca_components = self.n_pca_components
-        pca_columns = [f"PC{i+1}" for i in range(n_pca_components)]
-        other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
-                      "F_MELT_FRAC", "XI_FRAC"]
-
         try:
+            self._read_earthchem_data()
+            self._process_earthchem_data()
+            self._run_pca()
+
+            data = self.earthchem_pca.copy()
+            pca_columns = [f"PC{i+1}" for i in range(self.n_pca_components)]
+            other_cols = ["R_MGSI", "R_ALSI", "R_TIO2", "F_MELT_BATCH", "XI_BATCH",
+                          "F_MELT_FRAC", "XI_FRAC"]
+
             # Define sample centroids
             centroids = data.groupby("ROCKNAME")[["PC1", "PC2"]].median()
 
@@ -930,12 +1101,12 @@ class MixingArray:
             bottom_lines = {}
 
             # Loop through PCA components
-            for n in range(n_pca_components):
+            for n in range(self.n_pca_components):
                 for i in range(len(mixing_array_endpoints)):
                     # Calculate mixing lines between endpoints
                     if len(mixing_array_endpoints) > 1:
                         for j in range(i + 1, len(mixing_array_endpoints)):
-                            nsmps = (res // (len(mixing_array_endpoints) - 1)) + 1
+                            nsmps = (self.res // (len(mixing_array_endpoints) - 1)) + 1
                             if n == 0:
                                 mixing_lines[f"{i + 1}{j + 1}"] = (
                                     np.linspace(mixing_array_endpoints[i, n],
@@ -982,23 +1153,26 @@ class MixingArray:
                         ((i == 4) & (j == 5))):
                         # Create dataframe
                         mixing_synthetic = pd.DataFrame(
-                            np.hstack((scaler.inverse_transform(pca.inverse_transform(
-                                mixing_lines[f"{i + 1}{j + 1}"].T)),
-                                mixing_lines[f"{i + 1}{j + 1}"].T)),
-                            columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
-                        ).round(3)
+                            np.hstack((self.scaler.inverse_transform(
+                                self.pca_model.inverse_transform(
+                                    mixing_lines[f"{i + 1}{j + 1}"].T)),
+                                    mixing_lines[f"{i + 1}{j + 1}"].T)),
+                            columns=self.ox_pca + [f"PC{n + 1}" for n
+                                                   in range(self.n_pca_components)]).round(3)
                         tops_synthetic = pd.DataFrame(
-                            np.hstack((scaler.inverse_transform(pca.inverse_transform(
-                                top_lines[f"{i + 1}{j + 1}"].T)),
-                                top_lines[f"{i + 1}{j + 1}"].T)),
-                            columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
-                        ).round(3)
+                            np.hstack((self.scaler.inverse_transform(
+                                self.pca_model.inverse_transform(
+                                    top_lines[f"{i + 1}{j + 1}"].T)),
+                                    top_lines[f"{i + 1}{j + 1}"].T)),
+                            columns=self.ox_pca + [f"PC{n + 1}" for n in
+                                                   range(self.n_pca_components)]).round(3)
                         bots_synthetic = pd.DataFrame(
-                            np.hstack((scaler.inverse_transform(pca.inverse_transform(
-                                bottom_lines[f"{i + 1}{j + 1}"].T)),
-                                bottom_lines[f"{i + 1}{j + 1}"].T)),
-                            columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
-                        ).round(3)
+                            np.hstack((self.scaler.inverse_transform(
+                                self.pca_model.inverse_transform(
+                                    bottom_lines[f"{i + 1}{j + 1}"].T)),
+                                    bottom_lines[f"{i + 1}{j + 1}"].T)),
+                            columns=self.ox_pca + [f"PC{n + 1}" for n in
+                                                   range(self.n_pca_components)]).round(3)
 
                         # Append to list
                         mixing_list.append(mixing_synthetic)
@@ -1019,13 +1193,14 @@ class MixingArray:
                 0, "SAMPLEID", [f"sb{str(n).zfill(3)}" for n in range(len(all_bots))])
 
             # No negative oxides
-            data[ox_pca] = data[ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_mixs[ox_pca] = all_mixs[
-                ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_tops[ox_pca] = all_tops[
-                ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
-            all_bots[ox_pca] = all_bots[
-                ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            data[self.ox_pca] = data[
+                self.ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            all_mixs[self.ox_pca] = all_mixs[
+                self.ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            all_tops[self.ox_pca] = all_tops[
+                self.ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
+            all_bots[self.ox_pca] = all_bots[
+                self.ox_pca].apply(lambda x: x.apply(lambda y: max(0.001, y)))
 
             # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
             all_mixs["TIO2"] = all_mixs["TIO2"] + (all_mixs["TIO2"] * 0.1)
@@ -1034,15 +1209,18 @@ class MixingArray:
 
             # Calculate F melt
             ti_init = all_mixs["TIO2"].max()
-            data["R_TIO2"] = round(data["TIO2"] / ti_init, digits)
+            data["R_TIO2"] = round(data["TIO2"] / ti_init, self.digits)
             data["F_MELT_BATCH"] = round(
-                ((D_tio2 / data["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            data["XI_BATCH"] = round(1 - data["F_MELT_BATCH"], digits)
-            data["F_MELT_FRAC"] = round(1 - data["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            data["XI_FRAC"] = round(1 - data["F_MELT_FRAC"], digits)
+                ((self.D_tio2 / data["R_TIO2"]) - self.D_tio2) / (1 - self.D_tio2),
+                self.digits)
+            data["XI_BATCH"] = round(1 - data["F_MELT_BATCH"], self.digits)
+            data["F_MELT_FRAC"] = round(1 - data["R_TIO2"]**(1 / ((1 / self.D_tio2) - 1)),
+                                        self.digits)
+            data["XI_FRAC"] = round(1 - data["F_MELT_FRAC"], self.digits)
 
             # Select columns
-            data = data[metadata + ox_pca + ["LOI"] + pca_columns + other_cols]
+            data = data[self.metadata + self.ox_pca + ["LOI"] + pca_columns + other_cols]
+            data = data.rename(columns={"LOI": "H2O"})
 
             self.earthchem_pca = data.copy()
 
@@ -1050,47 +1228,53 @@ class MixingArray:
             data.to_csv(f"assets/earthchem-pca.csv", index=False)
 
             # Calculate F melt
-            all_mixs["R_TIO2"] = round(all_mixs["TIO2"] / ti_init, digits)
+            all_mixs["R_TIO2"] = round(all_mixs["TIO2"] / ti_init, self.digits)
             all_mixs["F_MELT_BATCH"] = round(
-                ((D_tio2 / all_mixs["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            all_mixs["XI_BATCH"] = round(1 - all_mixs["F_MELT_BATCH"], digits)
+                ((self.D_tio2 / all_mixs["R_TIO2"]) - self.D_tio2) / (1 - self.D_tio2),
+                self.digits)
+            all_mixs["XI_BATCH"] = round(1 - all_mixs["F_MELT_BATCH"], self.digits)
             all_mixs["F_MELT_FRAC"] = round(
-                1 - all_mixs["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            all_mixs["XI_FRAC"] = round(1 - all_mixs["F_MELT_FRAC"], digits)
+                1 - all_mixs["R_TIO2"]**(1 / ((1 / self.D_tio2) - 1)), self.digits)
+            all_mixs["XI_FRAC"] = round(1 - all_mixs["F_MELT_FRAC"], self.digits)
 
-            all_tops["R_TIO2"] = round(all_tops["TIO2"] / ti_init, digits)
+            all_tops["R_TIO2"] = round(all_tops["TIO2"] / ti_init, self.digits)
             all_tops["F_MELT_BATCH"] = round(
-                ((D_tio2 / all_tops["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            all_tops["XI_BATCH"] = round(1 - all_tops["F_MELT_BATCH"], digits)
+                ((self.D_tio2 / all_tops["R_TIO2"]) - self.D_tio2) / (1 - self.D_tio2),
+                self.digits)
+            all_tops["XI_BATCH"] = round(1 - all_tops["F_MELT_BATCH"], self.digits)
             all_tops["F_MELT_FRAC"] = round(
-                1 - all_tops["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            all_tops["XI_FRAC"] = round(1 - all_tops["F_MELT_FRAC"], digits)
+                1 - all_tops["R_TIO2"]**(1 / ((1 / self.D_tio2) - 1)), self.digits)
+            all_tops["XI_FRAC"] = round(1 - all_tops["F_MELT_FRAC"], self.digits)
 
-            all_bots["R_TIO2"] = round(all_bots["TIO2"] / ti_init, digits)
+            all_bots["R_TIO2"] = round(all_bots["TIO2"] / ti_init, self.digits)
             all_bots["F_MELT_BATCH"] = round(
-                ((D_tio2 / all_bots["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
-            all_bots["XI_BATCH"] = round(1 - all_bots["F_MELT_BATCH"], digits)
+                ((self.D_tio2 / all_bots["R_TIO2"]) - self.D_tio2) / (1 - self.D_tio2),
+                self.digits)
+            all_bots["XI_BATCH"] = round(1 - all_bots["F_MELT_BATCH"], self.digits)
             all_bots["F_MELT_FRAC"] = round(
-                1 - all_bots["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            all_bots["XI_FRAC"] = round(1 - all_bots["F_MELT_FRAC"], digits)
+                1 - all_bots["R_TIO2"]**(1 / ((1 / self.D_tio2) - 1)), self.digits)
+            all_bots["XI_FRAC"] = round(1 - all_bots["F_MELT_FRAC"], self.digits)
 
             # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
-            all_mixs["R_MGSI"] = round(all_mixs["MGO"] / all_mixs["SIO2"], digits)
-            all_mixs["R_ALSI"] = round(all_mixs["AL2O3"] / all_mixs["SIO2"], digits)
-            all_tops["R_MGSI"] = round(all_tops["MGO"] / all_tops["SIO2"], digits)
-            all_tops["R_ALSI"] = round(all_tops["AL2O3"] / all_tops["SIO2"], digits)
-            all_bots["R_MGSI"] = round(all_bots["MGO"] / all_bots["SIO2"], digits)
-            all_bots["R_ALSI"] = round(all_bots["AL2O3"] / all_bots["SIO2"], digits)
+            all_mixs["R_MGSI"] = round(all_mixs["MGO"] / all_mixs["SIO2"], self.digits)
+            all_mixs["R_ALSI"] = round(all_mixs["AL2O3"] / all_mixs["SIO2"], self.digits)
+            all_tops["R_MGSI"] = round(all_tops["MGO"] / all_tops["SIO2"], self.digits)
+            all_tops["R_ALSI"] = round(all_tops["AL2O3"] / all_tops["SIO2"], self.digits)
+            all_bots["R_MGSI"] = round(all_bots["MGO"] / all_bots["SIO2"], self.digits)
+            all_bots["R_ALSI"] = round(all_bots["AL2O3"] / all_bots["SIO2"], self.digits)
 
-            # Add LOI ad hoc
-            all_tops = self._add_loi(all_tops)
-            all_mixs = self._add_loi(all_mixs)
-            all_bots = self._add_loi(all_bots)
+            # Add H2O ad hoc
+            all_tops = self._add_h2o(all_tops)
+            all_mixs = self._add_h2o(all_mixs)
+            all_bots = self._add_h2o(all_bots)
 
             # Select columns
-            all_mixs = all_mixs[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
-            all_tops = all_tops[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
-            all_bots = all_bots[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
+            all_mixs = all_mixs[["SAMPLEID"] + self.ox_pca + ["H2O"] + pca_columns +
+                                other_cols]
+            all_tops = all_tops[["SAMPLEID"] + self.ox_pca + ["H2O"] + pca_columns +
+                                other_cols]
+            all_bots = all_bots[["SAMPLEID"] + self.ox_pca + ["H2O"] + pca_columns +
+                                other_cols]
 
             # Write to csv
             all_mixs.to_csv("assets/synth-mids.csv", index=False)
@@ -1102,32 +1286,32 @@ class MixingArray:
             max_x = max(mixing_array_tops[:, 0].max(), mixing_array_bots[:, 0].max())
 
             # Define the sampling interval
-            interval_x = (max_x - min_x) / res
+            interval_x = (max_x - min_x) / self.res
 
             randomly_sampled_points = []
             sample_ids = []
 
             # Monte carlo sampling of synthetic samples
-            for j in range(mc_sample):
+            for j in range(self.mc_sample):
                 # Set seed
-                np.random.seed(seed + j)
+                np.random.seed(self.seed + j)
 
                 # Create an array to store sampled points
                 sampled_points = []
                 sampled_weights = []
 
                 # Iterate over x positions
-                for x in np.linspace(min_x, max_x, res):
+                for x in np.linspace(min_x, max_x, self.res):
                     # Calculate the range of y values for the given x position
                     y_min = np.interp(x, mixing_array_tops[:, 0], mixing_array_tops[:, 1])
                     y_max = np.interp(x, mixing_array_bots[:, 0], mixing_array_bots[:, 1])
                     y_mid = (y_max + y_min) / 2
 
                     # Create a grid of y values for the current x position
-                    y_values = np.linspace(y_min, y_max, res)
+                    y_values = np.linspace(y_min, y_max, self.res)
 
                     # Calculate exponential distance weights
-                    point_weights = np.exp(-k * np.abs(y_values - y_mid))
+                    point_weights = np.exp(-self.k * np.abs(y_values - y_mid))
 
                     # Combine x and y values to create points
                     points = np.column_stack((x * np.ones_like(y_values), y_values))
@@ -1141,14 +1325,14 @@ class MixingArray:
                 sampled_weights = np.array(sampled_weights)
 
                 # Define probability distribution for selecting random points
-                if weighted_random:
+                if self.weighted_random:
                     prob_dist = sampled_weights / np.sum(sampled_weights)
                 else:
                     prob_dist = None
 
                 # Randomly select from sampled points
                 sample_idx = np.random.choice(
-                    len(sampled_points), res, replace=False, p=prob_dist)
+                    len(sampled_points), self.res, replace=False, p=prob_dist)
                 randomly_sampled_points.append([sampled_points[i] for i in sample_idx])
 
                 # Save random points
@@ -1159,40 +1343,42 @@ class MixingArray:
 
             # Create dataframe
             all_rnds = pd.DataFrame(
-                np.hstack((scaler.inverse_transform(pca.inverse_transform(
+                np.hstack((self.scaler.inverse_transform(self.pca_model.inverse_transform(
                     randomly_sampled_points)), randomly_sampled_points)),
-                columns=ox_pca + [f"PC{n + 1}" for n in range(n_pca_components)]
+                columns=self.ox_pca + [f"PC{n + 1}" for n in range(self.n_pca_components)]
             ).round(3)
 
             # Add sample id column
             all_rnds.insert(0, "SAMPLEID", sample_ids)
 
             # No negative oxides
-            all_rnds[ox_pca] = all_rnds[ox_pca].apply(
+            all_rnds[self.ox_pca] = all_rnds[self.ox_pca].apply(
                 lambda x: x.apply(lambda y: max(0.001, y)))
 
             # Increase TIO2 by 10% for mixing arrays so that F melt is consistent with PUM
             all_rnds["TIO2"] = (all_rnds["TIO2"] + (all_rnds["TIO2"] * 0.1))
 
             # Calculate F melt
-            all_rnds["R_TIO2"] = round(all_rnds["TIO2"] / ti_init, digits)
+            all_rnds["R_TIO2"] = round(all_rnds["TIO2"] / ti_init, self.digits)
             all_rnds["F_MELT_BATCH"] = round(
-                ((D_tio2 / all_rnds["R_TIO2"]) - D_tio2) / (1 - D_tio2), digits)
+                ((self.D_tio2 / all_rnds["R_TIO2"]) - self.D_tio2) / (1 - self.D_tio2),
+                self.digits)
             all_rnds["XI_BATCH"] = round(
-                1 - all_rnds["F_MELT_BATCH"], digits)
+                1 - all_rnds["F_MELT_BATCH"], self.digits)
             all_rnds["F_MELT_FRAC"] = round(
-                1 - all_rnds["R_TIO2"]**(1 / ((1 / D_tio2) - 1)), digits)
-            all_rnds["XI_FRAC"] = round(1 - all_rnds["F_MELT_FRAC"], digits)
+                1 - all_rnds["R_TIO2"]**(1 / ((1 / self.D_tio2) - 1)), self.digits)
+            all_rnds["XI_FRAC"] = round(1 - all_rnds["F_MELT_FRAC"], self.digits)
 
             # "Classic" mantle array ratios (Deschamps et al., 2013, Lithos)
-            all_rnds["R_MGSI"] = round(all_rnds["MGO"] / all_rnds["SIO2"], digits)
-            all_rnds["R_ALSI"] = round(all_rnds["AL2O3"] / all_rnds["SIO2"], digits)
+            all_rnds["R_MGSI"] = round(all_rnds["MGO"] / all_rnds["SIO2"], self.digits)
+            all_rnds["R_ALSI"] = round(all_rnds["AL2O3"] / all_rnds["SIO2"], self.digits)
 
-            # Add LOI ad hoc
-            all_rnds = self._add_loi(all_rnds)
+            # Add H2O ad hoc
+            all_rnds = self._add_h2o(all_rnds)
 
             # Select columns
-            all_rnds = all_rnds[["SAMPLEID"] + ox_pca + ["LOI"] + pca_columns + other_cols]
+            all_rnds = all_rnds[["SAMPLEID"] + self.ox_pca + ["H2O"] + pca_columns +
+                                other_cols]
 
             # Write to csv
             all_rnds.to_csv("assets/synth-rnds.csv", index=False)
@@ -1200,28 +1386,13 @@ class MixingArray:
             # Process benchmark samples
             self._process_benchmark_samples_pca()
 
-            # Update attribute
-            self.synthetic_data_written = True
-
-            return None
-
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in create_mixing_array() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"Error in create_mixing_array():\n  {e}")
             traceback.print_exc()
-
-            self.mixing_array_error = True
-            self.error = e
-
-            return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.2.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize mixing array !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize_mixing_array(self, figwidth=6.3, figheight=5.2, fontsize=24):
         """
@@ -1243,9 +1414,9 @@ class MixingArray:
 
         # Get dry synthetic endmember compositions
         df_mids = pd.read_csv("assets/synth-mids.csv")
-        df_dry = df_mids[df_mids["LOI"] == 0]
+        df_dry = df_mids[df_mids["H2O"] == 0]
         sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
-        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["H2O"] == 0)]
 
         # Mixing array endmembers
         bend = df_synth_bench["SAMPLEID"].iloc[0]
@@ -1270,15 +1441,7 @@ class MixingArray:
             os.makedirs(fig_dir, exist_ok=True)
 
         # Set plot style and settings
-        plt.rcParams["figure.dpi"] = 300
         plt.rcParams["font.size"] = fontsize
-        plt.rcParams["savefig.bbox"] = "tight"
-        plt.rcParams["axes.facecolor"] = "0.9"
-        plt.rcParams["legend.frameon"] = "False"
-        plt.rcParams["legend.facecolor"] = "0.9"
-        plt.rcParams["legend.loc"] = "upper left"
-        plt.rcParams["legend.fontsize"] = "small"
-        plt.rcParams["figure.autolayout"] = "True"
 
         # Colormap
         colormap = plt.colormaps["tab10"]
@@ -1483,8 +1646,6 @@ class MixingArray:
         return None
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize harker diagrams !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize_harker_diagrams(self, figwidth=6.3, figheight=5.5, fontsize=22):
         """
         """
@@ -1492,7 +1653,7 @@ class MixingArray:
         res = self.res
         fig_dir = self.fig_dir
         data = self.earthchem_filtered
-        oxides = [ox for ox in self.ox_pca if ox not in ["SIO2", "FE2O3", "K2O"]] + ["LOI"]
+        oxides = [ox for ox in self.ox_pca if ox not in ["SIO2", "FE2O3", "K2O"]]
 
         df_bench_path = "assets/benchmark-samples.csv"
 
@@ -1502,9 +1663,9 @@ class MixingArray:
 
         # Get dry synthetic endmember compositions
         df_mids = pd.read_csv("assets/synth-mids.csv")
-        df_dry = df_mids[df_mids["LOI"] == 0]
+        df_dry = df_mids[df_mids["H2O"] == 0]
         sids = [df_dry["SAMPLEID"].head(1).values[0], df_dry["SAMPLEID"].tail(1).values[0]]
-        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["LOI"] == 0)]
+        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["H2O"] == 0)]
 
         # Mixing array endmembers
         bend = df_synth_bench["SAMPLEID"].iloc[0]
@@ -1518,15 +1679,7 @@ class MixingArray:
             os.makedirs(fig_dir, exist_ok=True)
 
         # Set plot style and settings
-        plt.rcParams["figure.dpi"] = 300
         plt.rcParams["font.size"] = fontsize
-        plt.rcParams["savefig.bbox"] = "tight"
-        plt.rcParams["axes.facecolor"] = "0.9"
-        plt.rcParams["legend.frameon"] = "False"
-        plt.rcParams["legend.facecolor"] = "0.9"
-        plt.rcParams["legend.loc"] = "upper left"
-        plt.rcParams["legend.fontsize"] = "small"
-        plt.rcParams["figure.autolayout"] = "True"
 
         warnings.filterwarnings("ignore", category=FutureWarning, module="seaborn")
 
@@ -1646,6 +1799,29 @@ class MixingArray:
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
+    Main function to manage the creation and visualization of mixing arrays.
+
+    This function performs the following steps:
+    - Checks if the benchmark PCA CSV file exists. If it does not, it proceeds
+      to create a mixing array.
+    - Initializes the MixingArray class and calls methods to create and visualize
+      the mixing array and Harker diagrams.
+    - Prints status messages indicating the success of the creation and visualization
+      processes.
+    - If the benchmark PCA CSV file already exists, it notifies that mixing arrays
+      are found.
+
+    Attributes checked:
+        assets/bench-pca.csv : str
+            The path to the benchmark PCA CSV file that determines if mixing
+            arrays need to be created.
+
+    Returns:
+        None
+
+    Raises:
+        Exception: If any error occurs during the creation or visualization of
+        mixing arrays, including issues with file handling or method execution.
     """
     if not os.path.exists("assets/bench-pca.csv"):
         try:
@@ -1660,10 +1836,7 @@ def main():
             print("Mixing array visualized !")
 
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in main() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(f"Error in main():\n  {e}")
             traceback.print_exc()
     else:
         print("Mixing arrays found !")

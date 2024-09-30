@@ -16,13 +16,13 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Testing gfem models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#    res, src, samp = 32, "assets/synth-mids.csv", "sm005-loi005"
-#
-#    # hp model
-#    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-#    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
-#    model_shallow.build()
-#    model_shallow.visualize()
+    res, src, samp = 32, "assets/synth-mids.csv", "sm005-loi005"
+
+    # hp model
+    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
+    model_shallow.build()
+    model_shallow.visualize()
 #
 #    # stx model
 #    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
