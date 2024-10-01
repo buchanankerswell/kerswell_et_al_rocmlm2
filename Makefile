@@ -23,10 +23,8 @@ DATAPURGE = log \
 						$(DATADIR)/bench-pca.csv \
 						$(DATADIR)/gfem_summaries \
 						$(DATADIR)/earthchem-pca.csv \
-						$(DATADIR)/lut-efficiency.csv \
-						$(DATADIR)/earthchem-counts.csv \
-						$(DATADIR)/gfem-model-results-summary.csv
-DATACLEAN = assets Perple_X gfems rocmlms python/HyMaTZ
+						$(DATADIR)/earthchem-counts.csv
+DATACLEAN = assets Perple_X gfems rocmlms
 FIGSPURGE =
 FIGSCLEAN = figs
 

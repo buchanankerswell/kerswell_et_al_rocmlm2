@@ -5,11 +5,9 @@
 # utilities !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import os
-import re
-import glob
+import yaml
 import time
 import joblib
-import warnings
 import textwrap
 import traceback
 import numpy as np
@@ -33,109 +31,33 @@ from sklearn.metrics import mean_squared_error, r2_score
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from PIL import Image, ImageDraw, ImageFont
-from matplotlib.colors import ListedColormap, Normalize, SymLogNorm
+from matplotlib.colors import ListedColormap
 
 #######################################################
 ## .1.               RocMLM Class                !!! ##
 #######################################################
 class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # init !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, gfem_models, ml_algo="DT", tune=False, verbose=1):
+    def __init__(self, gfem_models, ml_algo="DT", tune=False, config_yaml=None, verbose=1):
         """
         """
-        # Input
         self.tune = tune
-        self.verbose = verbose
         self.ml_algo = ml_algo
+        self.verbose = verbose
+        self.config_yaml = config_yaml
         self.gfem_models = sorted(gfem_models, key=lambda model: model.sid)
 
-        # Random seed
-        self.seed = 42
+        self.model_trained = False
+        self.model_cross_validated = False
+        self.model_out_dir = "rocmlms"
 
-        # Parallel processing
-        self.nprocs = os.cpu_count() - 2
-
-        # Syracuse 2010 subduction segments for subduction depth profiles
-        self.segs = ["Central_Cascadia", "Kamchatka"]
-
-        # Mantle potential temps for mantle depth profiles
-        self.pot_Ts = [1173, 1573, 1773]
-
-        # GFEM model metadata
-        self.gfem_sids = []
-        self.gfem_db = None
-        self.gfem_res = None
-        self.gfem_P_min = None
-        self.gfem_P_max = None
-        self.gfem_T_min = None
-        self.gfem_T_max = None
-        self.gfem_targets = None
-        self.gfem_features = None
-        self.gfem_target_units_map = None
-        self.gfem_target_labels_map = None
-        self.gfem_target_digits_map = None
+        self._load_global_options()
+        self._load_rocmlm_options()
         self._get_gfem_model_metadata()
-
-        # RocMLM and training arrays
-        self.rocmlm = None
-        self.rocmlm_scaler_X = None
-        self.rocmlm_scaler_y = None
-        self.rocmlm_target_array = None
-        self.rocmlm_feature_array = None
-        self.rocmlm_target_array_shape = None
-        self.rocmlm_feature_array_shape = None
-        self.rocmlm_target_array_shape_square = None
-        self.rocmlm_feature_array_shape_square = None
-
-        # Square arrays for visualizations
-        self.gfem_target_array_square = np.array([])
-        self.gfem_feature_array_square = np.array([])
-        self.rocmlm_prediction_array_square = np.array([])
-
-        self.rocmlm_features = ["XI_FRAC", "LOI"]
-        self.rocmlm_targets = ["density", "Vp", "Vs", "melt_fraction", "H2O"]
         self._get_rocmlm_training_data()
 
-        # RocMLM options
-        self.kfolds = 5
-        self.epochs = int(2e2)
-        mask = np.any(np.isnan(self.rocmlm_target_array), axis=1)
-        self.batch_size = int(len(self.rocmlm_target_array[~mask,:]) * 0.1)
-        self.batch_size = max(self.batch_size, 8)
-
-        # NN architecture
-        L8, L16, L32 = int(8), int(16), int(32)
-#        nn_arch = (L8, L8, L8, L8, L8, L8, L8, L8, L8, L8, L8, L8)
-        nn_arch = (L16, L8, L16, L8, L16, L8, L16, L8, 32)
-#        nn_arch = (L8, L8, L8, L8, L8)
-
-        # RocMLM labels
-        self.rocmlm_label_map = {
-            "KN": "K Neighbors",
-            "DT": "Decision Tree",
-            "NN": "Neural Network"
-        }
-        self.default_rocmlm_map = {
-            "KN": KNeighborsRegressor(weights="distance"),
-            "DT": DecisionTreeRegressor(random_state=self.seed),
-            "NN": MLPRegressor(nn_arch, max_iter=self.epochs, random_state=self.seed,
-                               batch_size=self.batch_size),
-        }
-        self.rocmlm_gridsearch_map = {
-            "KN": dict(n_neighbors=[3, 5, 7, 9, 11]),
-            "DT": dict(max_features=[int(i) for i in range(1, len(self.rocmlm_features)+3)],
-                       min_samples_leaf=[int(2), int(3), int(4), int(5), int(6)],
-                       min_samples_split=[int(2), int(3), int(4), int(5), int(6)]),
-            "NN": dict(learning_rate_init=[0.0001, 0.0005, 0.001])
-        }
-
-        # Output filepaths
-        self.model_out_dir = f"rocmlms"
         if self.ml_algo == "NN":
-            self.model_prefix = (f"{self.ml_algo}{sum(nn_arch)}-"
+            self.model_prefix = (f"{self.ml_algo}{self.sum_nodes}-"
                                  f"S{self.rocmlm_feature_array_shape_square[0]}-"
                                  f"W{self.rocmlm_feature_array_shape_square[1]}-"
                                  f"F{self.rocmlm_feature_array_shape_square[3]}-"
@@ -153,25 +75,144 @@ class RocMLM:
         self.scaler_X_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_X.pkl"
         self.scaler_y_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_y.pkl"
 
-        # Cross validation metrics
-        self.cv_info = {}
-
-        # Rocmlm training checks
-        self.model_error = None
-        self.model_tuned = False
-        self.model_trained = False
-        self.model_hyperparams = None
-        self.model_training_error = False
-        self.model_cross_validated = False
-
-        # Check for existing model
         self._check_existing_model()
 
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .1.0.           Helper Functions              !!! ++
-    #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get unique value !!
+    def _load_global_options(self):
+        """
+        """
+        try:
+            if self.config_yaml:
+                if not os.path.exists(self.config_yaml):
+                    raise Exception(f"No config_yaml found at {self.config_yaml}!")
+                with open(self.config_yaml, "r") as file:
+                    config_data = yaml.safe_load(file)
+                global_options = config_data["global_options"]
+            else:
+                global_options = {
+                    "seed": 42,
+                    "digits": 3,
+                    "nprocs": os.cpu_count() - 2,
+                    "pot_Ts": [1173, 1573, 1773],
+                    "segs": ["Central_Cascadia", "Kamchatka"]
+                }
+
+            # Assign values from global options
+            self.seed = global_options["seed"]
+            self.digits = global_options["digits"]
+            self.nprocs = global_options["nprocs"]
+            self.pot_Ts = global_options["pot_Ts"]
+            self.segs = global_options["segs"]
+
+            # Plot settings
+            plt.rcParams.update({
+                "figure.dpi": 300,
+                "savefig.bbox": "tight",
+                "axes.facecolor": "0.9",
+                "legend.frameon": False,
+                "legend.facecolor": "0.9",
+                "legend.loc": "upper left",
+                "legend.fontsize": "small",
+                "figure.autolayout": True
+            })
+
+        except Exception as e:
+            print(f"Error in _load_global_options():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _load_rocmlm_options(self):
+        """
+        """
+        try:
+            if self.config_yaml:
+                if not os.path.exists(self.config_yaml):
+                    raise Exception(f"No config_yaml found at {self.config_yaml}!")
+                with open(self.config_yaml, "r") as file:
+                    config_data = yaml.safe_load(file)
+                rocmlm_options = config_data["rocmlm_options"]
+                ml_algorithms = config_data["ml_algorithms"]
+            else:
+                rocmlm_options = {
+                    "kfolds": 5,
+                    "rocmlm_features": ["XI_FRAC", "H2O"],
+                    "rocmlm_targets": ["density", "Vp", "Vs", "melt_fraction", "H2O"]
+                }
+                ml_algorithms = {
+                    "KN": {
+                        "label": "K Neighbors",
+                        "hyperparams": {
+                            "weights": "distance",
+                            "n_neighbors": 5,
+                        },
+                        "grid_search": {
+                            "n_neighbors": [3, 5, 7, 9, 11]
+                        }
+                    },
+                    "DT": {
+                        "label": "Decision Tree",
+                        "hyperparams": {
+                            "splitter": "best",
+                            "max_features": 4,
+                            "min_samples_leaf": int(1),
+                            "min_samples_split": int(2)
+                        },
+                        "grid_search": {
+                            "splitter": ["best", "random"],
+                            "max_features": [int(1), int(2), int(3), int(4)],
+                            "min_samples_leaf": [int(2), int(3), int(4), int(5), int(6)],
+                            "min_samples_split": [int(2), int(3), int(4), int(5), int(6)]
+                        }
+                    },
+                    "NN": {
+                        "label": "Neural Network",
+                        "hyperparams": {
+                            "hidden_layer_sizes": [int(8), int(8), int(8), int(8), int(8)],
+                            "max_iter": 200,
+                            "learning_rate_init": 0.001
+                        },
+                        "grid_search": {
+                            "hidden_layer_sizes": [[int(8), int(8), int(8), int(8), int(8)]],
+                            "max_iter": [200],
+                            "learning_rate_init": [0.0001, 0.0005, 0.001]
+                        }
+                    }
+                }
+
+            # Assign values from rocmlm_options and ml_algorithms
+            self.kfolds = rocmlm_options["kfolds"]
+            self.rocmlm_features = rocmlm_options["rocmlm_features"]
+            self.rocmlm_targets = rocmlm_options["rocmlm_targets"]
+
+            self.rocmlm_label = ml_algorithms[self.ml_algo]["label"]
+            self.rocmlm_gridsearch = ml_algorithms[self.ml_algo]["grid_search"]
+            default_hyperparams = ml_algorithms[self.ml_algo]["hyperparams"]
+
+            if self.ml_algo == "KN":
+                self.default_rocmlm = KNeighborsRegressor(
+                    weights=default_hyperparams["weights"],
+                    n_neighbors=default_hyperparams["n_neighbors"]
+                )
+            elif self.ml_algo == "DT":
+                self.default_rocmlm = DecisionTreeRegressor(
+                    splitter=default_hyperparams["splitter"],
+                    max_features=default_hyperparams["max_features"],
+                    min_samples_leaf=default_hyperparams["min_samples_leaf"],
+                    min_samples_split=default_hyperparams["min_samples_split"],
+                    random_state=self.seed
+                )
+            elif self.ml_algo == "NN":
+                self.default_rocmlm = MLPRegressor(
+                    hidden_layer_sizes=default_hyperparams["hidden_layer_sizes"],
+                    max_iter=default_hyperparams["max_iter"],
+                    learning_rate_init=default_hyperparams["learning_rate_init"],
+                    random_state=self.seed
+                )
+                self.sum_nodes = sum(default_hyperparams["hidden_layer_sizes"])
+                self.max_iter = default_hyperparams["max_iter"]
+
+        except Exception as e:
+            print(f"Error in _load_rocmlm_options():\n  {e}")
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_unique_value(self, input_list):
         """
@@ -180,45 +221,39 @@ class RocMLM:
             unique_value = input_list[0]
             for item in input_list[1:]:
                 if item != unique_value:
-                    raise Exception("Not all values are the same !")
+                    raise Exception("Not all values are the same!")
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_unique_value() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _get_unique_value():\n  {e}")
             return None
 
         return unique_value
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get gfem model metadata !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_gfem_model_metadata(self):
         """
         """
-        # Get self attributes
-        gfem_models = self.gfem_models
-
         try:
-            if not gfem_models:
+            if not self.gfem_models:
                 raise Exception("No GFEM models to compile !")
-            gfem_sids = [m.sid for m in gfem_models]
-            gfem_res = self._get_unique_value([m.res for m in gfem_models])
-            ox_gfem = self._get_unique_value([m.ox_gfem for m in gfem_models])
-            gfem_P_min = self._get_unique_value([m.P_min for m in gfem_models])
-            gfem_P_max = self._get_unique_value([m.P_max for m in gfem_models])
-            gfem_T_min = self._get_unique_value([m.T_min for m in gfem_models])
-            gfem_T_max = self._get_unique_value([m.T_max for m in gfem_models])
-            gfem_db = self._get_unique_value([m.perplex_db for m in gfem_models])
-            gfem_targets = self._get_unique_value([m.targets for m in gfem_models])
-            gfem_features = self._get_unique_value([m.features for m in gfem_models])
+
+            gfem_sids = [m.sid for m in self.gfem_models]
+
+            gfem_res = self._get_unique_value([m.res for m in self.gfem_models])
+            ox_gfem = self._get_unique_value([m.ox_gfem for m in self.gfem_models])
+            gfem_P_min = self._get_unique_value([m.P_min for m in self.gfem_models])
+            gfem_P_max = self._get_unique_value([m.P_max for m in self.gfem_models])
+            gfem_T_min = self._get_unique_value([m.T_min for m in self.gfem_models])
+            gfem_T_max = self._get_unique_value([m.T_max for m in self.gfem_models])
+            gfem_db = self._get_unique_value([m.perplex_db for m in self.gfem_models])
+            gfem_targets = self._get_unique_value([m.targets for m in self.gfem_models])
+            gfem_features = self._get_unique_value([m.features for m in self.gfem_models])
             target_units_map = self._get_unique_value(
-                [m.target_units_map for m in gfem_models])
+                [m.target_units_map for m in self.gfem_models])
             target_labels_map = self._get_unique_value(
-                [m.target_labels_map for m in gfem_models])
+                [m.target_labels_map for m in self.gfem_models])
             target_digits_map = self._get_unique_value(
-                [m.target_digits_map for m in gfem_models])
+                [m.target_digits_map for m in self.gfem_models])
+
             self.gfem_db = gfem_db
             self.gfem_res = gfem_res
             self.gfem_sids = gfem_sids
@@ -231,181 +266,145 @@ class RocMLM:
             self.target_units_map = target_units_map
             self.target_labels_map = target_labels_map
             self.target_digits_map = target_digits_map
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_gfem_model_metadata() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+            print(f"Error in _get_gfem_model_metadata():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get rocmlm training data !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_rocmlm_training_data(self):
         """
         """
-        # Get self attributes
-        gfem_res = self.gfem_res
-        gfem_sids = self.gfem_sids
-        gfem_models = self.gfem_models
-        gfem_targets = self.gfem_targets
-        gfem_features = self.gfem_features
-        rocmlm_targets = self.rocmlm_targets
-        rocmlm_features = self.rocmlm_features
-
         try:
-            if not gfem_models:
+            if not self.gfem_models:
                 raise Exception("No GFEM models to compile !")
-            pt_train = np.stack([m.pt_array for m in gfem_models])
-            ft_idx = [gfem_features.index(f) for f in rocmlm_features if f in gfem_features]
-            rocmlm_features = [gfem_features[i] for i in ft_idx]
+
+            pt_train = np.stack([m.pt_array for m in self.gfem_models])
+
+            ft_idx = [self.gfem_features.index(f)
+                      for f in self.rocmlm_features if f in self.gfem_features]
+            self.rocmlm_features = [self.gfem_features[i] for i in ft_idx]
+
             feat_train = []
-            for m in gfem_models:
+            for m in self.gfem_models:
                 selected_features = [m.sample_features[i] for i in ft_idx]
                 feat_train.append(selected_features)
+
             feat_train = np.array(feat_train)
             feat_train = np.tile(feat_train[:, np.newaxis, :], (1, pt_train.shape[1], 1))
             combined_train = np.concatenate((feat_train, pt_train), axis=2)
             rocmlm_feature_array = combined_train.reshape(-1, combined_train.shape[-1])
-            t_idx = [gfem_targets.index(t) for t in rocmlm_targets if t in gfem_targets]
-            rocmlm_targets = [gfem_targets[i] for i in t_idx]
-            rocmlm_target_array = np.stack([m.target_array for m in gfem_models])
+
+            t_idx = [self.gfem_targets.index(t)
+                     for t in self.rocmlm_targets if t in self.gfem_targets]
+            self.rocmlm_targets = [self.gfem_targets[i] for i in t_idx]
+
+            rocmlm_target_array = np.stack([m.target_array for m in self.gfem_models])
             rocmlm_target_array = rocmlm_target_array.reshape(
                 -1, rocmlm_target_array.shape[-1])
             rocmlm_target_array = rocmlm_target_array[:, t_idx]
-            M = int(len(gfem_models))         # Number of samples
-            W = int((gfem_res + 1) ** 2)      # PT grid size
-            w = int(np.sqrt(W))               # P or T array size
-            f = int(len(rocmlm_features))     # Number of rocmlm features
-            F = int(f + 2)                    # Number of rocmlm features + PT
-            T = int(len(rocmlm_targets))      # Number of rocmlm targets
+
+            M = int(len(self.gfem_models))     # Number of samples
+            W = int((self.gfem_res + 1) ** 2)  # PT grid size
+            w = int(np.sqrt(W))                # P or T array size
+            f = int(len(self.rocmlm_features)) # Number of rocmlm features
+            F = int(f + 2)                     # Number of rocmlm features + PT
+            T = int(len(self.rocmlm_targets))  # Number of rocmlm targets
+
             rocmlm_target_array_shape = (M, W, T)
             rocmlm_feature_array_shape = (M, W, F)
             rocmlm_target_array_shape_square = (M, w, w, T)
             rocmlm_feature_array_shape_square = (M, w, w, F)
+
             self.rocmlm_target_array = rocmlm_target_array
             self.rocmlm_feature_array = rocmlm_feature_array
             self.rocmlm_target_array_shape = rocmlm_target_array_shape
             self.rocmlm_feature_array_shape = rocmlm_feature_array_shape
             self.rocmlm_target_array_shape_square = rocmlm_target_array_shape_square
             self.rocmlm_feature_array_shape_square = rocmlm_feature_array_shape_square
+
             gfem_target_array_square = \
                 rocmlm_target_array.reshape(rocmlm_target_array_shape_square)
             gfem_feature_array_square = \
                 rocmlm_feature_array.reshape(rocmlm_feature_array_shape_square)
             self.gfem_target_array_square = gfem_target_array_square
             self.gfem_feature_array_square = gfem_feature_array_square
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_rocmlm_training_data() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+            print(f"Error in _get_rocmlm_training_data():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check existing model !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_existing_model(self):
         """
         """
-        # Get self attributes
-        verbose = self.verbose
-        rocmlm_path = self.rocmlm_path
-        model_out_dir = self.model_out_dir
-
-        model = None
-        if os.path.exists(rocmlm_path):
+        if os.path.exists(self.rocmlm_path):
             try:
-                if verbose >= 1: print(f"Found pretrained model {rocmlm_path} !")
+                if self.verbose >= 1:
+                    print(f"Found pretrained model {self.rocmlm_path} !")
+
                 self.model_trained = True
-                self.load_pretrained_model(f"{rocmlm_path}")
+                self.load_pretrained_model(f"{self.rocmlm_path}")
+
             except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in _check_existing_model() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                traceback.print_exc()
-                return None
+                print(f"Error in _check_existing_model():\n  {e}")
         else:
-            os.makedirs(model_out_dir, exist_ok=True)
+            os.makedirs(self.model_out_dir, exist_ok=True)
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # load pretrained model
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def load_pretrained_model(self, file_path):
         """
         """
-        # Get self attributes
-        verbose = self.verbose
-        rocmlm_path = self.rocmlm_path
-        scaler_X_path = self.scaler_X_path
-        scaler_y_path = self.scaler_y_path
-
         if os.path.exists(file_path):
             try:
-                if verbose >= 1:
+                if self.verbose >= 1:
                     print(f"Loading RocMLM object from {file_path} ...")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                rocmlm = joblib.load(rocmlm_path)
-                scaler_X = joblib.load(scaler_X_path)
-                scaler_y = joblib.load(scaler_y_path)
+
+                rocmlm = joblib.load(self.rocmlm_path)
+                scaler_X = joblib.load(self.scaler_X_path)
+                scaler_y = joblib.load(self.scaler_y_path)
+
                 self._get_gfem_model_metadata()
                 self._get_rocmlm_training_data()
+
                 self.rocmlm = rocmlm
-                target_array = self.rocmlm_target_array.copy()
-                feature_array = self.rocmlm_feature_array.copy()
+
+                rocmlm_target_array = self.rocmlm_target_array.copy()
+                rocmlm_feature_array = self.rocmlm_feature_array.copy()
                 rocmlm_target_array_shape_square = self.rocmlm_target_array_shape_square
-                X, y = feature_array.copy(), target_array.copy()
+
+                X, y = rocmlm_feature_array.copy(), rocmlm_target_array.copy()
                 X_scaled = scaler_X.transform(X)
                 pred_scaled = rocmlm.predict(X_scaled)
                 pred_original = scaler_y.inverse_transform(pred_scaled)
                 rocmlm_prediction_array_square = pred_original.reshape(
                     rocmlm_target_array_shape_square)
+
                 self.rocmlm_prediction_array_square = rocmlm_prediction_array_square
+
             except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in load_pretrained_model() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                traceback.print_exc()
-                return None
+                print(f"Error in load_pretrained_model():\n  {e}")
         else:
             print(f"File {file_path} does not exist !")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # scale arrays !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _scale_arrays(self, feature_array, target_array):
         """
         """
         try:
-            X = feature_array
-            y = target_array
+            X, y = feature_array, target_array
             X[~np.isfinite(X)] = np.nan
             y[~np.isfinite(y)] = np.nan
-            mask = np.any(np.isnan(y), axis=1)
             X, y = np.nan_to_num(X), np.nan_to_num(y)
+
             if not np.isfinite(X).all() or not np.isfinite(y).all():
-                raise Exception("Input data contains NaN or infinity values !")
+                raise Exception("Input data contains NaN or infinity values!")
+
             scaler_X, scaler_y = StandardScaler(), StandardScaler()
             X_scaled = scaler_X.fit_transform(X)
             y_scaled = scaler_y.fit_transform(y)
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _scale_arrays() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _scale_arrays():\n  {e}")
             return None, None, None, None, None, None
 
         return X, y, scaler_X, scaler_y, X_scaled, y_scaled
@@ -414,204 +413,179 @@ class RocMLM:
     #+ .1.2.               RocMLMs                   !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # configure rocmlm !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _configure_rocmlm(self):
         """
         """
-        # Get self attributes
-        tune = self.tune
-        seed = self.seed
-        epochs = self.epochs
-        nprocs = self.nprocs
-        verbose = self.verbose
-        ml_algo = self.ml_algo
-        batch_size = self.batch_size
-        model_prefix = self.model_prefix
-        default_rocmlm_map = self.default_rocmlm_map
-        rocmlm_target_array = self.rocmlm_target_array
-        rocmlm_feature_array = self.rocmlm_feature_array
-        rocmlm_gridsearch_map = self.rocmlm_gridsearch_map
-
         try:
-            if rocmlm_feature_array.size == 0:
-                raise Exception("No training features !")
-            if rocmlm_target_array.size == 0:
-                raise Exception("No training targets !")
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
             _, _, _, _, X_scaled, y_scaled = self._scale_arrays(
-                rocmlm_feature_array, rocmlm_target_array)
-            if verbose >= 1:
-                print(f"Configuring model {model_prefix} ...")
-            if tune:
-                if verbose >= 1:
-                    print(f"  Tuning model {model_prefix} ...")
-                model = default_rocmlm_map[ml_algo]
-                search = rocmlm_gridsearch_map[ml_algo]
-                kf = KFold(n_splits=6, shuffle=True, random_state=seed)
-                grid_search = GridSearchCV(model, search, cv=kf, n_jobs=nprocs,
-                                           scoring="neg_root_mean_squared_error")
+                self.rocmlm_feature_array, self.rocmlm_target_array)
+
+            if self.verbose >= 1:
+                print(f"Configuring model {self.model_prefix} ...")
+
+            if self.tune:
+                if self.verbose >= 1:
+                    print(f"Tuning model {self.model_prefix} ...")
+
+                default_rocmlm = self.default_rocmlm
+                rocmlm_gridsearch = self.rocmlm_gridsearch
+
+                kf = KFold(n_splits=6, shuffle=True, random_state=self.seed)
+
+                grid_search = GridSearchCV(
+                    default_rocmlm, rocmlm_gridsearch, cv=kf, n_jobs=self.nprocs,
+                    scoring="neg_root_mean_squared_error"
+                )
                 grid_search.fit(X_scaled, y_scaled)
-                if ml_algo == "KN":
-                    model =  KNeighborsRegressor(
-                        n_neighbors=grid_search.best_params_["n_neighbors"])
-                elif ml_algo == "DT":
-                    model = DecisionTreeRegressor(
-                        random_state=seed,
+
+                if self.ml_algo == "KN":
+                    self.default_rocmlm = KNeighborsRegressor(
+                        weights=grid_search.best_params_["weights"],
+                        n_neighbors=grid_search.best_params_["n_neighbors"]
+                    )
+                elif self.ml_algo == "DT":
+                    self.default_rocmlm = DecisionTreeRegressor(
+                        splitter=grid_search.best_params_["splitter"],
                         max_features=grid_search.best_params_["max_features"],
                         min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
-                        min_samples_split=grid_search.best_params_["min_samples_split"])
-                elif "NN" in ml_algo:
-                    model = MLPRegressor(
-                        nn_arch, max_iter=epochs, random_state=seed, batch_size=batch_size,
-                        learning_rate_init=grid_search.best_params_["learning_rate_init"])
-                self.model_tuned = True
+                        min_samples_split=grid_search.best_params_["min_samples_split"],
+                        random_state=self.seed
+                    )
+                elif self.ml_algo == "NN":
+                    self.default_rocmlm = MLPRegressor(
+                        hidden_layer_sizes=grid_search.best_params_["hidden_layer_sizes"],
+                        max_iter=grid_search.best_params_["max_iter"],
+                        learning_rate_init=grid_search.best_params_["learning_rate_init"],
+                        random_state=self.seed
+                    )
             else:
-                model = default_rocmlm_map[ml_algo]
-            self.rocmlm = model
-            self.model_hyperparams = model.get_params()
+                default_rocmlm = self.default_rocmlm
+
+            self.rocmlm = default_rocmlm
+            self.rocmlm_hyperparams = self.rocmlm.get_params()
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _configure_rocmlm() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+            print(f"Error in _configure_rocmlm():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # print rocmlm info !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _print_rocmlm_info(self):
         """
         """
-        # Get self attributes
-        kfolds = self.kfolds
-        epochs = self.epochs
-        ml_algo = self.ml_algo
-        model_prefix = self.model_prefix
-        rocmlm_targets = self.rocmlm_targets
-        rocmlm_features = self.rocmlm_features
-        rocmlm_label_map = self.rocmlm_label_map
-        model_hyperparams = self.model_hyperparams
-        rocmlm_target_array = self.rocmlm_target_array
-        rocmlm_feature_array = self.rocmlm_feature_array
+        try:
+            tgwrp = textwrap.fill(", ".join(self.rocmlm_targets), width=80,
+                                  subsequent_indent="                  ")
+            ftwrp = textwrap.fill(", ".join(self.rocmlm_features), width=80)
 
-        tgwrp = textwrap.fill(", ".join(rocmlm_targets), width=80,
-                              subsequent_indent="                  ")
-        ftwrp = textwrap.fill(", ".join(rocmlm_features), width=80)
-        print("+++++++++++++++++++++++++++++++++++++++++++++")
-        print(f"RocMLM model: {model_prefix}")
-        print("---------------------------------------------")
-        print(f"    model: {rocmlm_label_map[ml_algo]}")
-        print(f"    k folds: {kfolds}")
-        print(f"    features: {ftwrp}")
-        print(f"    targets: {tgwrp}")
-        print(f"    features array shape: {rocmlm_feature_array.shape}")
-        print(f"    targets array shape: {rocmlm_target_array.shape}")
-        print(f"    hyperparameters:")
-        for key, value in model_hyperparams.items():
-            print(f"        {key}: {value}")
-        print("---------------------------------------------")
+            print("+++++++++++++++++++++++++++++++++++++++++++++")
+            print(f"RocMLM model: {self.model_prefix}")
+            print("---------------------------------------------")
+            print(f"    model: {self.rocmlm_label}")
+            print(f"    k folds: {self.kfolds}")
+            print(f"    features: {ftwrp}")
+            print(f"    targets: {tgwrp}")
+            print(f"    features array shape: {self.rocmlm_feature_array.shape}")
+            print(f"    targets array shape: {self.rocmlm_target_array.shape}")
+            print(f"    hyperparameters:")
+            for key, value in self.rocmlm_hyperparams.items():
+                print(f"        {key}: {value}")
+            print("---------------------------------------------")
 
-        return None
+        except Exception as e:
+            print(f"Error in _print_rocmlm_info():\n  {e}")
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # kfold itr !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _kfold_itr(self, fold_args):
         """
         """
-        # Get self attributes
-        rocmlm = self.rocmlm
-        epochs = self.epochs
-        ml_algo = self.ml_algo
-        batch_size = self.batch_size
-        rocmlm_target_array = self.rocmlm_target_array
-        rocmlm_feature_array = self.rocmlm_feature_array
-
         try:
-            if rocmlm_feature_array.size == 0:
-                raise Exception("No training features !")
-            if rocmlm_target_array.size == 0:
-                raise Exception("No training targets !")
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
             X, y, _, scaler_y, X_scaled, y_scaled = \
-                self._scale_arrays(rocmlm_feature_array, rocmlm_target_array)
+                self._scale_arrays(self.rocmlm_feature_array, self.rocmlm_target_array)
             (train_index, test_idxex) = fold_args
             X, X_test = X_scaled[train_index], X_scaled[test_idxex]
             y, y_test = y_scaled[train_index], y_scaled[test_idxex]
-            if "NN" in ml_algo:
+
+            if "NN" in self.ml_algo:
+                num_samples = len(y)
+                batch_size = min(max(int(num_samples * 0.1), 8), num_samples)
+
                 epoch_, train_loss_, test_loss_ = [], [], []
                 training_start_time = time.time()
-                with tqdm(total=epochs, desc="Training NN", position=0) as pbar:
-                    for epoch in range(epochs):
-                        indices = np.arange(len(y))
-                        np.random.shuffle(indices)
-                        for start_idx in range(0, len(indices), batch_size):
-                            end_idx = start_idx + batch_size
-                            end_idx = min(end_idx, len(indices))
-                            batch_indices = indices[start_idx:end_idx]
-                            X_batch, y_batch = X[batch_indices], y[batch_indices]
-                            rocmlm.partial_fit(X_batch, y_batch)
 
-                        train_loss = rocmlm.loss_
-                        train_loss_.append(train_loss)
-                        test_loss = mean_squared_error(y_test, rocmlm.predict(X_test))
-                        test_loss_.append(test_loss)
-                        epoch_.append(epoch + 1)
-                        pbar.update(1)
+                for epoch in range(self.max_iter):
+                    indices = np.arange(len(y))
+                    np.random.shuffle(indices)
+
+                    for start_idx in range(0, len(indices), batch_size):
+                        end_idx = start_idx + batch_size
+                        end_idx = min(end_idx, len(indices))
+                        batch_indices = indices[start_idx:end_idx]
+                        X_batch, y_batch = X[batch_indices], y[batch_indices]
+                        self.rocmlm.partial_fit(X_batch, y_batch)
+
+                    train_loss = self.rocmlm.loss_
+                    train_loss_.append(train_loss)
+                    test_loss = mean_squared_error(y_test, self.rocmlm.predict(X_test))
+                    test_loss_.append(test_loss)
+                    epoch_.append(epoch + 1)
+
                 training_end_time = time.time()
-                loss_curve = {"epoch": epoch_, "train_loss": train_loss_,
-                              "test_loss": test_loss_}
+                loss_curve = {
+                    "epoch": epoch_, "train_loss": train_loss_, "test_loss": test_loss_}
             else:
                 training_start_time = time.time()
-                rocmlm.fit(X, y)
+                self.rocmlm.fit(X, y)
                 training_end_time = time.time()
                 loss_curve = None
+
             training_time = training_end_time - training_start_time
-            y_pred_scaled = rocmlm.predict(X_test)
+
+            y_pred_scaled = self.rocmlm.predict(X_test)
             y_pred_original = scaler_y.inverse_transform(y_pred_scaled)
             y_test_original = scaler_y.inverse_transform(y_test)
+
             rmse_test = np.sqrt(mean_squared_error(
                 y_test_original, y_pred_original, multioutput="raw_values"))
             r2_test = r2_score(y_test_original, y_pred_original, multioutput="raw_values")
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _kfold_itr() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _kfold_itr():\n  {e}")
             return (None, None, None, None)
 
         return (loss_curve, rmse_test, r2_test, training_time)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # process kfold results !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_kfold_results(self, results):
         """
         """
-        # Get self attributes
-        kfolds = self.kfolds
-        verbose = self.verbose
-        ml_algo = self.ml_algo
-        gfem_sids = self.gfem_sids
-        rocmlm_targets = self.rocmlm_targets
-        rocmlm_label_map = self.rocmlm_label_map
-        M = self.rocmlm_feature_array_shape_square[0]
-        w = self.rocmlm_feature_array_shape_square[1]
-
         try:
+            M = self.rocmlm_feature_array_shape_square[0]
+            w = self.rocmlm_feature_array_shape_square[1]
+
             loss_curves = []
             training_times = []
             rmse_test_scores, r2_test_scores = [], []
+
             for (loss_curve, rmse_test, r2_test, training_time) in results:
                 loss_curves.append(loss_curve)
                 rmse_test_scores.append(rmse_test)
                 r2_test_scores.append(r2_test)
                 training_times.append(training_time)
-            if "NN" in ml_algo:
+
+            if "NN" in self.ml_algo:
                 self._visualize_loss_curve(loss_curves)
+
             rmse_test_scores = np.stack(rmse_test_scores)
             r2_test_scores = np.stack(r2_test_scores)
             rmse_test_mean = np.mean(rmse_test_scores, axis=0)
@@ -620,404 +594,363 @@ class RocMLM:
             r2_test_std = np.std(r2_test_scores, axis=0)
             training_time_mean = np.mean(training_times)
             training_time_std = np.std(training_times)
-            if any("sm" in sample or "sr" in sample for sample in gfem_sids):
+
+            if any("sm" in sample or "sr" in sample for sample in self.gfem_sids):
                 sample_label = f"SMA{M}"
-            elif any("st" in sample for sample in gfem_sids):
+            elif any("st" in sample for sample in self.gfem_sids):
                 sample_label = f"SMAT{M}"
-            elif any("sm" in sample for sample in gfem_sids):
+            elif any("sm" in sample for sample in self.gfem_sids):
                 sample_label = f"SMAM{M}"
-            elif any("sb" in sample for sample in gfem_sids):
+            elif any("sb" in sample for sample in self.gfem_sids):
                 sample_label = f"SMAB{M}"
-            elif any("sr" in sample for sample in gfem_sids):
+            elif any("sr" in sample for sample in self.gfem_sids):
                 sample_label = f"SMAR{M}"
+
             cv_info = {
-                "model": [ml_algo],
+                "model": [self.ml_algo],
                 "sample": [sample_label],
                 "size": [(w - 1) ** 2],
-                "n_targets": [len(rocmlm_targets)],
-                "k_folds": [kfolds],
+                "n_targets": [len(self.rocmlm_targets)],
+                "k_folds": [self.kfolds],
                 "training_time_mean": [round(training_time_mean, 5)],
                 "training_time_std": [round(training_time_std, 5)]
             }
-            for i, target in enumerate(rocmlm_targets):
+
+            for i, target in enumerate(self.rocmlm_targets):
                 cv_info[f"rmse_test_mean_{target}"] = round(rmse_test_mean[i], 5)
                 cv_info[f"rmse_test_std_{target}"] = round(rmse_test_std[i], 5)
                 cv_info[f"r2_test_mean_{target}"] = round(r2_test_mean[i], 5)
                 cv_info[f"r2_test_std_{target}"] = round(r2_test_std[i], 5)
-            if verbose >= 1:
+
+            if self.verbose >= 1:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"{rocmlm_label_map[ml_algo]} performance:")
+                print(f"{self.rocmlm_label} performance:")
                 print(f"    training time: {training_time_mean:.5f} ± "
                       f"{training_time_std:.5f}")
                 print(f"    rmse test:")
-                for r, e, p in zip(rmse_test_mean, rmse_test_std, rocmlm_targets):
+                for r, e, p in zip(rmse_test_mean, rmse_test_std, self.rocmlm_targets):
                     print(f"        {p}: {r:.5f} ± {e:.5f}")
                 print(f"    r2 test:")
-                for r, e, p in zip(r2_test_mean, r2_test_std, rocmlm_targets):
+                for r, e, p in zip(r2_test_mean, r2_test_std, self.rocmlm_targets):
                     print(f"        {p}: {r:.5f} ± {e:.5f}")
                 print("+++++++++++++++++++++++++++++++++++++++++++++")
+
             self.cv_info = cv_info
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _process_kfold_results() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+            print(f"Error in _process_kfold_results():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # kfold cv !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _kfold_cv(self):
         """
         """
-        # Get self attributes
-        seed = self.seed
-        kfolds = self.kfolds
-        nprocs = self.nprocs
-        rocmlm_target_array = self.rocmlm_target_array
-        rocmlm_feature_array = self.rocmlm_feature_array
-
         try:
-            if rocmlm_feature_array.size == 0:
-                raise Exception("No training features !")
-            if rocmlm_target_array.size == 0:
-                raise Exception("No training targets !")
-            X, _, _, _, _, _ = self._scale_arrays(rocmlm_feature_array, rocmlm_target_array)
-            kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
-            fold_args = [(train_idx, test_idx) for _, (train_idx, test_idx) in
-                         enumerate(kf.split(X))]
-            with cf.ProcessPoolExecutor(max_workers=nprocs) as executor:
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
+            X, _, _, _, _, _ = self._scale_arrays(
+                self.rocmlm_feature_array, self.rocmlm_target_array)
+
+            kf = KFold(n_splits=self.kfolds, shuffle=True, random_state=self.seed)
+
+            fold_args = [
+                (train_idx, test_idx) for _, (train_idx, test_idx) in enumerate(kf.split(X))]
+
+            with cf.ProcessPoolExecutor(max_workers=self.nprocs) as executor:
                 results = list(tqdm(executor.map(self._kfold_itr, fold_args),
-                                    total=len(fold_args), desc="Processing folds ..."))
+                                    total=len(fold_args), desc="Cross-validating model ..."))
+
             self.model_cross_validated = True
             self._process_kfold_results(results)
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _kfold_cv() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+            print(f"Error in _kfold_cv():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # fit training data !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _fit_training_data(self):
         """
         """
-        # Get self attributes
-        seed = self.seed
-        epochs = self.epochs
-        rocmlm = self.rocmlm
-        ml_algo = self.ml_algo
-        batch_size = self.batch_size
-        rocmlm_path = self.rocmlm_path
-        model_prefix = self.model_prefix
-        scaler_X_path = self.scaler_X_path
-        scaler_y_path = self.scaler_y_path
-        target_array = self.rocmlm_target_array.copy()
-        feature_array = self.rocmlm_feature_array.copy()
-        rocmlm_target_array_shape_square = self.rocmlm_target_array_shape_square
-
         try:
             if self.rocmlm is None:
                 raise Exception("No ML model! Call _configure_rocmlm() first ...")
+
             if not self.model_cross_validated:
                 raise Exception("ML model not cross validated! Call _kfold_cv() first ...")
-            if feature_array.size == 0:
-                raise Exception("No training features !")
-            if target_array.size == 0:
-                raise Exception("No training targets !")
+
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
             _, _, scaler_X, scaler_y, X_scaled, y_scaled = \
-                self._scale_arrays(feature_array, target_array)
-            X_train, X_test, y_train, y_test = \
-                train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=seed)
-            if "NN" in ml_algo:
-                with tqdm(total=epochs, desc="Training NN", position=0) as pbar:
-                    for epoch in range(epochs):
-                        indices = np.arange(len(y_train))
+                self._scale_arrays(self.rocmlm_feature_array, self.rocmlm_target_array)
+
+            X, X_test, y, y_test = \
+                train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=self.seed)
+
+            if "NN" in self.ml_algo:
+                num_samples = len(y)
+                batch_size = min(max(int(num_samples * 0.1), 8), num_samples)
+
+                with tqdm(total=self.max_iter, desc="Training NN", position=0) as pbar:
+                    for epoch in range(self.max_iter):
+                        indices = np.arange(len(y))
                         np.random.shuffle(indices)
+
                         for start_idx in range(0, len(indices), batch_size):
                             end_idx = start_idx + batch_size
                             end_idx = min(end_idx, len(indices))
                             batch_indices = indices[start_idx:end_idx]
-                            X_batch, y_batch = X_train[batch_indices], y_train[batch_indices]
-                            rocmlm.partial_fit(X_batch, y_batch)
+                            X_batch, y_batch = X[batch_indices], y[batch_indices]
+                            self.rocmlm.partial_fit(X_batch, y_batch)
+
                         pbar.update(1)
             else:
-                print(f"Training model {model_prefix} ...")
-                rocmlm.fit(X_train, y_train)
+                print(f"Training model {self.model_prefix} ...")
+                self.rocmlm.fit(X, y)
+
             print(":::::::::::::::::::::::::::::::::::::::::::::")
+
             self.model_trained = True
             self.rocmlm_scaler_X = scaler_X
             self.rocmlm_scaler_y = scaler_y
-            with open(rocmlm_path, "wb") as file:
-                joblib.dump(rocmlm, file)
-            with open(scaler_X_path, "wb") as file:
+
+            with open(self.rocmlm_path, "wb") as file:
+                joblib.dump(self.rocmlm, file)
+            with open(self.scaler_X_path, "wb") as file:
                 joblib.dump(scaler_X, file)
-            with open(scaler_y_path, "wb") as file:
+            with open(self.scaler_y_path, "wb") as file:
                 joblib.dump(scaler_y, file)
-            X, y = feature_array.copy(), target_array.copy()
+
+            X, y = self.rocmlm_feature_array.copy(), self.rocmlm_target_array.copy()
             X_scaled = scaler_X.transform(X)
-            pred_scaled = rocmlm.predict(X_scaled)
+
+            pred_scaled = self.rocmlm.predict(X_scaled)
             pred_original = scaler_y.inverse_transform(pred_scaled)
             rocmlm_prediction_array_square = pred_original.reshape(
-                rocmlm_target_array_shape_square)
+                self.rocmlm_target_array_shape_square)
+
             self.rocmlm_prediction_array_square = rocmlm_prediction_array_square
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _fit_training_data() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
+            print(f"Error in _fit_training_data():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # save rocmlm cv info !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _save_rocmlm_cv_info(self):
         """
         """
-        # Get self attributes
-        data_dict = self.cv_info
-        filepath = f"assets/rocmlm-performance.csv"
-
         try:
+            filepath = f"assets/rocmlm-performance.csv"
+
             if not self.cv_info:
                 raise Exception("No cross validation! Call _kfold_cv() first ...")
+
             if not pd.io.common.file_exists(filepath):
-                df = pd.DataFrame(data_dict)
+                df = pd.DataFrame(self.cv_info)
             else:
                 df = pd.read_csv(filepath)
-                new_data = pd.DataFrame(data_dict)
+                new_data = pd.DataFrame(self.cv_info)
                 df = pd.concat([df, new_data], ignore_index=True)
+
             df = df.sort_values(by=["model", "sample", "size"])
             df.to_csv(filepath, index=False)
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _save_rocmlm_cv_info() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
-            return None
 
-        return None
+        except Exception as e:
+            print(f"Error in _save_rocmlm_cv_info():\n  {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.4.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get subduction geotherm !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_subduction_geotherm(self, segment="Central_Cascadia", slab_position="slabmoho"):
         """
-        """
-        # Get self attributes
-        P_min = self.P_min
-        P_max = self.P_max
-        T_min = self.T_min
-        T_max = self.T_max
-        data_dir = f"{self.data_dir}/D80"
+        Retrieves the subduction geotherm data for a specified segment and slab position.
 
+        Parameters:
+            segment (str): The name of the subduction segment (default is
+                           "Central_Cascadia").
+            slab_position (str): Position of the slab (either "slabmoho" or "slabtop";
+                                 default is "slabmoho").
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the pressure (P) and temperature (T) data
+                          for the specified slab position and segment.
+
+        Raises:
+            Exception: If the segment data file does not exist or if the slab position
+            is unrecognized.
+        """
         try:
-            if not os.path.exists(data_dir):
-                raise Exception(f"Data not found at {data_dir} !")
-            path = f"{data_dir}/{segment}.txt"
-            ref_cols = ["slab_depth", "unk", "depth", "T"]
-            columns_to_keep = ["P", "T"]
+            path = f"assets/D80/{segment}.txt"
+
             if not os.path.exists(path):
-                raise Exception(f"Subduction geotherm {segment} not found at {path} !")
-            geotherm = pd.read_csv(path, header=None, names=ref_cols, sep=r"\s+")
-            if slab_position == "slabmoho":
-                geotherm = geotherm[geotherm["slab_depth"] == 7]
-            elif slab_position == "slabtop":
-                geotherm = geotherm[geotherm["slab_depth"] == 0]
-            else:
-                raise Exception(f"Unrecognized position argument '{position}' !")
+                raise Exception(f"Subduction geotherm {segment} not found at {path}!")
+
+            ref_cols = ["slab_depth", "unk", "depth", "T"]
             litho_P_gradient = 35 # (km/GPa)
+            columns_to_keep = ["P", "T"]
+
+            # Load and filter geotherm data
+            geotherm = pd.read_csv(path, header=None, names=ref_cols, sep=r"\s+")
+            slab_depth_filter = (7 if slab_position == "slabmoho" else 0
+                                 if slab_position == "slabtop" else None)
+
+            if slab_depth_filter is None:
+                raise Exception(f"Unrecognized position argument '{slab_position}'!")
+
+            geotherm = geotherm[geotherm["slab_depth"] == slab_depth_filter]
             geotherm = geotherm[geotherm["depth"] < 240]
             geotherm["P"] = geotherm["depth"] / litho_P_gradient
             geotherm["T"] = geotherm["T"] + 273
             geotherm.sort_values(by=["P"], inplace=True)
-            geotherm = geotherm[(geotherm["P"] >= P_min) & (geotherm["P"] <= P_max)]
-            geotherm = geotherm[(geotherm["T"] >= T_min) & (geotherm["T"] <= T_max)]
-            geotherm = geotherm[columns_to_keep]
-            geotherm = geotherm.round(3)
+
+            # Filter based on minimum and maximum P and T values
+            geotherm = geotherm[
+                (geotherm["P"] >= self.P_min) & (geotherm["P"] <= self.P_max) &
+                (geotherm["T"] >= self.T_min) & (geotherm["T"] <= self.T_max)
+            ]
+
+            # Select relevant columns and round values
+            geotherm = geotherm[["P", "T"]].round(3)
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_subduction_geotherm() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _get_subduction_geotherm():\n  {e}")
             return None
 
         return geotherm
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # get mantle geotherm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_mantle_geotherm(self, mantle_potential=1573, Qs=55e-3, Ts=273, A1=1.0e-6,
                              A2=2.2e-8, k1=2.3, k2=3.0, mantle_adiabat=0.5e-3,
                              crust_thickness=35e3, litho_thickness=150e3):
         """
-        """
-        # Get self attributes
-        res = self.res
-        P_min = self.P_min
-        P_max = self.P_max
+        Calculates the geotherm for a 1D layered lithospheric cooling model.
 
+        Parameters:
+            Qs (float): Surface heat flux (W/m²).
+            Ts (float): Surface temperature (K).
+            A1 (float): Heat production in layer 1 (W/m³).
+            A2 (float): Heat production in layer 2 (W/m³).
+            k1 (float): Thermal conductivity in layer 1 (W/m·K).
+            k2 (float): Thermal conductivity in layer 2 (W/m·K).
+            mantle_potential (float): Mantle potential temperature (K).
+            mantle_adiabat (float): Mantle adiabatic gradient (K/m).
+            crust_thickness (float): Crustal thickness (m).
+            litho_thickness (float): Lithospheric thickness (m).
+
+        Returns:
+            pd.DataFrame: A DataFrame containing pressure (P) and temperature (T) values
+                          for the calculated geotherm.
+
+        Raises:
+            Exception: If any error occurs during geotherm calculation.
+        """
         try:
-            # Define array size
-            array_size = (res + 1) * 10
-            # 1D layered lithospheric cooling model parameters
-            # Qs:                                  Surface heat flux (W/m2)
-            # Ts:                                  Surface T (K)
-            # A1:                                  Layer 1 heat production (W/m3)
-            # A2:                                  Layer 2 heat production (W/m3)
-            # k1:                                  Layer 1 thermal conductivity (W/mK)
-            # k2:                                  Layer 2 thermal conductivity (W/mK)
-            # mantle_adiabat:                      Mantle adiabatic gradient (K/m)
-            # crust_thickness:                     Crustal thickness (m)
-            # litho_thickness:                     Lithoshperic thickness (m)
-            litho_P_gradient = 35e3              # Lithostatic P gradient (m/GPa)
-            Z_min = P_min * litho_P_gradient     # Min depth (m)
-            Z_max = P_max * litho_P_gradient     # Max depth (m)
-            # Initialize depth and temperature arrays
+            array_size = (self.res + 1) * 10
+            litho_P_gradient = 35e3
+            Z_min = self.P_min * litho_P_gradient
+            Z_max = self.P_max * litho_P_gradient
             z = np.linspace(Z_min, Z_max, array_size)
+
+            # Initialize temperature array
             T_geotherm = np.zeros(array_size)
-            # Layer1 (crust)
-            # A1 Radiogenic heat production (W/m^3)
-            # k1 Thermal conductivity (W/mK)
-            D1 = crust_thickness
-            # Layer2 (lithospheric mantle)
-            # A2 Radiogenic heat production (W/m^3)
-            # k2 Thermal conductivity (W/mK)
-            D2 = litho_thickness
-            # Calculate heat flow at the top of each layer
-            Qt2 = Qs - (A1 * D1)
-            Qt1 = Qs
-            # Calculate T at the top of each layer
-            Tt1 = Ts
-            Tt2 = Tt1 + (Qt1 * D1 / k1) - (A1 / 2 / k1 * D1**2)
-            Tt3 = Tt2 + (Qt2 * D2 / k2) - (A2 / 2 / k2 * D2**2)
-            # Calculate T within each layer
+
+            # Calculate temperatures at different layers
+            Qt2 = Qs - (A1 * crust_thickness)
+            Tt2 = Ts + (Qs * crust_thickness / k1) - (A1 / 2 / k1 * crust_thickness**2)
+            Tt3 = Tt2 + (Qt2 * litho_thickness / k2) - (A2 / 2 / k2 * litho_thickness**2)
             for j in range(array_size):
                 potential_temp = mantle_potential + mantle_adiabat * z[j]
-                if z[j] <= D1:
-                    T_geotherm[j] = Tt1 + (Qt1 / k1 * z[j]) - (A1 / (2 * k1) * z[j]**2)
-                    if T_geotherm[j] >= potential_temp:
-                        T_geotherm[j] = potential_temp
-                elif D1 < z[j] <= D2 + D1:
-                    T_geotherm[j] = Tt2 + (Qt2 / k2 * (z[j] - D1)) - (A2 / (2 * k2) *
-                                                                      (z[j] - D1)**2)
-                    if T_geotherm[j] >= potential_temp:
-                        T_geotherm[j] = potential_temp
-                elif z[j] > D2 + D1:
-                    T_geotherm[j] = Tt3 + mantle_adiabat * (z[j] - D1 - D2)
-                    if T_geotherm[j] >= potential_temp:
-                        T_geotherm[j] = potential_temp
+
+                if z[j] <= crust_thickness:
+                    T_geotherm[j] = Ts + (Qs / k1 * z[j]) - (A1 / (2 * k1) * z[j]**2)
+                elif crust_thickness < z[j] <= litho_thickness + crust_thickness:
+                    T_geotherm[j] = (Tt2 + (Qt2 / k2 * (z[j] - crust_thickness)) -
+                                     (A2 / (2 * k2) * (z[j] - crust_thickness)**2))
+                elif z[j] > litho_thickness + crust_thickness:
+                    T_geotherm[j] = (Tt3 + mantle_adiabat *
+                                     (z[j] - crust_thickness - litho_thickness))
+
+                # Ensure temperature does not exceed potential temperature
+                if T_geotherm[j] >= potential_temp:
+                    T_geotherm[j] = potential_temp
+
+            # Calculate pressure values
             P_geotherm = z / litho_P_gradient
+
+            # Create a DataFrame for the geotherm data
             geotherm = pd.DataFrame(
                 {"P": P_geotherm, "T": T_geotherm}).sort_values(by=["P", "T"])
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _get_mantle_geotherm() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _get_mantle_geotherm():\n  {e}")
             return None
 
         return geotherm
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check rocmlm images !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_rocmlm_images(self, sid, type="predictions"):
         """
         """
-        # Get self attributes
-        fig_dir = self.fig_dir
-        model_prefix = self.model_prefix
-        rocmlm_targets = self.rocmlm_targets
-
         try:
             if type not in {"targets", "predictions", "diff"}:
                 raise Exception("Unrecognized array image type !")
+
             check = True
-            for target in rocmlm_targets:
-                path = (f"{fig_dir}/{model_prefix}-{sid}-{target.replace("_", "-")}-"
-                        f"{type}.png")
+
+            for target in self.rocmlm_targets:
+                path = (f"{self.fig_dir}/{self.model_prefix}-{sid}-"
+                        f"{target.replace("_", "-")}-{type}.png")
                 if not os.path.exists(path):
                     check = False
                     break
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _check_rocmlm_images() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _check_rocmlm_images():\n  {e}")
             return None
 
         return check
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize loss curve !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _visualize_loss_curve(self, loss_curves, figwidth=6.3, figheight=3.54, fontsize=14):
         """
         """
-        # Get self attributes
-        fig_dir = self.fig_dir
-        ml_algo = self.ml_algo
-        rocmlm_label_map = self.rocmlm_label_map
-
-        merged_curves = {}
-        for curve in loss_curves:
-            for key, value in curve.items():
-                if key in merged_curves:
-                    if isinstance(merged_curves[key], list):
-                        merged_curves[key].extend(value)
+        try:
+            merged_curves = {}
+            for curve in loss_curves:
+                for key, value in curve.items():
+                    if key in merged_curves:
+                        if isinstance(merged_curves[key], list):
+                            merged_curves[key].extend(value)
+                        else:
+                            merged_curves[key] = [merged_curves[key], value]
+                            merged_curves[key].extend(value)
                     else:
-                        merged_curves[key] = [merged_curves[key], value]
-                        merged_curves[key].extend(value)
-                else:
-                    merged_curves[key] = value
-        df = pd.DataFrame.from_dict(merged_curves, orient="index").transpose()
-        df.sort_values(by="epoch", inplace=True)
+                        merged_curves[key] = value
+            df = pd.DataFrame.from_dict(merged_curves, orient="index").transpose()
+            df.sort_values(by="epoch", inplace=True)
 
-        plt.rcParams["figure.dpi"] = 300
-        plt.rcParams["font.size"] = fontsize
-        plt.rcParams["savefig.bbox"] = "tight"
-        plt.rcParams["axes.facecolor"] = "0.9"
-        plt.rcParams["legend.frameon"] = "False"
-        plt.rcParams["legend.facecolor"] = "0.9"
-        plt.rcParams["legend.loc"] = "upper left"
-        plt.rcParams["legend.fontsize"] = "small"
-        plt.rcParams["figure.autolayout"] = "True"
+            plt.rcParams["font.size"] = fontsize
 
-        fig = plt.figure(figsize=(figwidth, figheight))
-        colormap = plt.get_cmap("tab10")
-        plt.plot(df["epoch"], df["train_loss"], label="train loss", color=colormap(0))
-        plt.plot(df["epoch"], df["test_loss"], label="test loss", color=colormap(1))
-        plt.xlabel("Epoch")
-        plt.ylabel(f"Loss")
-        plt.title(f"{rocmlm_label_map[ml_algo]} Loss Curve")
-        plt.legend()
-        os.makedirs(f"{fig_dir}", exist_ok=True)
-        plt.savefig(f"{fig_dir}/{ml_algo}-loss-curve.png")
-        plt.close()
+            fig = plt.figure(figsize=(figwidth, figheight))
+            colormap = plt.get_cmap("tab10")
+            plt.plot(df["epoch"], df["train_loss"], label="train loss", color=colormap(0))
+            plt.plot(df["epoch"], df["test_loss"], label="test loss", color=colormap(1))
+            plt.xlabel("Epoch")
+            plt.ylabel(f"Loss")
+            plt.title(f"{self.rocmlm_label} Loss Curve")
+            plt.legend()
+            os.makedirs(f"{self.fig_dir}", exist_ok=True)
+            plt.savefig(f"{self.fig_dir}/{self.ml_algo}-loss-curve.png")
+            plt.close()
 
-        return None
+        except Exception as e:
+            print(f"Error in _visualize_loss_curve():\n  {e}")
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize array image  !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _visualize_array_image(self, sid, sid_idx, palette="bone", type="targets",
                                figwidth=6.3, figheight=4.725, fontsize=22):
@@ -1068,16 +1001,7 @@ class RocMLM:
                     pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
                     crust_thickness=7e3, litho_thickness=1e3)
 
-        plt.rcParams["figure.dpi"] = 300
         plt.rcParams["font.size"] = fontsize
-        plt.rcParams["savefig.bbox"] = "tight"
-        plt.rcParams["axes.facecolor"] = "0.9"
-        plt.rcParams["legend.frameon"] = "False"
-        plt.rcParams["legend.facecolor"] = "0.9"
-        plt.rcParams["legend.loc"] = "upper left"
-        plt.rcParams["legend.fontsize"] = "small"
-        plt.rcParams["figure.autolayout"] = "True"
-        plt.rcParams["figure.constrained_layout.use"] = "True"
 
         try:
             n_feats = gfem_feature_array_square.shape[-1] - 2
@@ -1287,46 +1211,31 @@ class RocMLM:
                 plt.savefig(f"{fig_dir}/{filename}")
                 plt.close()
                 print(f"  Figure saved to: {filename} ...")
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in _visualize_array_image() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in _visualize_array_image():\n  {e}")
 
-        return None
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize(self, skip=20):
         """
         """
-        # Get self attributes
-        gfem_sids = self.gfem_sids
-
         try:
-            for sid_idx, sid in enumerate(gfem_sids[::skip]):
+            for sid_idx, sid in enumerate(self.gfem_sids[::skip]):
                 if not self._check_rocmlm_images(sid, type="diff"):
                     self._visualize_array_image(sid, sid_idx, type="diff")
+
                 if not self._check_rocmlm_images(sid, type="targets"):
                     self._visualize_array_image(sid, sid_idx, type="targets")
+
                 if not self._check_rocmlm_images(sid, type="predictions"):
                     self._visualize_array_image(sid, sid_idx, type="predictions")
-        except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in visualize_rocmlm() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
 
-        return None
+        except Exception as e:
+            print(f"Error in visualize_rocmlm():\n  {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.5.             Train RocMLMs               !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # rocmlm !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def train(self):
         """
@@ -1335,32 +1244,25 @@ class RocMLM:
         for retry in range(max_retries):
             if self.model_trained:
                 break
+
             try:
                 self._configure_rocmlm()
                 self._print_rocmlm_info()
                 self._kfold_cv()
                 self._fit_training_data()
                 self._save_rocmlm_cv_info()
+
             except Exception as e:
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-                print(f"!!! ERROR in train() !!!")
-                print(f"{e}")
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                print(f"Error in train():\n  {e}")
                 traceback.print_exc()
+
                 if retry < max_retries - 1:
                     print(f"Retrying in 5 seconds ...")
                     time.sleep(5)
-                else:
-                    self.model_training_error = True
-                    self.model_error = e
-                    return None
-        return None
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.6.           RocMLM Inference              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # predict !!
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def predict(self, xi, h2o, P, T):
         """
@@ -1400,12 +1302,9 @@ class RocMLM:
             inference_end_time = time.time()
             inference_time = inference_end_time - inference_start_time
             pred_original = scaler_y.inverse_transform(pred_scaled)
+
         except Exception as e:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(f"!!! ERROR in predict() !!!")
-            print(f"{e}")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            traceback.print_exc()
+            print(f"Error in predict():\n  {e}")
             return None
 
         return pred_original
@@ -1416,33 +1315,33 @@ class RocMLM:
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # train rocmlms !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"]):
+def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"], config_yaml=None):
     """
     """
     try:
         if not gfem_models:
             raise Exception("No GFEM models to compile !")
+
         models = []
         for algo in ml_algos:
-            model = RocMLM(gfem_models, algo)
+            tune = True if algo != "NN" else False
+            model = RocMLM(gfem_models, algo, tune=tune, config_yaml=config_yaml)
             model.train()
             models.append(model)
+
+        rocmlms = [m for m in models if not m.model_training_error]
+        error_count = len([m for m in models if m.model_training_error])
+
+        if error_count > 0:
+            print(f"Total RocMLMs with errors: {error_count}")
+        else:
+            print("All RocMLMs built successfully !")
+
+        print(":::::::::::::::::::::::::::::::::::::::::::::")
+
     except Exception as e:
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print(f"!!! ERROR in train_rocmlms() !!!")
-        print(f"{e}")
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        traceback.print_exc()
+        print(f"Error in train_rocmlms():\n  {e}")
         return None
-    rocmlms = [m for m in models if not m.model_training_error]
-    error_count = len([m for m in models if m.model_training_error])
-    if error_count > 0:
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print(f"Total RocMLMs with errors: {error_count}")
-    else:
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print("All RocMLMs built successfully !")
-    print(":::::::::::::::::::::::::::::::::::::::::::::")
 
     return rocmlms
 
@@ -1454,22 +1353,19 @@ def main():
     """
     from gfem import build_gfem_models
     try:
-        # Build GFEM models
-        gfems = {}
-        sources = {"m": "assets/synth-mids.csv", "r": "assets/synth-rnds.csv"}
-        db, res, P_min, P_max, T_min, T_max = "hp02", 64, 0.1, 8.1, 273, 1973
-        for name, source in sources.items():
-            gfems[name] = build_gfem_models(source, db, res, P_min, P_max, T_min, T_max)
-        training_data = gfems["m"] + gfems["r"]
-        rocmlms = train_rocmlms(training_data)
-        for model in rocmlms:
-            model.visualize()
+        gfems = []
+        gfem_configs = {"stx21m": "assets/config_yamls/dry-deep-mantle-stx21m.yaml",
+                        "stx21r": "assets/config_yamls/dry-deep-mantle-stx21r.yaml"}
+
+        for name, yaml in gfem_configs.items():
+            gfems.extend(build_gfem_models(config_yaml=yaml))
+
+        rocmlm_config = "assets/config_yamls/rocmlm-test.yaml"
+        rocmlms = train_rocmlms(gfems, config_yaml=rocmlm_config)
+
     except Exception as e:
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print(f"!!! ERROR in main() !!!")
-        print(f"{e}")
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        traceback.print_exc()
+        print(f"Error in main():\n  {e}")
+
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("RocMLMs trained and visualized !")
     print("=============================================")

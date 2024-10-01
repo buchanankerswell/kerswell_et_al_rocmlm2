@@ -31,7 +31,7 @@ from matplotlib.colors import ListedColormap
 #######################################################
 class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, perplex_db="hp02", sid="PYR", source="assets/benchmark-samples.csv",
+    def __init__(self, perplex_db="stx21", sid="PYR", source="assets/benchmark-samples.csv",
                  res=32, P_min=0.1, P_max=8.1, T_min=273, T_max=1973, config_yaml=None,
                  verbose=1):
         """
@@ -69,6 +69,8 @@ class GFEMModel:
             and values are loaded from the YAML file instead.
         """
         if config_yaml:
+            if not os.path.exists(config_yaml):
+                raise Exception(f"No config_yaml found at {config_yaml}!")
             with open(config_yaml, "r") as file:
                 config_data = yaml.safe_load(file)
             perplex_options = config_data["perplex_options"]
@@ -143,6 +145,8 @@ class GFEMModel:
         """
         try:
             if self.config_yaml:
+                if not os.path.exists(self.config_yaml):
+                    raise Exception(f"No config_yaml found at {self.config_yaml}!")
                 with open(self.config_yaml, "r") as file:
                     config_data = yaml.safe_load(file)
                 global_options = config_data["global_options"]
@@ -218,6 +222,8 @@ class GFEMModel:
         """
         try:
             if self.config_yaml:
+                if not os.path.exists(self.config_yaml):
+                    raise Exception(f"No config_yaml found at {self.config_yaml}!")
                 with open(self.config_yaml, "r") as file:
                     config_data = yaml.safe_load(file)
                 perplex_options = config_data["perplex_options"]
@@ -750,6 +756,7 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.1.          Perple_X Functions             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_subduction_geotherm(self, segment="Central_Cascadia", slab_position="slabmoho"):
         """
         Retrieves the subduction geotherm data for a specified segment and slab position.
@@ -2972,7 +2979,8 @@ def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8
     """
     try:
         if config_yaml:
-            # Load configuration yaml
+            if not os.path.exists(config_yaml):
+                raise Exception(f"No config_yaml found at {config_yaml}!")
             with open(config_yaml, "r") as file:
                 config_data = yaml.safe_load(file)
             perplex_options = config_data["perplex_options"]
@@ -3058,7 +3066,6 @@ def main():
 
     except Exception as e:
         print(f"Error in main():\n  {e}")
-        return None
 
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("GFEM models built and visualized!")
