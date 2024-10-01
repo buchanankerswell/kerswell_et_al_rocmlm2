@@ -10,29 +10,29 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Build GFEM models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#    # makes default PYR stx21 model from GFEMModel class
-#    model = GFEMModel()
-#    model.build()
-#    model.visualize()
-#
-#    # makes default PYR stx21 model from yaml file
-#    model = GFEMModel(config_yaml="assets/config_yamls/PYR-stx21.yaml")
-#    model.build()
-#    model.visualize()
-#
-#    res, src, samp = 32, "assets/synth-mids.csv", "sm005-h2o005"
-#
-#    # makes hp02 model from GFEMModel class
-#    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-#    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
-#    model_shallow.build()
-#    model_shallow.visualize()
-#
-#    # makes stx21 model from GFEMModel class
-#    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
-#    model_deep = GFEMModel("stx21", samp, src, res, P_min, P_max, T_min, T_max)
-#    model_deep.build()
-#    model_deep.visualize()
+    # makes default PYR stx21 model from GFEMModel class
+    model = GFEMModel()
+    model.build()
+    model.visualize()
+
+    # makes default PYR stx21 model from yaml file
+    model = GFEMModel(config_yaml="assets/config_yamls/PYR-stx21.yaml")
+    model.build()
+    model.visualize()
+
+    res, src, samp = 32, "assets/synth-mids.csv", "sm005-h2o005"
+
+    # makes hp02 model from GFEMModel class
+    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
+    model_shallow = GFEMModel("hp02", samp, src, res, P_min, P_max, T_min, T_max)
+    model_shallow.build()
+    model_shallow.visualize()
+
+    # makes stx21 model from GFEMModel class
+    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
+    model_deep = GFEMModel("stx21", samp, src, res, P_min, P_max, T_min, T_max)
+    model_deep.build()
+    model_deep.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Builds multiple GFEM models in parallel

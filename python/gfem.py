@@ -1911,7 +1911,7 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.3.              Visualize                  !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def _check_model_array_images(self, type="sub", gradient=False):
+    def _check_model_array_images(self, geotherm_type="sub", gradient=False):
         """
         Checks if model array images exist for specified targets.
 
@@ -1921,7 +1921,7 @@ class GFEMModel:
         images are present.
 
         Parameters:
-            type (str): The type of image to check (default is "sub").
+            geotherm_type (str): The type of image to check (default is "sub").
             gradient (bool): If True, checks for gradient images; otherwise, checks
                              for standard images (default is False).
 
@@ -1946,7 +1946,7 @@ class GFEMModel:
             # Construct file path
             path = (f"{self.fig_dir}/{self.sid}-{self.perplex_db}-"
                     f"{target.replace('_', '-')}"
-                    f"{'-grad' if gradient else ''}-{type}.png")
+                    f"{'-grad' if gradient else ''}-{geotherm_type}.png")
 
             # Check for existence of the image file
             if os.path.exists(path):
@@ -1967,16 +1967,22 @@ class GFEMModel:
         Returns:
             bool: True if all target surface images exist, False otherwise.
         """
-        targets_exclude = ["phase_assemblage"]
-        # Filter out excluded targets
-        self.targets_to_visualize = [
-            t for t in self.targets_to_visualize if t not in targets_exclude]
+        try:
+            targets_exclude = ["phase_assemblage"]
 
-        existing_figs = [
-            target for target in self.targets_to_visualize
-            if os.path.exists(f"{self.fig_dir}/{self.sid}-{self.perplex_db}-"
-                              f"{target.replace('_', '-')}-surf.png")
-        ]
+            # Filter out excluded targets
+            self.targets_to_visualize = [
+                t for t in self.targets_to_visualize if t not in targets_exclude]
+
+            existing_figs = [
+                target for target in self.targets_to_visualize
+                if os.path.exists(f"{self.fig_dir}/{self.sid}-{self.perplex_db}-"
+                                  f"{target.replace('_', '-')}-surf.png")
+            ]
+
+        except Exception as e:
+            print(f"Error in _check_model_array_surfs():\n  {e}")
+            return None
 
         # Check if the number of existing figures matches the number of targets to visualize
         return len(existing_figs) == len(self.targets_to_visualize)
@@ -1996,6 +2002,7 @@ class GFEMModel:
         # Define targets to exclude
         targets_exclude = [
             "phase_assemblage", "assemblage_index", "phase_assemblage_variance"]
+
         self.targets_to_visualize = [
             t for t in self.targets_to_visualize if t not in targets_exclude]
 
@@ -2006,15 +2013,15 @@ class GFEMModel:
 
             # Check paths based on pressure conditions
             if self.P_min < 6:
-                for depth in ["sub-slabtop", "sub-slabmoho"]:
+                for position in ["sub-slabtop", "sub-slabmoho"]:
                     path = (f"{self.fig_dir}/{self.sid}-{self.perplex_db}-"
-                            f"{target.replace('_', '-')}-depth-profile-{depth}.png")
+                            f"{target.replace('_', '-')}-depth-profile-{position}.png")
                     if os.path.exists(path):
                         existing_figs.append(path)
 
-            for depth in ["craton", "mor"]:
+            for geotherm_type in ["craton", "mor"]:
                 path = (f"{self.fig_dir}/{self.sid}-{self.perplex_db}-"
-                        f"{target.replace('_', '-')}-depth-profile-{depth}.png")
+                        f"{target.replace('_', '-')}-depth-profile-{geotherm_type}.png")
                 if os.path.exists(path):
                     existing_figs.append(path)
 
@@ -2065,353 +2072,256 @@ class GFEMModel:
         return len(existing_figs) == expected_count
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, type="sub", palette="bone", gradient=False,
+    def _get_geotherms_for_array_image(self, geotherm_type):
+        """
+        """
+        try:
+            geotherms = {}
+            if geotherm_type == "sub":
+                for seg in self.segs:
+                    if self.P_min < 6:
+                        geotherms[seg] = {
+                            "slabtop": self._get_subduction_geotherm(
+                                seg, slab_position="slabtop"),
+                            "slabmoho": self._get_subduction_geotherm(
+                                seg, slab_position="slabmoho"),
+                        }
+            elif geotherm_type == "craton":
+                for pot in self.pot_Ts:
+                    geotherms[pot] = self._get_mantle_geotherm(pot)
+            elif geotherm_type == "mor":
+                for pot in self.pot_Ts:
+                    geotherms[pot] = self._get_mantle_geotherm(
+                        pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                        crust_thickness=7e3, litho_thickness=1e3)
+
+        except Exception as e:
+            print(f"Error in _get_geotherms_for_array_image():\n  {e}")
+            return None
+
+        return geotherms
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_square_target_for_array_image(self, index, gradient):
+        """
+        """
+        try:
+            square_target = self.target_array[:, index].reshape(self.res + 1, self.res + 1)
+
+            if gradient:
+                edges_x = cv2.Sobel(square_target, cv2.CV_64F, 1, 0, ksize=3)
+                edges_y = cv2.Sobel(square_target, cv2.CV_64F, 0, 1, ksize=3)
+                max_val = np.nanmax(square_target) if np.any(~np.isnan(square_target)) else 0
+                square_target = (np.sqrt(edges_x**2 + edges_y**2) / max_val
+                                 if max_val > 0 else np.zeros_like(edges_x))
+
+        except Exception as e:
+            print(f"Error in _get_square_target_for_array_image():\n  {e}")
+            return None
+
+        return square_target
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_colormap_for_array_image(self, palette, reverse, discrete):
+        """
+        """
+        try:
+            palettes = {
+                "viridis": "viridis_r" if reverse else "viridis",
+                "bone": "bone_r" if reverse else "bone",
+                "pink": "pink_r" if reverse else "pink",
+                "seismic": "seismic_r" if reverse else "seismic",
+                "grey": "Greys_r" if reverse else "Greys",
+                "default": "Blues_r" if reverse else "Blues"
+            }
+            pal = palettes.get(palette, palettes["default"])
+            cmap = (ListedColormap(plt.colormaps[pal](np.linspace(0, 1, 256)))
+                    if discrete else plt.get_cmap(pal))
+            cmap.set_bad(color="0.9")
+
+        except Exception as e:
+            print(f"Error in _get_colormap_for_array_image():\n  {e}")
+            return None
+
+        return cmap
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_vmin_vmax_for_array_image(self, square_target, discrete):
+        """
+        """
+        try:
+            if discrete:
+                vmin = int(np.nanmin(np.unique(square_target)))
+                vmax = int(np.nanmax(np.unique(square_target)))
+            else:
+                non_nan_values = square_target[~np.isnan(square_target)]
+                vmin, vmax = ((np.min(non_nan_values), np.max(non_nan_values))
+                              if non_nan_values.size > 0 else (0, 0))
+
+        except Exception as e:
+            print(f"Error in _get_vmin_vmax_for_array_image():\n  {e}")
+            return None, None
+
+        return vmin, vmax
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _plot_geotherms_on_array_image(self, ax, geotherms, geotherm_type, linestyles):
+        """
+        """
+        try:
+            if geotherm_type == "sub":
+                for seg, gt in geotherms.items():
+                    ax.plot(gt["slabtop"]["T"], gt["slabtop"]["P"], linestyle="-",
+                            color="black", linewidth=2, label=seg)
+                    ax.plot(gt["slabmoho"]["T"], gt["slabmoho"]["P"], linestyle="--",
+                            color="black", linewidth=2)
+            elif geotherm_type in ["craton", "mor"]:
+                for i, (pot, gt) in enumerate(geotherms.items()):
+                    ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
+                            linewidth=2, label=pot)
+
+        except Exception as e:
+            print(f"Error in _plot_geotherms_on_array_image():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _visualize_array_image(self, geotherm_type="sub", palette="bone", gradient=False,
                                figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
-        sid = self.sid
-        res = self.res
-        segs = self.segs
-        P_min = self.P_min
-        pot_Ts = self.pot_Ts
-        results = self.results
-        fig_dir = self.fig_dir
-        targets = self.targets
-        perplex_db = self.perplex_db
-        model_built = self.model_built
-        target_array = self.target_array
-        target_units_map = self.target_units_map
-        target_digits_map = self.target_digits_map
-        target_labels_map = self.target_labels_map
-        targets_to_visualize = self.targets_to_visualize
+        try:
+            plt.rcParams["font.size"] = fontsize
+            linestyles = ["-", "--", "-.", ":", (0, (3, 5, 1, 5))]
+            P, T = self.results["P"], self.results["T"]
+            extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
 
-        plt.rcParams["font.size"] = fontsize
-        P, T = results["P"], results["T"]
-        extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
-        if not model_built:
-            raise Exception("No GFEM model! Call build() first ...")
-        if not results:
-            raise Exception("No GFEM model results! Call get_results() first ...")
-        if target_array is None or target_array.size == 0:
-            raise Exception("No GFEM model target array! Call get_target_array() first ...")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir, exist_ok=True)
-        if gradient:
-            targets_exclude = ["assemblage_index", "phase_assemblage_variance"]
-        else:
-            targets_exclude = ["phase_assemblage"]
-        targets_to_visualize = [t for t in targets_to_visualize if t not in targets_exclude]
-        if type == "sub":
-            sub_gtt = {}
-            sub_gtm = {}
-            for seg in segs:
-                if P_min < 6:
-                    sub_gtt[seg] = self._get_subduction_geotherm(
-                        seg, slab_position="slabtop")
-                    sub_gtm[seg] = self._get_subduction_geotherm(
-                        seg, slab_position="slabmoho")
-                else:
-                    print("  P_min too high to plot subduction geotherms!")
-                    return None
-        elif type == "craton":
-            ad_gt = {}
-            for pot in pot_Ts:
-                ad_gt[pot] = self._get_mantle_geotherm(pot)
-        elif type == "mor":
-            ad_gt = {}
-            for pot in pot_Ts:
-                ad_gt[pot] = self._get_mantle_geotherm(
-                    pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
-                    crust_thickness=7e3, litho_thickness=1e3)
-        linestyles = ["-", "--", "-.", ":", (0, (3, 5, 1, 5))]
-        for i, target in enumerate(targets):
-            if target not in targets_to_visualize:
-                continue
-            target_label = target_labels_map[target]
-            filename = f"{sid}-{perplex_db}-{target.replace("_", "-")}-{type}.png"
-            if target not in ["assemblage_index", "phase_assemblage_variance"]:
-                title = f"{target_label} ({target_units_map[target]})"
-            else:
-                title = f"{target_label}"
-            square_target = target_array[:, i].reshape(res + 1, res + 1)
-            if gradient:
-                original_image = square_target.copy()
-                edges_x = cv2.Sobel(original_image, cv2.CV_64F, 1, 0, ksize=3)
-                edges_y = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=3)
-                if np.any(~np.isnan(original_image)):
-                    max_val = np.nanmax(original_image)
-                    if max_val > 0:
-                        square_target = np.sqrt(edges_x**2 + edges_y**2) / max_val
-                    else:
-                        square_target = np.zeros_like(edges_x)
-                else:
-                    square_target = np.full_like(edges_x, np.nan)
-                filename = f"{sid}-{perplex_db}-{target.replace("_", "-")}-grad-{type}.png"
-                title = f"{target_label} Gradient"
-            if target in ["assemblage_index", "phase_assemblage_variance"]:
-                color_discrete = True
-            else:
-                color_discrete = False
-            if palette in ["grey"]:
-                if target in ["phase_assemblage_variance"]:
-                    color_reverse = True
-                else:
-                    color_reverse = False
-            else:
-                if target in ["phase_assemblage_variance"]:
-                    color_reverse = False
-                else:
-                    color_reverse = True
-            if not color_discrete:
-                non_nan_values = square_target[np.logical_not(np.isnan(square_target))]
-                if non_nan_values.size > 0:
-                    vmin = np.min(non_nan_values)
-                    vmax = np.max(non_nan_values)
-                else:
-                    vmin = 0
-                    vmax = 0
-            else:
-                vmin = int(np.nanmin(np.unique(square_target)))
-                vmax = int(np.nanmax(np.unique(square_target)))
-            if color_discrete:
-                num_colors = vmax - vmin
-                num_colors = max(num_colors, num_colors // 4)
-                if palette == "viridis":
-                    if color_reverse:
-                        pal = plt.colormaps["viridis_r"]
-                    else:
-                        pal = plt.colormaps["viridis"]
-                elif palette == "bone":
-                    if color_reverse:
-                        pal = plt.colormaps["bone_r"]
-                    else:
-                        pal = plt.colormaps["bone"]
-                elif palette == "pink":
-                    if color_reverse:
-                        pal = plt.colormaps["pink_r"]
-                    else:
-                        pal = plt.colormaps["pink"]
-                elif palette == "seismic":
-                    if color_reverse:
-                        pal = plt.colormaps["seismic_r"]
-                    else:
-                        pal = plt.colormaps["seismic"]
-                elif palette == "grey":
-                    if color_reverse:
-                        pal = plt.colormaps["Greys_r"]
-                    else:
-                        pal = plt.colormaps["Greys"]
-                elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
-                    if color_reverse:
-                        pal = plt.colormaps["Blues_r"]
-                    else:
-                        pal = plt.colormaps["Blues"]
-                color_palette = pal(np.linspace(0, 1, num_colors))
-                cmap = ListedColormap(color_palette)
-                cmap.set_bad(color="0.9")
+            if not self.model_built:
+                raise Exception("No GFEM model! Call build() first ...")
+            if not self.results:
+                raise Exception("No results! Call get_results() first ...")
+            if self.target_array is None or self.target_array.size == 0:
+                raise Exception("No target array! Call get_target_array() first ...")
+            if geotherm_type not in ["sub", "craton", "mor"]:
+                raise Exception("Unrecognized geotherm_type argument!")
+
+            if not os.path.exists(self.fig_dir):
+                os.makedirs(self.fig_dir, exist_ok=True)
+
+            # Filter targets
+            exclude_targets = (
+                ["assemblage_index", "phase_assemblage_variance"] if gradient else
+                ["phase_assemblage"]
+            )
+            trg_vis = [t for t in self.targets_to_visualize if t not in exclude_targets]
+
+            # Get geotherms
+            geotherms = self._get_geotherms_for_array_image(geotherm_type)
+
+            for i, target in enumerate(self.targets):
+                if target not in trg_vis:
+                    continue
+
+                target_label = self.target_labels_map[target]
+                filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
+                            f"{geotherm_type}.png")
+                title = (f"{target_label} ({self.target_units_map.get(target, '')})")
+
+                # Get square array
+                square_target = self._get_square_target_for_array_image(i, gradient)
+
+                if gradient:
+                    filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                                f"grad-{geotherm_type}.png")
+                    title = f"{target_label} Gradient"
+
+                # Determine color mapping
+                color_discrete = target in ["assemblage_index", "phase_assemblage_variance"]
+                color_reverse = target not in ["phase_assemblage_variance"]
+                cmap = self._get_colormap_for_array_image(
+                    palette, color_reverse, color_discrete)
+                vmin, vmax = self._get_vmin_vmax_for_array_image(
+                    square_target, color_discrete)
+
+                # Plot the array in 2d
                 fig, ax = plt.subplots(figsize=(figwidth, figheight))
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
-                if type == "sub":
-                    for seg, gt in sub_gtt.items():
-                        ax.plot(gt["T"], gt["P"], linestyle="-", color="black",
-                                linewidth=2, label=seg)
-                    for seg, gt in sub_gtm.items():
-                        ax.plot(gt["T"], gt["P"], linestyle="--", color="black",
-                                linewidth=2, label=seg)
-                elif type == "craton":
-                    for i, (pot, gt) in enumerate(ad_gt.items()):
-                        ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                linewidth=2, label=pot)
-                elif type == "mor":
-                    for i, (pot, gt) in enumerate(ad_gt.items()):
-                        ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                linewidth=2, label=pot)
+
+                # Plot geotherms based on type
+                self._plot_geotherms_on_array_image(ax, geotherms, geotherm_type, linestyles)
+
+                # Finalize the plot
                 ax.set_xlabel("T (K)")
                 ax.set_ylabel("P (GPa)")
-                plt.colorbar(im, ax=ax, label="")
-            else:
-                if palette == "viridis":
-                    if color_reverse:
-                        cmap = "viridis_r"
-                    else:
-                        cmap = "viridis"
-                elif palette == "bone":
-                    if color_reverse:
-                        cmap = "bone_r"
-                    else:
-                        cmap = "bone"
-                elif palette == "pink":
-                    if color_reverse:
-                        cmap = "pink_r"
-                    else:
-                        cmap = "pink"
-                elif palette == "seismic":
-                    if color_reverse:
-                        cmap = "seismic_r"
-                    else:
-                        cmap = "seismic"
-                elif palette == "grey":
-                    if color_reverse:
-                        cmap = "Greys_r"
-                    else:
-                        cmap = "Greys"
-                elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
-                    if color_reverse:
-                        cmap="Blues_r"
-                    else:
-                        cmap="Blues"
-                if palette == "seismic":
-                    vmin = -np.max(
-                        np.abs(square_target[np.logical_not(np.isnan(square_target))]))
-                    vmax = np.max(
-                        np.abs(square_target[np.logical_not(np.isnan(square_target))]))
-                else:
-                    vmin, vmax = vmin, vmax
-                    if vmin <= 1e-4: vmin = 0
-                cmap = plt.colormaps[cmap]
-                cmap.set_bad(color="0.9")
-                fig, ax = plt.subplots()
-                im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
-                               origin="lower", vmin=vmin, vmax=vmax)
-                if type == "sub":
-                    for seg, gt in sub_gtt.items():
-                        ax.plot(gt["T"], gt["P"], linestyle="-", color="black",
-                                linewidth=2, label=seg)
-                    for seg, gt in sub_gtm.items():
-                        ax.plot(gt["T"], gt["P"], linestyle="--", color="black",
-                                linewidth=2, label=seg)
-                elif type == "craton":
-                    for i, (pot, gt) in enumerate(ad_gt.items()):
-                        ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                linewidth=2, label=pot)
-                elif type == "mor":
-                    for i, (pot, gt) in enumerate(ad_gt.items()):
-                        ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                linewidth=2, label=pot)
-                ax.set_xlabel("T (K)")
-                ax.set_ylabel("P (GPa)")
-                if palette == "seismic":
-                    cbar = plt.colorbar(im, ax=ax, ticks=[vmin, 0, vmax], label="")
-                else:
-                    cbar = plt.colorbar(im, ax=ax, ticks=np.linspace(vmin, vmax, num=4),
-                                        label="")
+                cbar = plt.colorbar(
+                    im, ax=ax, ticks=np.linspace(vmin, vmax, num=4), label="")
                 cbar.ax.yaxis.set_major_formatter(
-                    plt.FormatStrFormatter(target_digits_map[target]))
-            plt.title(title)
-            plt.savefig(f"{fig_dir}/{filename}")
-            plt.close()
-            print(f"  Figure saved to: {filename} ...")
+                    plt.FormatStrFormatter(self.target_digits_map[target]))
+                plt.title(title)
 
-        return None
+                # Save fig
+                plt.savefig(f"{self.fig_dir}/{filename}")
+                plt.close()
+
+                print(f"  Figure saved to: {filename} ...")
+
+        except Exception as e:
+            print(f"Error in _visualize_array_image():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize target surf !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_target_surf(self, palette="bone", figwidth=6.3, figheight=4.725,
-                               fontsize=22):
+    def _visualize_array_surf(self, palette="bone", gradient=False, figwidth=6.3,
+                              figheight=4.725, fontsize=22):
         """
         """
-        sid = self.sid
-        res = self.res
-        results = self.results
-        fig_dir = self.fig_dir
-        targets = self.targets
-        perplex_db = self.perplex_db
-        model_built = self.model_built
-        target_array = self.target_array
-        target_units_map = self.target_units_map
-        target_digits_map = self.target_digits_map
-        target_labels_map = self.target_labels_map
-        targets_to_visualize = self.targets_to_visualize
+        try:
+            plt.rcParams["font.size"] = fontsize
+            P = self.results["P"].reshape(self.res + 1, self.res + 1)
+            T = self.results["T"].reshape(self.res + 1, self.res + 1)
 
-        plt.rcParams["font.size"] = fontsize
-        P = results["P"].reshape(res + 1, res + 1)
-        T = results["T"].reshape(res + 1, res + 1)
-        if not model_built:
-            raise Exception("No GFEM model! Call build() first ...")
-        if not results:
-            raise Exception("No GFEM model results! Call get_results() first ...")
-        if target_array is None or target_array.size == 0:
-            raise Exception("No GFEM model target array! Call get_target_array() first ...")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir, exist_ok=True)
-        targets_exclude = ["phase_assemblage"]
-        targets_to_visualize = [t for t in targets_to_visualize if t not in targets_exclude]
-        for i, target in enumerate(targets):
-            if target not in targets_to_visualize:
-                continue
-            target_label = target_labels_map[target]
-            filename = f"{sid}-{perplex_db}-{target.replace("_", "-")}-surf.png"
-            if target not in ["assemblage_index", "phase_assemblage_variance"]:
-                title = f"{target_label} ({target_units_map[target]})"
-            else:
-                title = f"{target_label}"
-            square_target = target_array[:, i].reshape(res + 1, res + 1)
-            if target in ["assemblage_index", "phase_assemblage_variance"]:
-                color_discrete = True
-            else:
-                color_discrete = False
-            if palette in ["grey"]:
-                if target in ["phase_assemblage_variance"]:
-                    color_reverse = True
-                else:
-                    color_reverse = False
-            else:
-                if target in ["phase_assemblage_variance"]:
-                    color_reverse = False
-                else:
-                    color_reverse = True
-            if not color_discrete:
-                non_nan_values = square_target[np.logical_not(np.isnan(square_target))]
-                if non_nan_values.size > 0:
-                    vmin = np.min(non_nan_values)
-                    vmax = np.max(non_nan_values)
-                else:
-                    vmin = 0
-                    vmax = 0
-            else:
-                vmin = int(np.nanmin(np.unique(square_target)))
-                vmax = int(np.nanmax(np.unique(square_target)))
-            if color_discrete:
-                num_colors = vmax - vmin
-                num_colors = max(num_colors, num_colors // 4)
-                if palette == "viridis":
-                    if color_reverse:
-                        pal = plt.get_cmap("viridis_r", num_colors)
-                    else:
-                        pal = plt.get_cmap("viridis", num_colors)
-                elif palette == "bone":
-                    if color_reverse:
-                        pal = plt.get_cmap("bone_r", num_colors)
-                    else:
-                        pal = plt.get_cmap("bone", num_colors)
-                elif palette == "pink":
-                    if color_reverse:
-                        pal = plt.get_cmap("pink_r", num_colors)
-                    else:
-                        pal = plt.get_cmap("pink", num_colors)
-                elif palette == "seismic":
-                    if color_reverse:
-                        pal = plt.get_cmap("seismic_r", num_colors)
-                    else:
-                        pal = plt.get_cmap("seismic", num_colors)
-                elif palette == "grey":
-                    if color_reverse:
-                        pal = plt.get_cmap("Greys_r", num_colors)
-                    else:
-                        pal = plt.get_cmap("Greys", num_colors)
-                elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
-                    if color_reverse:
-                        pal = plt.get_cmap("Blues_r", num_colors)
-                    else:
-                        pal = plt.get_cmap("Blues", num_colors)
-                color_palette = pal(np.linspace(0, 1, num_colors))
-                cmap = ListedColormap(color_palette)
-                cmap.set_bad(color="0.9")
+            if not self.model_built:
+                raise Exception("No GFEM model! Call build() first ...")
+            if not self.results:
+                raise Exception("No results! Call get_results() first ...")
+            if self.target_array is None or self.target_array.size == 0:
+                raise Exception("No target array! Call get_target_array() first ...")
+
+            if not os.path.exists(self.fig_dir):
+                os.makedirs(self.fig_dir, exist_ok=True)
+
+            # Filter targets
+            targets_exclude = ["phase_assemblage"]
+            trg_vis = [t for t in self.targets_to_visualize if t not in targets_exclude]
+
+            for i, target in enumerate(self.targets):
+                if target not in trg_vis:
+                    continue
+
+                target_label = self.target_labels_map[target]
+                filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
+                            f"surf.png")
+                title = (f"{target_label} ({self.target_units_map.get(target, '')})")
+
+                # Get square array
+                square_target = self._get_square_target_for_array_image(i, gradient)
+
+                if gradient:
+                    filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                                f"grad-surf.png")
+                    title = f"{target_label} Gradient"
+
+                # Determine color mapping
+                color_discrete = target in ["assemblage_index", "phase_assemblage_variance"]
+                color_reverse = target not in ["phase_assemblage_variance"]
+                cmap = self._get_colormap_for_array_image(
+                    palette, color_reverse, color_discrete)
+                vmin, vmax = self._get_vmin_vmax_for_array_image(
+                    square_target, color_discrete)
+
+                # Plot the array in 3d
                 fig = plt.figure(figsize=(figwidth, figheight), constrained_layout=True)
                 ax = fig.add_subplot(111, projection="3d")
                 surf = ax.plot_surface(T, P, square_target, cmap=cmap, vmin=vmin, vmax=vmax)
+
+                # Finalize the plot
                 ax.set_xlabel("T (K)", labelpad=18)
                 ax.set_ylabel("P (GPa)", labelpad=18)
                 ax.set_zlabel("")
@@ -2422,373 +2332,398 @@ class GFEMModel:
                 ax.view_init(20, -145)
                 ax.set_box_aspect((1.5, 1.5, 1), zoom=1)
                 ax.set_facecolor("white")
-                cbar = fig.colorbar(surf, ax=ax, label="", shrink=0.6)
-                cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter("%.0f"))
-                cbar.ax.set_ylim(vmax, vmin)
-            else:
-                if palette == "viridis":
-                    if color_reverse:
-                        cmap = "viridis_r"
-                    else:
-                        cmap = "viridis"
-                elif palette == "bone":
-                    if color_reverse:
-                        cmap = "bone_r"
-                    else:
-                        cmap = "bone"
-                elif palette == "pink":
-                    if color_reverse:
-                        cmap = "pink_r"
-                    else:
-                        cmap = "pink"
-                elif palette == "seismic":
-                    if color_reverse:
-                        cmap = "seismic_r"
-                    else:
-                        cmap = "seismic"
-                elif palette == "grey":
-                    if color_reverse:
-                        cmap = "Greys_r"
-                    else:
-                        cmap = "Greys"
-                elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
-                    if color_reverse:
-                        cmap="Blues_r"
-                    else:
-                        cmap="Blues"
-                if palette == "seismic":
-                    vmin = -np.max(
-                        np.abs(square_target[np.logical_not(np.isnan(square_target))]))
-                    vmax = np.max(
-                        np.abs(square_target[np.logical_not(np.isnan(square_target))]))
-                else:
-                    vmin, vmax = vmin, vmax
-                    if vmin <= 1e-4: vmin = 0
-                cmap = plt.get_cmap(cmap)
-                cmap.set_bad(color="0.9")
-                fig = plt.figure(figsize=(figwidth, figheight), constrained_layout=True)
-                ax = fig.add_subplot(111, projection="3d")
-                surf = ax.plot_surface(T, P, square_target, cmap=cmap, vmin=vmin, vmax=vmax)
-                ax.set_xlabel("T (K)", labelpad=18)
-                ax.set_ylabel("P (GPa)", labelpad=18)
-                ax.set_zlabel("")
-                if vmin != vmax:
-                    ax.set_zlim(vmin - (vmin * 0.05), vmax + (vmax * 0.05))
-                plt.tick_params(axis="x", which="major")
-                plt.tick_params(axis="y", which="major")
-                plt.title(title, y=0.95)
-                ax.view_init(20, -145)
-                ax.set_box_aspect((1.5, 1.5, 1), zoom=1)
-                ax.set_facecolor("white")
-                if palette == "seismic":
-                    cbar = fig.colorbar(surf, ax=ax, ticks=[vmin, 0, vmax], label="",
-                                        shrink=0.6)
-                else:
-                    cbar = fig.colorbar(surf, ax=ax, ticks=np.linspace(vmin, vmax, num=4),
-                                        label="", shrink=0.6)
+                cbar = fig.colorbar(
+                    surf, ax=ax, ticks=np.linspace(vmin, vmax, num=4), label="", shrink=0.6)
                 cbar.ax.yaxis.set_major_formatter(
-                    plt.FormatStrFormatter(target_digits_map[target]))
+                    plt.FormatStrFormatter(self.target_digits_map[target]))
                 ax.zaxis.set_major_formatter(
-                    plt.FormatStrFormatter(target_digits_map[target]))
-                if vmin != vmax:
-                    cbar.ax.set_ylim(vmin, vmax)
-            plt.savefig(f"{fig_dir}/{filename}")
-            plt.close()
+                    plt.FormatStrFormatter(self.target_digits_map[target]))
 
-        return None
+                # Save fig
+                plt.savefig(f"{self.fig_dir}/{filename}")
+                plt.close()
+
+        except Exception as e:
+            print(f"Error in _visualize_array_surf():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize depth profiles !!
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_depth_profiles(self, type="sub", slab_position="slabtop", figwidth=6.3,
-                                  figheight=4.725, fontsize=22):
+    def _generate_subduction_profiles(self, target, slab_position):
         """
         """
-        # Get model data
-        sid = self.sid
-        res = self.res
-        segs = self.segs
-        P_min = self.P_min
-        P_max = self.P_max
-        pot_Ts = self.pot_Ts
-        fig_dir = self.fig_dir
-        targets = self.targets
-        perplex_db = self.perplex_db
-        model_built = self.model_built
-        model_out_dir = self.model_out_dir
-        target_units_map = self.target_units_map
-        target_digits_map = self.target_digits_map
-        target_labels_map = self.target_labels_map
-        targets_to_visualize = self.targets_to_visualize
+        try:
+            Pprof, tprof, labels = [], [], []
+            for j, seg in enumerate(self.segs):
+                filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                            f"depth-profile-sub-{slab_position}.png")
 
-        plt.rcParams["font.size"] = fontsize
-        if not model_built:
-            raise Exception("No GFEM model! Call build() first ...")
-        if not os.path.exists("assets"):
-            raise Exception(f"Data not found at assets!")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir, exist_ok=True)
-        targets_exclude = [
-            "phase_assemblage", "assebmlage_index", "phase_assemblage_variance"]
-        targets_to_visualize = [t for t in targets_to_visualize if t not in targets_exclude]
-        sids = ["sm000-h2o000", f"sm{str(res).zfill(3)}-h2o000"]
-        df_mids = pd.read_csv("assets/synth-mids.csv")
-        df_synth_bench = df_mids[df_mids["SAMPLEID"].isin(sids) & (df_mids["H2O"] == 0)]
-        bend = df_synth_bench["SAMPLEID"].iloc[0]
-        tend = df_synth_bench["SAMPLEID"].iloc[-1]
-        colormap = plt.colormaps["tab10"]
-        for i, target in enumerate(targets):
-            if target not in targets_to_visualize:
-                continue
+                gt = self._get_subduction_geotherm(seg, slab_position=slab_position)
+
+                df_gt = self._extract_target_along_geotherm(target, gt)
+
+                labels.append(seg.replace("_", " ").lower())
+                Pprof.append(df_gt["P"])
+                tprof.append(df_gt[target])
+
+        except Exception as e:
+            print(f"Error in _generate_subduction_profiles():\n  {e}")
+            return None, None, None, None
+
+        return filename, Pprof, tprof, labels
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _generate_mantle_profiles(self, target, geotherm_type):
+        """
+        """
+        try:
+            Pprof, tprof, labels = [], [], []
+            filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                        f"depth-profile-{geotherm_type}.png")
+
+            for j, pot in enumerate(self.pot_Ts):
+                if geotherm_type == "mor":
+                    gt = self._get_mantle_geotherm(
+                        pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                        crust_thickness=7e3, litho_thickness=1e3)
+                elif geotherm_type == "craton":
+                    gt = self._get_mantle_geotherm(pot)
+
+                df_gt = self._extract_target_along_geotherm(target, gt)
+
+                labels.append(pot)
+                Pprof.append(df_gt["P"])
+                tprof.append(df_gt[target])
+
+        except Exception as e:
+            print(f"Error in _generate_mantle_profiles():\n  {e}")
+            return None, None, None, None
+
+        return filename, Pprof, tprof, labels
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _visualize_depth_profiles(self, geotherm_type="sub", slab_position="slabtop",
+                                  figwidth=6.3, figheight=4.725, fontsize=22):
+        """
+        """
+        try:
+            plt.rcParams["font.size"] = fontsize
+            colormap = plt.colormaps["tab10"]
+
+            if not self.model_built:
+                raise Exception("No GFEM model! Call build() first ...")
+            if not self.results:
+                raise Exception("No results! Call get_results() first ...")
+            if self.target_array is None or self.target_array.size == 0:
+                raise Exception("No target array! Call get_target_array() first ...")
+            if geotherm_type not in ["sub", "craton", "mor"]:
+                raise Exception("Unrecognized geotherm_type argument!")
+
+            if not os.path.exists(self.fig_dir):
+                os.makedirs(self.fig_dir, exist_ok=True)
+
+            # Filter targets
+            targets_exclude = [
+                "phase_assemblage", "assebmlage_index", "phase_assemblage_variance"]
+            trg_vis = [t for t in self.targets_to_visualize if t not in targets_exclude]
+
+            for i, target in enumerate(self.targets):
+                if target not in trg_vis:
+                    continue
+
                 fig, ax1 = plt.subplots(figsize=(figwidth, figheight))
-                Pprof, tprof, labels = [], [], []
-                if type == "sub":
-                    for j, seg in enumerate(segs):
-                        if slab_position == "slabtop":
-                            filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
-                                        f"depth-profile-sub-slabtop.png")
-                            gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
-                        elif slab_position == "slabmoho":
-                            filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
-                                        f"depth-profile-sub-slabmoho.png")
-                            gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
-                        df_gt = self._extract_target_along_geotherm(target, gt)
-                        seg_lab = seg.replace("_", " ").lower()
-                        labels.append(seg_lab)
-                        Pprof.append(df_gt["P"])
-                        tprof.append(df_gt[target])
-                elif type == "craton":
-                    filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
-                                f"depth-profile-craton.png")
-                    for j, pot in enumerate(pot_Ts):
-                        gt = self._get_mantle_geotherm(pot)
-                        df_gt = self._extract_target_along_geotherm(target, gt)
-                        labels.append(pot)
-                        Pprof.append(df_gt["P"])
-                        tprof.append(df_gt[target])
-                elif type == "mor":
-                    filename = (f"{sid}-{perplex_db}-{target.replace("_", "-")}-"
-                                f"depth-profile-mor.png")
-                    for j, pot in enumerate(pot_Ts):
-                        gt = self._get_mantle_geotherm(
-                            pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
-                            crust_thickness=7e3, litho_thickness=1e3)
-                        df_gt = self._extract_target_along_geotherm(target, gt)
-                        labels.append(pot)
-                        Pprof.append(df_gt["P"])
-                        tprof.append(df_gt[target])
+
+                if geotherm_type == "sub":
+                    filename, Pprof, tprof, labels = self._generate_subduction_profiles(
+                        target, slab_position)
+                elif geotherm_type in ["craton", "mor"]:
+                    filename, Pprof, tprof, labels = self._generate_mantle_profiles(
+                        target, geotherm_type)
+
+                # Plot depth profiles along geotherm
                 for j, (Pp, tp, lab) in enumerate(zip(Pprof, tprof, labels)):
                     ax1.plot(tp, Pp, "-", linewidth=2, color=colormap(j), label=lab)
-                target_label = target_labels_map[target]
-                ax1.set_xlabel(f"{target_label} ({target_units_map[target]})")
+
+                # Finalize plot
+                target_label = self.target_labels_map[target]
+                ax1.set_xlabel(f"{target_label} ({self.target_units_map[target]})")
                 ax1.set_ylabel("P (GPa)")
                 ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
                 ax1.xaxis.set_major_formatter(
-                    ticker.FormatStrFormatter(target_digits_map[target]))
+                    ticker.FormatStrFormatter(self.target_digits_map[target]))
                 text_margin_x = 0.04
                 text_margin_y = 0.15
                 text_spacing_y = 0.1
                 depth_conversion = lambda P: P * 30
-                depth_values = depth_conversion(np.linspace(P_min, P_max, len(Pp)))
+                depth_values = depth_conversion(np.linspace(
+                    self.P_min, self.P_max, len(Pp)))
                 ax2 = ax1.secondary_yaxis(
                     "right", functions=(depth_conversion, depth_conversion))
                 ax2.set_ylabel("Depth (km)")
                 plt.legend(loc="upper left", columnspacing=0, handletextpad=0.2,
                            fontsize=fontsize * 0.833)
                 plt.title("Depth Profile")
-                plt.savefig(f"{fig_dir}/{filename}")
+
+                # Save fig
+                plt.savefig(f"{self.fig_dir}/{filename}")
                 plt.close()
                 print(f"  Figure saved to: {filename} ...")
 
-        return None
+        except Exception as e:
+            print(f"Error in _visualize_depth_profiles():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # visualize geotherm assemblages !!
+    def _check_werami_geotherm_paths(self, geotherm_type):
+        """
+        """
+        try:
+            if geotherm_type == "sub":
+                for seg in self.segs:
+                    if self.P_min < 6:
+                        path_top = f"{self.model_out_dir}/slabmoho-{seg}.tab"
+                        path_moho = f"{self.model_out_dir}/slabtop-{seg}.tab"
+                        if not os.path.exists(path_top):
+                            raise Exception(f"No werami data found at {path_top}!")
+                        if not os.path.exists(path_moho):
+                            raise Exception(f"No werami data found at {path_moho}!")
+                    else:
+                        print("  P_min too high to plot subduction geotherms!")
+                        return None
+
+            if geotherm_type == "craton":
+                for pot in self.pot_Ts:
+                    path = f"{self.model_out_dir}/craton-{pot}.tab"
+                    if not os.path.exists(path):
+                        raise Exception(f"No werami data found at {path}!")
+
+            if geotherm_type == "mor":
+                for pot in self.pot_Ts:
+                    path = f"{self.model_out_dir}/mor-{pot}.tab"
+                    if not os.path.exists(path):
+                        raise Exception(f"No werami data found at {path}!")
+
+        except Exception as e:
+            print(f"Error in _check_werami_geotherm_paths():\n  {e}")
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_geotherm_assemblages(self, type="sub", slab_position="slabtop",
+    def _prepare_geotherm_paths_for_assemblages(self, geotherm_type, slab_position):
+        """
+        """
+        try:
+            tabfiles, filenames, gts, labels = [], [], [], []
+
+            if geotherm_type == "sub":
+                for seg in self.segs:
+                    if self.P_min < 6:
+                        labels.append(seg.replace("_", "-").lower())
+                        tabfiles.append(f"{self.model_out_dir}/{slab_position}-{seg}.tab")
+                        filenames.append(f"{self.sid}-{self.perplex_db}-{slab_position}-"
+                                         f"{labels[-1]}-assemblages.png")
+                        gts.append(self._get_subduction_geotherm(
+                            seg, slab_position=slab_position))
+
+            elif geotherm_type in ["craton", "mor"]:
+                for pot in self.pot_Ts:
+                    labels.append(pot)
+                    tabfiles.append(f"{self.model_out_dir}/{geotherm_type}-{pot}.tab")
+                    filenames.append(f"{self.sid}-{self.perplex_db}-{geotherm_type}-"
+                                     f"{pot}-assemblages.png")
+                    if geotherm_type == "craton":
+                        gts.append(self._get_mantle_geotherm(pot))
+                    elif geotherm_type == "mor":
+                        gts.append(self._get_mantle_geotherm(
+                            pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                            crust_thickness=7e3, litho_thickness=1e3))
+
+        except Exception as e:
+            print(f"Error in _prepare_geotherm_paths_for_assemblages():\n  {e}")
+            return None, None, None, None
+
+        return tabfiles, filenames, gts, labels
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_phase_names_for_assemblages(self, modal_thresh):
+        """
+        """
+        try:
+            all_phases = []
+            if "hp" in self.perplex_db:
+                file_patterns = [
+                    os.path.join("gfems", "*hp*", "mor*.tab"),
+                    os.path.join("gfems", "*hp*", "craton*.tab"),
+                    os.path.join("gfems", "*hp*", "slab*.tab"),
+                ]
+            elif self.perplex_db == "stx21":
+                file_patterns = [
+                    os.path.join("gfems", "*stx*", "mor*.tab"),
+                    os.path.join("gfems", "*stx*", "craton*.tab"),
+                    os.path.join("gfems", "*stx*", "slab*.tab"),
+                ]
+
+            file_paths = []
+            for pattern in file_patterns:
+                file_paths.extend(glob.glob(pattern, recursive=True))
+            for file_path in file_paths:
+                df = pd.read_csv(file_path, sep="\\s+", skiprows=8)
+                df = df.dropna(axis=1, how="all")
+                df = df.fillna(0)
+                df = df.drop(["T(K)", "P(bar)"], axis=1)
+                normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
+                duplicate_columns = normalized_columns[
+                    normalized_columns.duplicated()].unique()
+                for base_name in duplicate_columns:
+                    cols_to_combine = df.loc[:, normalized_columns == base_name]
+                    combined_col = cols_to_combine.sum(axis=1)
+                    df[base_name] = combined_col
+                    df = df.drop(cols_to_combine.columns[1:], axis=1)
+                    normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
+                df = df.drop(columns=[col for col in df.columns if
+                                      (df[col] < modal_thresh).all()])
+                all_phases.extend(df.columns)
+
+            phase_names = sorted(set(all_phases))
+            num_colors = len(phase_names)
+            colormap = plt.colormaps["tab20"]
+            colors = [colormap(i) for i in range(num_colors)]
+            color_map = {col_name: colors[idx] for idx, col_name in enumerate(phase_names)}
+
+        except Exception as e:
+            print(f"Error in _get_phase_names_for_assemblages():\n  {e}")
+            return None, None
+
+        return phase_names, color_map
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_geotherm_assemblage_from_tabfile(self, tabfile, modal_thresh):
+        """
+        """
+        try:
+            df = pd.read_csv(tabfile, sep="\\s+", skiprows=8)
+            df = df.dropna(axis=1, how="all")
+            df = df.fillna(0)
+
+            normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
+            duplicate_columns = normalized_columns[normalized_columns.duplicated()].unique()
+
+            for base_name in duplicate_columns:
+                cols_to_combine = df.loc[:, normalized_columns == base_name]
+                combined_col = cols_to_combine.sum(axis=1)
+                df[base_name] = combined_col
+                df = df.drop(cols_to_combine.columns[1:], axis=1)
+                normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
+
+            df = df.drop(columns=[
+                col for col in df.columns if (df[col] < modal_thresh).all()])
+
+        except Exception as e:
+            print(f"Error in _get_geotherm_assemblage_from_tabfile():\n  {e}")
+            return None
+
+        return df
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _visualize_geotherm_assemblages(self, geotherm_type="sub", slab_position="slabtop",
                                         modal_thresh=5, figwidth=6.3, figheight=4.725,
                                         fontsize=22):
         """
         """
-        xi = self.xi
-        sid = self.sid
-        res = self.res
-        h2o = self.h2o
-        segs = self.segs
-        P_min = self.P_min
-        pot_Ts = self.pot_Ts
-        fig_dir = self.fig_dir
-        perplex_db = self.perplex_db
-        model_built = self.model_built
-        model_out_dir = self.model_out_dir
+        try:
+            plt.rcParams["font.size"] = fontsize
 
-        plt.rcParams["font.size"] = fontsize
-        if not model_built:
-            raise Exception("No GFEM model! Call build() first ...")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir, exist_ok=True)
-        if type not in ["sub", "craton", "mor"]:
-            raise Exception("Unrecognized type argument!")
-        if type == "sub":
-            for seg in segs:
-                if P_min < 6:
-                    path_top = f"{model_out_dir}/slabmoho-{seg}.tab"
-                    path_moho = f"{model_out_dir}/slabtop-{seg}.tab"
-                    if not os.path.exists(path_top):
-                        raise Exception(f"No werami data found at {path_top}!")
-                    if not os.path.exists(path_moho):
-                        raise Exception(f"No werami data found at {path_moho}!")
+            if not self.model_built:
+                raise Exception("No GFEM model! Call build() first ...")
+            if not self.results:
+                raise Exception("No results! Call get_results() first ...")
+            if self.target_array is None or self.target_array.size == 0:
+                raise Exception("No target array! Call get_target_array() first ...")
+            if geotherm_type not in ["sub", "craton", "mor"]:
+                raise Exception("Unrecognized geotherm_type argument!")
+
+            if not os.path.exists(self.fig_dir):
+                os.makedirs(self.fig_dir, exist_ok=True)
+
+            # Check for werami output along geotherm path
+            self._check_werami_geotherm_paths(geotherm_type)
+
+            # Handle geotherms, tabfile paths, and labels
+            tabfiles, filenames, gts, labels = self._prepare_geotherm_paths_for_assemblages(
+                geotherm_type, slab_position)
+
+            # Get unique phase names and colormap
+            phase_names, color_map = self._get_phase_names_for_assemblages(modal_thresh)
+
+            for tabfile, filename, gt, lab in zip(tabfiles, filenames, gts, labels):
+                # Get assemblages data and assign colors
+                df = self._get_geotherm_assemblage_from_tabfile(tabfile, modal_thresh)
+                cumulative = np.cumsum(df.drop(["T(K)", "P(bar)"], axis=1).values, axis=1)
+                colors_plot = [
+                    color_map[col] for col in df.drop(["T(K)", "P(bar)"], axis=1).columns]
+
+                # Get geotherm density and H2O profiles
+                df_gt = self._extract_target_along_geotherm("density", gt)
+                Pg, Tg, rhog = df_gt["P"], df_gt["T"], df_gt["density"]
+                df_gt = self._extract_target_along_geotherm("H2O", gt)
+                H2Og = df_gt["H2O"]
+
+                # Plot stable assemblage stackplot
+                fig, axes = plt.subplots(
+                    nrows=2, ncols=1, figsize=(figwidth * 2, figheight * 2))
+
+                ax_stack = axes[0]
+                ax_stack.stackplot(
+                    df["P(bar)"].values / 1e4, df.drop(["T(K)", "P(bar)"], axis=1).values.T,
+                    labels=df.drop(["T(K)", "P(bar)"], axis=1).columns, colors=colors_plot)
+
+                for col, color in enumerate(colors_plot):
+                    ax_stack.plot(
+                        df["P(bar)"].values / 1e4, cumulative[:, col], color="black", lw=0.8)
+
+                # Finalize stackplot
+                ax_stack.set_ylim(0, 100)
+                ax_stack.set_xlabel("")
+                ax_stack.set_xticks([])
+                ax_stack.set_ylabel("Cumulative %")
+                if self.xi and self.h2o:
+                    ax_stack.set_title(
+                        f"Composition: ({self.xi:.2f} $\\xi$, {self.h2o:.2f} wt.% H$_2$O)")
                 else:
-                    print("  P_min too high to plot subduction geotherms!")
-                    return None
-        if type == "craton":
-            for pot in pot_Ts:
-                path = f"{model_out_dir}/craton-{pot}.tab"
-                if not os.path.exists(path):
-                    raise Exception(f"No werami data found at {path}!")
-        if type == "mor":
-            for pot in pot_Ts:
-                path = f"{model_out_dir}/mor-{pot}.tab"
-                if not os.path.exists(path):
-                    raise Exception(f"No werami data found at {path}!")
-        all_phases = []
-        if "hp" in perplex_db:
-            file_patterns = [
-                os.path.join("gfems", "*hp*", "mor*.tab"),
-                os.path.join("gfems", "*hp*", "craton*.tab"),
-                os.path.join("gfems", "*hp*", "slab*.tab"),
-            ]
-        elif perplex_db == "stx21":
-            file_patterns = [
-                os.path.join("gfems", "*stx*", "mor*.tab"),
-                os.path.join("gfems", "*stx*", "craton*.tab"),
-                os.path.join("gfems", "*stx*", "slab*.tab"),
-            ]
-        file_paths = []
-        for pattern in file_patterns:
-            file_paths.extend(glob.glob(pattern, recursive=True))
-        for file_path in file_paths:
-            df = pd.read_csv(file_path, sep="\\s+", skiprows=8)
-            df = df.dropna(axis=1, how="all")
-            df = df.fillna(0)
-            df = df.drop(["T(K)", "P(bar)"], axis=1)
-            normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
-            duplicate_columns = normalized_columns[
-                normalized_columns.duplicated()].unique()
-            for base_name in duplicate_columns:
-                cols_to_combine = df.loc[:, normalized_columns == base_name]
-                combined_col = cols_to_combine.sum(axis=1)
-                df[base_name] = combined_col
-                df = df.drop(cols_to_combine.columns[1:], axis=1)
-                normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
-            df = df.drop(columns=[col for col in df.columns if
-                                  (df[col] < modal_thresh).all()])
-            all_phases.extend(df.columns)
-        phase_names = sorted(set(all_phases))
-        num_colors = len(phase_names)
-        colormap = plt.colormaps["tab20"]
-        colors = [colormap(i) for i in range(num_colors)]
-        color_map = {col_name: colors[idx] for idx, col_name in enumerate(phase_names)}
-        tabfiles, filenames, gts, labels = [], [], [], []
-        if type == "sub":
-            for seg in segs:
-                seg_lab = seg.replace("_", "-").lower()
-                labels.append(seg_lab)
-                if slab_position == "slabtop":
-                    tabfiles.append(f"{model_out_dir}/slabtop-{seg}.tab")
-                    filenames.append(f"{sid}-{perplex_db}-slabtop-{seg_lab}-assemblages.png")
-                    gt = self._get_subduction_geotherm(seg, slab_position="slabtop")
-                    gts.append(gt)
-                elif slab_position == "slabmoho":
-                    tabfiles.append(f"{model_out_dir}/slabmoho-{seg}.tab")
-                    filenames.append(f"{sid}-{perplex_db}-slabmoho-{seg_lab}-"
-                                     f"assemblages.png")
-                    gt = self._get_subduction_geotherm(seg, slab_position="slabmoho")
-                    gts.append(gt)
-        elif type == "craton":
-            for pot in pot_Ts:
-                labels.append(pot)
-                tabfiles.append(f"{model_out_dir}/craton-{pot}.tab")
-                filenames.append(f"{sid}-{perplex_db}-craton-{pot}-assemblages.png")
-                gt = self._get_mantle_geotherm(pot)
-                gts.append(gt)
-        elif type == "mor":
-            for pot in pot_Ts:
-                labels.append(pot)
-                tabfiles.append(f"{model_out_dir}/mor-{pot}.tab")
-                filenames.append(f"{sid}-{perplex_db}-mor-{pot}-assemblages.png")
-                gt = self._get_mantle_geotherm(
-                    pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
-                    crust_thickness=7e3, litho_thickness=1e3)
-                gts.append(gt)
-        for tabfile, filename, gt, lab in zip(tabfiles, filenames, gts, labels):
-            df = pd.read_csv(tabfile, sep="\\s+", skiprows=8)
-            df = df.dropna(axis=1, how="all")
-            df = df.fillna(0)
-            normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
-            duplicate_columns = normalized_columns[normalized_columns.duplicated()].unique()
-            for base_name in duplicate_columns:
-                cols_to_combine = df.loc[:, normalized_columns == base_name]
-                combined_col = cols_to_combine.sum(axis=1)
-                df[base_name] = combined_col
-                df = df.drop(cols_to_combine.columns[1:], axis=1)
-                normalized_columns = df.columns.str.replace(r"\.\d+$", "", regex=True)
-            df = df.drop(columns=[col for col in df.columns if
-                                  (df[col] < modal_thresh).all()])
-            df_gt = self._extract_target_along_geotherm("density", gt)
-            Pg, Tg, rhog = df_gt["P"], df_gt["T"], df_gt["density"]
-            df_gt = self._extract_target_along_geotherm("H2O", gt)
-            H2Og = df_gt["H2O"]
-            fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(figwidth * 2, figheight * 2))
-            colors_plot = [color_map[col] for col in
-                           df.drop(["T(K)", "P(bar)"], axis=1).columns]
-            ax_stack = axes[0]
-            ax_stack.stackplot(df["P(bar)"].values / 1e4,
-                               df.drop(["T(K)", "P(bar)"], axis=1).values.T,
-                               labels=df.drop(["T(K)", "P(bar)"], axis=1).columns,
-                               colors=colors_plot)
-            cumulative = np.cumsum(df.drop(["T(K)", "P(bar)"], axis=1).values, axis=1)
-            for col, color in enumerate(colors_plot):
-                ax_stack.plot(df["P(bar)"].values / 1e4, cumulative[:, col],
-                              color="black", lw=0.8)
-            ax_stack.set_ylim(0, 100)
-            ax_stack.set_xlabel("")
-            ax_stack.set_xticks([])
-            ax_stack.set_ylabel("Cumulative %")
-            ax_stack.set_title(
-                f"Sample composition: ({xi:.2f} $\\xi$, {h2o:.2f} wt.% H$_2$O)")
-            ax_line = axes[1]
-            ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
-            ax_line.set_xlabel("Pressure (GPa)")
-            ax_line.set_ylabel("Density (g/cm$^3$)")
-            lines1, labels1 = ax_line.get_legend_handles_labels()
-            ax_line_sec = ax_line.twinx()
-            ax_line_sec.plot(Pg, H2Og, color="blue", linewidth=2, label="GFEM H$_2$O")
-            ax_line_sec.set_ylabel("H$_2$O (wt.%)")
-            ax_line_sec.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-            if perplex_db == "stx21" or np.all(H2Og == 0):
-                ax_line_sec.set_ylim(-0.04, 1)
-                ax_line_sec.set_yticks([0])
-            lines2, labels2 = ax_line_sec.get_legend_handles_labels()
-            ax_line.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
-            ax_line.set_title(lab)
-            handles, labels = ax_stack.get_legend_handles_labels()
-            sorted_handles_labels = sorted(zip(handles, labels),
-                                           key=lambda x: phase_names.index(x[1]))
-            handles, labels = zip(*sorted_handles_labels)
-            labels = [label.split("(")[0].strip() for label in labels]
-            fig.legend(handles=handles, labels=labels, loc="upper left",
-                       bbox_to_anchor=(0.9, 0.95), ncol=2, title="Stable phases")
-            text_margin_x = 0.02
-            text_margin_y = 0.52
-            text_spacing_y = 0.1
-            plt.savefig(f"{fig_dir}/{filename}")
-            plt.close()
-            print(f"  Figure saved to: {filename} ...")
+                    ax_stack.set_title(
+                        f"Sample: {self.sid}")
 
-        return None
+                # Plot density and H2O profiles
+                ax_line = axes[1]
+                ax_line.plot(Pg, rhog, color="black", linewidth=2, label=f"GFEM $\\rho$")
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # Finalize profile plot
+                ax_line.set_xlabel("Pressure (GPa)")
+                ax_line.set_ylabel("Density (g/cm$^3$)")
+                lines1, labels1 = ax_line.get_legend_handles_labels()
+                ax_line_sec = ax_line.twinx()
+                ax_line_sec.plot(Pg, H2Og, color="blue", linewidth=2, label="GFEM H$_2$O")
+                ax_line_sec.set_ylabel("H$_2$O (wt.%)")
+                ax_line_sec.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+                if self.perplex_db == "stx21" or np.all(H2Og == 0):
+                    ax_line_sec.set_ylim(-0.04, 1)
+                    ax_line_sec.set_yticks([0])
+                lines2, labels2 = ax_line_sec.get_legend_handles_labels()
+                ax_line.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+                ax_line.set_title(lab)
+
+                # Add legend
+                handles, labels = ax_stack.get_legend_handles_labels()
+                sorted_handles_labels = sorted(zip(handles, labels),
+                                               key=lambda x: phase_names.index(x[1]))
+                handles, labels = zip(*sorted_handles_labels)
+                labels = [label.split("(")[0].strip() for label in labels]
+                fig.legend(handles=handles, labels=labels, loc="upper left",
+                           bbox_to_anchor=(0.9, 0.95), ncol=2, title="Stable phases")
+
+                # Save fig
+                plt.savefig(f"{self.fig_dir}/{filename}")
+                plt.close()
+                print(f"  Figure saved to: {filename} ...")
+
+        except Exception as e:
+            print(f"Error in _visualize_geotherm_assemblages():\n  {e}")
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize(self):
         """
@@ -2797,36 +2732,39 @@ class GFEMModel:
             if not self.model_built:
                 raise Exception("No GFEM model! Call build() first ...")
 
+            self._get_normalized_sample_comp()
             self._get_results()
             self._get_target_array()
             self._get_pt_array()
 
-            if not self._check_model_array_images(type="mor", gradient=False):
-                self._visualize_array_image(type="mor", gradient=False)
-            if not self._check_model_array_images(type="sub", gradient=False):
-                self._visualize_array_image(type="sub", gradient=False)
-            if not self._check_model_array_images(type="craton", gradient=False):
-                self._visualize_array_image(type="craton", gradient=False)
-            if not self._check_model_array_images(type="mor", gradient=True):
-                self._visualize_array_image(type="mor", gradient=True)
-            if not self._check_model_array_images(type="sub", gradient=True):
-                self._visualize_array_image(type="sub", gradient=True)
-            if not self._check_model_array_images(type="craton", gradient=True):
-                self._visualize_array_image(type="craton", gradient=True)
+            if not self._check_model_array_images(geotherm_type="mor", gradient=False):
+                self._visualize_array_image(geotherm_type="mor", gradient=False)
+            if not self._check_model_array_images(geotherm_type="sub", gradient=False):
+                self._visualize_array_image(geotherm_type="sub", gradient=False)
+            if not self._check_model_array_images(geotherm_type="craton", gradient=False):
+                self._visualize_array_image(geotherm_type="craton", gradient=False)
+            if not self._check_model_array_images(geotherm_type="mor", gradient=True):
+                self._visualize_array_image(geotherm_type="mor", gradient=True)
+            if not self._check_model_array_images(geotherm_type="sub", gradient=True):
+                self._visualize_array_image(geotherm_type="sub", gradient=True)
+            if not self._check_model_array_images(geotherm_type="craton", gradient=True):
+                self._visualize_array_image(geotherm_type="craton", gradient=True)
             if not self._check_model_array_surfs():
-                self._visualize_target_surf()
+                self._visualize_array_surf()
 
             if not self._check_model_depth_profile_images():
-                self._visualize_depth_profiles(type="mor")
-                self._visualize_depth_profiles(type="craton")
-                self._visualize_depth_profiles(type="sub", slab_position="slabtop")
-                self._visualize_depth_profiles(type="sub", slab_position="slabmoho")
+                self._visualize_depth_profiles(geotherm_type="mor")
+                self._visualize_depth_profiles(geotherm_type="craton")
+                self._visualize_depth_profiles(geotherm_type="sub", slab_position="slabtop")
+                self._visualize_depth_profiles(geotherm_type="sub", slab_position="slabmoho")
 
             if not self._check_model_gt_assemblages_images():
-                self._visualize_geotherm_assemblages(type="mor")
-                self._visualize_geotherm_assemblages(type="craton")
-                self._visualize_geotherm_assemblages(type="sub", slab_position="slabtop")
-                self._visualize_geotherm_assemblages(type="sub", slab_position="slabmoho")
+                self._visualize_geotherm_assemblages(geotherm_type="mor")
+                self._visualize_geotherm_assemblages(geotherm_type="craton")
+                self._visualize_geotherm_assemblages(
+                    geotherm_type="sub", slab_position="slabtop")
+                self._visualize_geotherm_assemblages(
+                    geotherm_type="sub", slab_position="slabmoho")
 
         except Exception as e:
             print(f"Error in visualize():\n  {e}")
@@ -2834,7 +2772,6 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.4.           Build GFEM Models             !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def build(self):
         """
