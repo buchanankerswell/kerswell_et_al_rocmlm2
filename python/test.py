@@ -16,14 +16,14 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Testing gfem models
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    res, src, samp, config = 32, "assets/synth-mids.csv", "sm005-h2o005", "assets/test.yaml"
-
-    # hp model
-    model_shallow = GFEMModel()
-    model_shallow.build()
-
-    model_shallow = GFEMModel(config_yaml=config)
-    model_shallow.build()
+#    res, src, samp, config = 32, "assets/synth-mids.csv", "sm005-h2o005", "assets/test.yaml"
+#
+#    # hp model
+#    model_shallow = GFEMModel()
+#    model_shallow.build()
+#
+#    model_shallow = GFEMModel(config_yaml=config)
+#    model_shallow.build()
 #
 #    # hp model
 #    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973

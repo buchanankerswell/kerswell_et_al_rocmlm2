@@ -35,23 +35,38 @@ class GFEMModel:
                  res=32, P_min=0.1, P_max=8.1, T_min=273, T_max=1973, config_yaml=None,
                  verbose=1):
         """
-        A class for constructing and managing a Gibbs Free Energy Minimization Model (GFEM).
-        GFEM Models are built with Perple_X v.7.0.9.
+        Initializes the GFEMModel with the given parameters or a configuration YAML file.
 
         Parameters:
-            perplex_db (str): Thermodynamic dataset to be used in Perple_X
-            sid (str): Sample ID for the model. Must be found in source.
-            source (str): Data source (.csv file) containing sample ids and chemical
+            perplex_db (str): Thermodynamic dataset for Perple_X (default: 'hp02').
+                              Accepted values: ['hp02', 'hp11', 'hp622', 'hp633', 'stx21'].
+            sid (str): Sample ID to identify the model, must be present in the source file.
+            source (str): Path to the CSV file containing sample IDs and chemical
                           compositions.
-            res (int, optional): Resolution of the model grid (default is 128).
-            P_min (int, optional): Minimum pressure (default is 1 GPa).
-            P_max (int, optional): Maximum pressure (default is 28 GPa).
-            T_min (int, optional): Minimum temperature (default is 773 K).
-            T_max (int, optional): Maximum temperature (default is 2273 K).
-          verbose (int, optional): Verbosity level (default is 1).
+            res (int): Resolution of the model grid (default: 32).
+            P_min (float): Minimum pressure for the model in GPa (default: 0.1 GPa).
+            P_max (float): Maximum pressure for the model in GPa (default: 8.1 GPa).
+            T_min (float): Minimum temperature for the model in K (default: 273 K).
+            T_max (float): Maximum temperature for the model in K (default: 1973 K).
+            config_yaml (str, optional): Path to a YAML file containing configuration
+                                         parameters to override defaults.
+            verbose (int): Verbosity level (default: 1).
+
+        Attributes:
+            config_yaml (str): Stores the path to the configuration YAML file (if provided).
+            verbose (int): Verbosity level for output and logging.
+            model_built (bool): Indicates whether the GFEM model has been successfully built.
+            timeout (int): Computed timeout based on resolution, used for time-limited tasks.
+            model_out_dir (str): Directory path where model output files will be stored.
+            log_file (str): File path for the log output of the model.
+            fig_dir (str): Directory path where figures will be stored.
 
         Raises:
-            Exception: If the specified thermodynamic dataset is unrecognized.
+            ValueError: If an unrecognized thermodynamic dataset is provided.
+
+        Notes:
+            If a config_yaml is provided, all other parameters (except verbose) are ignored
+            and values are loaded from the YAML file instead.
         """
         if config_yaml:
             with open(config_yaml, "r") as file:
@@ -77,6 +92,7 @@ class GFEMModel:
 
         self.config_yaml = config_yaml
         self.verbose = verbose
+
         self.model_built = False
         self.timeout = (self.res**2) * 3
         self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
@@ -97,12 +113,33 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_global_options(self):
         """
-        Loads global options and configurations for the model, including:
-            Random seed
-            Timeout based on resolution
-            Potential temperatures and segments for depth profiles
-            Oxide components and targets (rock properties) for visualization
-            Output directories for the model and figures
+        Loads and configures global options for the GFEM model. If a configuration YAML file
+        is provided, options are loaded from the file; otherwise, default values are used.
+
+        Global options include:
+            - Random seed for reproducibility
+            - Numerical precision (digits) for model outputs
+            - Potential temperatures (pot_Ts) for depth profile calculations
+            - Segments (segs) for geographical profiles (e.g., subduction zones)
+            - Target properties (targets_to_visualize) for visualization (e.g., density)
+            - Plot settings for visual output (e.g., figure resolution, axis color)
+
+        Attributes:
+            seed (int): Random seed used for ensuring reproducibility of results.
+            digits (int): Number of digits for rounding numerical values in outputs.
+            pot_Ts (list): List of potential temperatures in Kelvin for depth profile
+                           calculations.
+            segs (list): List of segment names representing specific geographic regions.
+            targets_to_visualize (list): List of rock properties (e.g., density, Vp, Vs)
+                                         for visualization.
+
+        Notes:
+            - If a config_yaml is provided, the global options are read from the file.
+            - Plot settings are updated using matplotlib's rcParams for consistent figure
+              output.
+
+        Exceptions:
+            Logs an error message if any issue occurs while loading global options.
         """
         try:
             if self.config_yaml:
@@ -143,12 +180,41 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_perplex_options(self):
         """
-        Loads configuration settings for Perple_X based on the selected dataset.
+        Loads and configures options specific to Perple_X based on the selected
+        thermodynamic dataset.
 
-        Prepares configuration strings for Perple_X programs Build and Werami.
+        This method handles:
+            - Loading of oxides used in the Gibbs Free Energy Minimization (GFEM) model.
+            - Setting up configuration strings for Perple_X programs like Build and Werami.
+            - Assigning temperature, melt, fluid, and solid properties from the selected
+              dataset.
+            - Defining excluded mineral phases and selected phases for the model.
+
+        Attributes:
+            ox_gfem (list): List of oxides included in the GFEM model.
+            T_melt (int or str): Melting temperature (in Kelvin) or a default value for melt.
+            melt_mod (str): Modifier for the melt model used in Perple_X.
+            td_data_file (str): Path to the thermodynamic data file.
+            sl_data_file (str): Path to the solution model data file.
+            melt_is_fluid (str): Indicator for whether melt behaves as fluid.
+            em_exclude (list): Sorted list of excluded mineral phases.
+            sl_include (list): Sorted list of included solid phases in the assemblages.
+            fluid_in_properties (str): Indicator for including fluid in thermodynamic
+                                       properties.
+            fluid_in_assemblages (str): Indicator for including fluid in assemblages.
 
         Raises:
-            ValueError: If the dataset configuration is invalid or missing.
+            ValueError: If the specified thermodynamic dataset configuration is missing
+                        or unrecognized.
+
+        Notes:
+            - If a config_yaml is provided, options are loaded from the file.
+            - Each dataset (e.g., 'hp02', 'hp11', 'hp622', etc.) has its own set of
+              predefined configurations, which include temperature settings,
+              included/excluded phases, and file paths for data sources.
+
+        Exceptions:
+            Logs an error message if any issue occurs during the loading of Perple_X options.
         """
         try:
             if self.config_yaml:
@@ -266,13 +332,13 @@ class GFEMModel:
         formatting, and labels for various variables. Adds mappings for oxides present
         in the `ox_gfem` attribute.
 
-        Inputs:
+        Attributes:
             self.melt_mod: Melt modifier string for melt fraction.
             self.ox_gfem: List of oxides to map for output.
 
         Outputs:
             Initializes `werami_output_map`, `target_units_map`, arget_digits_map`,
-              `target_labels_map` attributes.
+            `target_labels_map` attributes.
             Populates `targets` with keys from the label map except 'P' and 'T'.
         """
         try:
@@ -661,10 +727,12 @@ class GFEMModel:
                 os.path.exists(f"{self.model_out_dir}/assemblages.csv")):
                 self.model_built = True
 
-                if self.verbose >= 1:
+                if self.verbose >= 2:
                     print(f"  Found {self.perplex_db} GFEM model for sample {self.sid}!")
 
                 try:
+                    self._get_normalized_sample_comp()
+                    self._get_sample_features()
                     self._get_results()
                     self._get_target_array()
                     self._get_pt_array()
@@ -2796,8 +2864,7 @@ class GFEMModel:
 ## .2.   Build GFEM for RocMLM training data     !!! ##
 #######################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_sampleids(filepath, batch="all", n_batches=8):
+def get_sample_ids(filepath, batch="all", n_batches=8):
     """
     Retrieves SAMPLEIDs from a CSV file.
 
@@ -2821,12 +2888,11 @@ def get_sampleids(filepath, batch="all", n_batches=8):
         sampleids = df["SAMPLEID"].values
 
     except Exception as e:
-        print(f"Error in get_sampleids():\n  {e}")
+        print(f"Error in get_sample_ids():\n  {e}")
         return None
 
     return sampleids
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def gfem_itr(args):
     """
@@ -2864,53 +2930,80 @@ def gfem_itr(args):
     return iteration
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def build_gfem_models(source, perplex_db="hp02", res=64, Pmin=0.1, Pmax=28, Tmin=773,
-                      Tmax=2273, sampleids=None, nprocs=os.cpu_count() - 2, verbose=1):
+def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8.1,
+                      T_min=273, T_max=1973, sids=None, nprocs=os.cpu_count() - 2,
+                      config_yaml=None, verbose=1):
     """
-    Build GFEM models for specified sample IDs using a Perple_X database.
+    Builds GFEM models for specified sample IDs using a Perple_X database.
 
-    This function reads sample IDs from a specified source, validates them,
-    and builds GFEM models in parallel using a specified number of processes.
+    This function processes sample IDs from a provided source and constructs
+    Gibbs Free Energy minimization models (GFEM) across a set of pressure-temperature
+    conditions. The models are built in parallel to maximize efficiency, and custom
+    configuration options can be loaded from a YAML file.
 
     Parameters:
-        source (str): Path to the source file containing sample IDs.
-        perplex_db (str): The database for Perple_X (default is "hp02").
-        res (int): Resolution for the models (default is 64).
-        Pmin (float): Minimum pressure for the model (default is 0.1).
-        Pmax (float): Maximum pressure for the model (default is 28).
-        Tmin (float): Minimum temperature for the model (default is 773).
-        Tmax (float): Maximum temperature for the model (default is 2273).
-        sampleids (list, optional): List of sample IDs to process.
-                                    If None, all IDs are read from the source.
-        nprocs (int): Number of processes for parallel execution
-                      (default is number of CPUs - 2).
-        verbose (int): Verbosity level for logging (default is 1).
+        source (str, optional): Path to the source file containing sample IDs.
+                                If not specified, it is loaded from the YAML configuration.
+        perplex_db (str, optional): Name of the Perple_X database to use
+                                    (default is "hp02").
+        res (int, optional): Grid resolution for the models (default is 32).
+        P_min (float, optional): Minimum pressure for the model in kilobars
+                                 (default is 0.1 GPa).
+        P_max (float, optional): Maximum pressure for the model in kilobars
+                                 (default is 8.1 GPa).
+        T_min (float, optional): Minimum temperature for the model in Kelvin
+                                 (default is 273 K).
+        T_max (float, optional): Maximum temperature for the model in Kelvin
+                                 (default is 1973 K).
+        sids (list, optional): A list of sample IDs to process. If None, sample IDs
+                               are read from the source file.
+        nprocs (int, optional): Number of parallel processes to use for model building
+                                (default is the number of CPUs minus 2).
+        config_yaml (str, optional): Path to a YAML configuration file that can
+                                     override the above parameters.
+        verbose (int, optional): Verbosity level for logging information (default is 1).
 
     Returns:
         list: A list of successfully built GFEMModel instances.
+
+    Raises:
+        Exception: If the source file or sample IDs are invalid or if model
+                   building encounters an error.
     """
     try:
+        if config_yaml:
+            # Load configuration yaml
+            with open(config_yaml, "r") as file:
+                config_data = yaml.safe_load(file)
+            perplex_options = config_data["perplex_options"]
+            res = perplex_options["res"]
+            P_min = perplex_options["P_min"]
+            P_max = perplex_options["P_max"]
+            T_min = perplex_options["T_min"]
+            T_max = perplex_options["T_max"]
+            source = perplex_options["source"]
+            perplex_db = perplex_options["perplex_db"]
+
         # Validate source and sample IDs
         if os.path.exists(source):
-            if sampleids is None:
-                sampleids = get_sampleids(source)
+            if sids is None:
+                sids = get_sample_ids(source)
             else:
-                valid_sampleids = get_sampleids(source)
-                if not set(sampleids).issubset(valid_sampleids):
-                    raise Exception(f"Sample IDs {sampleids} not found in source: {source}!")
+                valid_sids = get_sample_ids(source)
+                if not set(sids).issubset(valid_sids):
+                    raise Exception(f"Sample IDs {sids} not found in source: {source}!")
         else:
             raise Exception(f"Source {source} does not exist!")
 
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print(f"Building {perplex_db} GFEM models for {len(sampleids)} samples ...")
+        print(f"Building {perplex_db} GFEM models for {len(sids)} samples ...")
 
         # Set up the number of processes
-        nprocs = min(nprocs, os.cpu_count() - 2, len(sampleids))
+        nprocs = min(nprocs, os.cpu_count() - 2, len(sids))
 
         # Prepare arguments for model building
-        run_args = [(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax) for
-                    sampleid in sampleids]
+        run_args = [
+            (perplex_db, sid, source, res, P_min, P_max, T_min, T_max) for sid in sids]
 
         # Build models in parallel
         models = []
@@ -2938,33 +3031,30 @@ def build_gfem_models(source, perplex_db="hp02", res=64, Pmin=0.1, Pmax=28, Tmin
     return gfems
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# main !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
-    Main function to build GFEM models from specified sources and databases.
+    Main function for building GFEM models from predefined YAML configurations.
 
-    It retrieves sample IDs from specified CSV files and builds models for
-    different pressure and temperature ranges based on the chosen database.
+    The function loads configuration files for various GFEM models from specified
+    YAML sources, iterates through them, and builds models for each configuration.
+    Models are constructed based on the database, pressure, and temperature ranges
+    defined in the YAML files.
+
+    The function handles potential errors during the build process and prints a
+    summary message upon successful completion.
+
+    Raises:
+        Exception: Catches and prints any errors that occur during model building.
     """
     try:
-        res, gfems = 64, {}
-        sources = {"m": "assets/synth-mids.csv", "r": "assets/synth-rnds.csv"}
+        gfems = {}
+        configs = {"hp02m": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
+                   "hp02r": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml",
+                   "stx21m": "assets/config_yamls/dry-deep-mantle-stx21m.yaml",
+                   "stx21r": "assets/config_yamls/dry-deep-mantle-stx21r.yaml"}
 
-        for name, src in sources.items():
-            sids = get_sampleids(src)
-
-            for db in ["hp02", "stx21"]:
-                # Define pressure and temperature ranges based on the database
-                if db == "hp02":
-                    P_min, P_max, T_min, T_max = 0.1, 8.1, 273, 1973
-                elif db == "stx21":
-                    P_min, P_max, T_min, T_max = 8.1, 136.1, 773, 4273
-                    # Filter sample IDs for the stx21 database
-                    sids = [s for s in sids if "h2o000" in s]
-
-                # Build GFEM models for the current source and database
-                build_gfem_models(src, db, res, P_min, P_max, T_min, T_max, sids)
+        for name, yaml in configs.items():
+            build_gfem_models(config_yaml=yaml)
 
     except Exception as e:
         print(f"Error in main():\n  {e}")
