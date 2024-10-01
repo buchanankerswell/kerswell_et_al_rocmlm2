@@ -11,7 +11,6 @@ import shutil
 import zipfile
 import datetime
 import platform
-from git import Repo
 import urllib.request
 import importlib.metadata
 
@@ -97,19 +96,6 @@ def download_and_unzip(url, filename, destination):
         raise Exception(f"An unexpected error occurred:\n  {e}")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def download_github_submodule(repository_url, submodule_dir, commit_hash):
-    """
-    """
-    try:
-        if os.path.exists(submodule_dir):
-            shutil.rmtree(submodule_dir)
-        print(f"Cloning {repository_url} repo [commit: {commit_hash}] ...")
-        repo = Repo.clone_from(repository_url, submodule_dir, recursive=True)
-        repo.git.checkout(commit_hash)
-    except Exception as e:
-        print(f"An error occurred while cloning the GitHub repository:\n  {e}")
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def compile_perplex():
     """
     """
@@ -122,19 +108,6 @@ def compile_perplex():
         print("Perple_X install successful!")
     except Exception as e:
         print(f"Error in compile_perplex():\n  {e}")
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def compile_hymatz():
-    """
-    """
-    try:
-        url = "https://github.com/wangyefei/HyMaTZ.git"
-        download_github_submodule(url, "python/tmp", "411a378")
-        shutil.move("python/tmp/HyMaTZ", "python/HyMaTZ")
-        shutil.rmtree("python/tmp")
-        print("HyMaTZ install successful!")
-    except Exception as e:
-        print(f"Error in compile_hymatz():\n  {e}")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
@@ -150,11 +123,6 @@ def main():
         print("Data assets found!")
 
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
-    if not os.path.exists("python/HyMaTZ"):
-        compile_hymatz()
-    else:
-        print("HyMaTZ programs found!")
 
     if not os.path.exists("Perple_X"):
         compile_perplex()
