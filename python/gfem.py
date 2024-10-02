@@ -754,7 +754,7 @@ class GFEMModel:
             os.makedirs(self.model_out_dir, exist_ok=True)
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    #+ .1.1.          Perple_X Functions             !!! ++
+    #+ .1.1.                Perple_X                 !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_subduction_geotherm(self, segment="Central_Cascadia", slab_position="slabmoho"):
@@ -2221,9 +2221,9 @@ class GFEMModel:
                     continue
 
                 target_label = self.target_labels_map[target]
+                title = (f"{target_label} ({self.target_units_map.get(target, '')})")
                 filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
                             f"{geotherm_type}.png")
-                title = (f"{target_label} ({self.target_units_map.get(target, '')})")
 
                 # Get square array
                 square_target = self._get_square_target_for_array_image(i, gradient)
@@ -2261,7 +2261,6 @@ class GFEMModel:
                 # Save fig
                 plt.savefig(f"{self.fig_dir}/{filename}")
                 plt.close()
-
                 print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
@@ -2342,6 +2341,7 @@ class GFEMModel:
                 # Save fig
                 plt.savefig(f"{self.fig_dir}/{filename}")
                 plt.close()
+                print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
             print(f"Error in _visualize_array_surf():\n  {e}")

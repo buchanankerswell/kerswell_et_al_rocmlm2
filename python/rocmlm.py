@@ -47,6 +47,9 @@ class RocMLM:
         self.config_yaml = config_yaml
         self.gfem_models = sorted(gfem_models, key=lambda model: model.sid)
 
+        if self.ml_algo not in ["DT", "KN", "NN"]:
+            raise Exception("Unrecognized ml_algo! Must be 'DT', 'KN' or 'NN' ...")
+
         self.model_trained = False
         self.model_cross_validated = False
         self.model_out_dir = "rocmlms"
@@ -56,20 +59,12 @@ class RocMLM:
         self._get_gfem_model_metadata()
         self._get_rocmlm_training_data()
 
-        if self.ml_algo == "NN":
-            self.model_prefix = (f"{self.ml_algo}{self.sum_nodes}-"
-                                 f"S{self.rocmlm_feature_array_shape_square[0]}-"
-                                 f"W{self.rocmlm_feature_array_shape_square[1]}-"
-                                 f"F{self.rocmlm_feature_array_shape_square[3]}-"
-                                 f"F{len(self.rocmlm_targets)}-"
-                                 f"{self.gfem_db}")
-        else:
-            self.model_prefix = (f"{self.ml_algo}-"
-                                 f"S{self.rocmlm_feature_array_shape_square[0]}-"
-                                 f"W{self.rocmlm_feature_array_shape_square[1]}-"
-                                 f"F{self.rocmlm_feature_array_shape_square[3]}-"
-                                 f"F{len(self.rocmlm_targets)}-"
-                                 f"{self.gfem_db}")
+        self.model_prefix = (f"{self.ml_algo}-"
+                             f"S{self.rocmlm_feature_array_shape_square[0]}-"
+                             f"R{self.rocmlm_feature_array_shape_square[1]}-"
+                             f"F{self.rocmlm_feature_array_shape_square[3]}-"
+                             f"T{len(self.rocmlm_targets)}-"
+                             f"{self.gfem_db}")
         self.fig_dir = (f"figs/rocmlm/{self.model_prefix}")
         self.rocmlm_path = f"{self.model_out_dir}/{self.model_prefix}-pretrained.pkl"
         self.scaler_X_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_X.pkl"
@@ -93,16 +88,18 @@ class RocMLM:
                     "seed": 42,
                     "digits": 3,
                     "nprocs": os.cpu_count() - 2,
+                    "palette": "bone",
                     "pot_Ts": [1173, 1573, 1773],
                     "segs": ["Central_Cascadia", "Kamchatka"]
                 }
 
             # Assign values from global options
+            self.segs = global_options["segs"]
             self.seed = global_options["seed"]
             self.digits = global_options["digits"]
             self.nprocs = global_options["nprocs"]
             self.pot_Ts = global_options["pot_Ts"]
-            self.segs = global_options["segs"]
+            self.palette = global_options["palette"]
 
             # Plot settings
             plt.rcParams.update({
@@ -134,6 +131,7 @@ class RocMLM:
             else:
                 rocmlm_options = {
                     "kfolds": 5,
+                    "cross_validate": False,
                     "rocmlm_features": ["XI_FRAC", "H2O"],
                     "rocmlm_targets": ["density", "Vp", "Vs", "melt_fraction", "H2O"]
                 }
@@ -180,6 +178,7 @@ class RocMLM:
 
             # Assign values from rocmlm_options and ml_algorithms
             self.kfolds = rocmlm_options["kfolds"]
+            self.cross_validate = rocmlm_options["cross_validate"]
             self.rocmlm_features = rocmlm_options["rocmlm_features"]
             self.rocmlm_targets = rocmlm_options["rocmlm_targets"]
 
@@ -207,7 +206,6 @@ class RocMLM:
                     learning_rate_init=default_hyperparams["learning_rate_init"],
                     random_state=self.seed
                 )
-                self.sum_nodes = sum(default_hyperparams["hidden_layer_sizes"])
                 self.max_iter = default_hyperparams["max_iter"]
 
         except Exception as e:
@@ -234,7 +232,7 @@ class RocMLM:
         """
         try:
             if not self.gfem_models:
-                raise Exception("No GFEM models to compile !")
+                raise Exception("No GFEM models to compile!")
 
             gfem_sids = [m.sid for m in self.gfem_models]
 
@@ -276,13 +274,13 @@ class RocMLM:
         """
         try:
             if not self.gfem_models:
-                raise Exception("No GFEM models to compile !")
+                raise Exception("No GFEM models to compile!")
 
             pt_train = np.stack([m.pt_array for m in self.gfem_models])
 
             ft_idx = [self.gfem_features.index(f)
                       for f in self.rocmlm_features if f in self.gfem_features]
-            self.rocmlm_features = [self.gfem_features[i] for i in ft_idx]
+            self.rocmlm_features = [self.gfem_features[i] for i in ft_idx] + ["P", "T"]
 
             feat_train = []
             for m in self.gfem_models:
@@ -303,17 +301,16 @@ class RocMLM:
                 -1, rocmlm_target_array.shape[-1])
             rocmlm_target_array = rocmlm_target_array[:, t_idx]
 
-            M = int(len(self.gfem_models))     # Number of samples
-            W = int((self.gfem_res + 1) ** 2)  # PT grid size
-            w = int(np.sqrt(W))                # P or T array size
-            f = int(len(self.rocmlm_features)) # Number of rocmlm features
-            F = int(f + 2)                     # Number of rocmlm features + PT
+            S = int(len(self.gfem_models))     # Number of samples
+            R = int((self.gfem_res + 1) ** 2)  # PT grid size
+            r = int(np.sqrt(R))                # PT grid resolution
+            F = int(len(self.rocmlm_features)) # Number of rocmlm features + PT
             T = int(len(self.rocmlm_targets))  # Number of rocmlm targets
 
-            rocmlm_target_array_shape = (M, W, T)
-            rocmlm_feature_array_shape = (M, W, F)
-            rocmlm_target_array_shape_square = (M, w, w, T)
-            rocmlm_feature_array_shape_square = (M, w, w, F)
+            rocmlm_target_array_shape = (S, R, T)
+            rocmlm_feature_array_shape = (S, R, F)
+            rocmlm_target_array_shape_square = (S, r, r, T)
+            rocmlm_feature_array_shape_square = (S, r, r, F)
 
             self.rocmlm_target_array = rocmlm_target_array
             self.rocmlm_feature_array = rocmlm_feature_array
@@ -336,55 +333,51 @@ class RocMLM:
     def _check_existing_model(self):
         """
         """
-        if os.path.exists(self.rocmlm_path):
-            try:
+        try:
+            if os.path.exists(self.rocmlm_path):
                 if self.verbose >= 1:
-                    print(f"Found pretrained model {self.rocmlm_path} !")
+                    print(f"Found pretrained model {self.model_prefix}!")
+                self.load_pretrained_model(
+                    self.rocmlm_path, self.scaler_X_path, self.scaler_y_path)
+            else:
+                os.makedirs(self.model_out_dir, exist_ok=True)
 
-                self.model_trained = True
-                self.load_pretrained_model(f"{self.rocmlm_path}")
-
-            except Exception as e:
-                print(f"Error in _check_existing_model():\n  {e}")
-        else:
-            os.makedirs(self.model_out_dir, exist_ok=True)
+        except Exception as e:
+            print(f"Error in _check_existing_model():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def load_pretrained_model(self, file_path):
+    def load_pretrained_model(self, rocmlm_path, scaler_X_path, scaler_y_path):
         """
         """
-        if os.path.exists(file_path):
-            try:
+        try:
+            if (os.path.exists(rocmlm_path) and  os.path.exists(scaler_X_path) and
+                os.path.exists(scaler_y_path)):
                 if self.verbose >= 1:
-                    print(f"Loading RocMLM object from {file_path} ...")
+                    print(f"  Loading RocMLM object from {rocmlm_path} ...")
+                    print(f"  Loading RocMLM object from {scaler_X_path} ...")
+                    print(f"  Loading RocMLM object from {scaler_y_path} ...")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
-                rocmlm = joblib.load(self.rocmlm_path)
-                scaler_X = joblib.load(self.scaler_X_path)
-                scaler_y = joblib.load(self.scaler_y_path)
-
-                self._get_gfem_model_metadata()
-                self._get_rocmlm_training_data()
-
-                self.rocmlm = rocmlm
+                self.model_trained = True
+                self.rocmlm = joblib.load(rocmlm_path)
+                self.rocmlm_scaler_X = joblib.load(scaler_X_path)
+                self.rocmlm_scaler_y = joblib.load(scaler_y_path)
 
                 rocmlm_target_array = self.rocmlm_target_array.copy()
                 rocmlm_feature_array = self.rocmlm_feature_array.copy()
                 rocmlm_target_array_shape_square = self.rocmlm_target_array_shape_square
 
                 X, y = rocmlm_feature_array.copy(), rocmlm_target_array.copy()
-                X_scaled = scaler_X.transform(X)
-                pred_scaled = rocmlm.predict(X_scaled)
-                pred_original = scaler_y.inverse_transform(pred_scaled)
-                rocmlm_prediction_array_square = pred_original.reshape(
+                X_scaled = self.rocmlm_scaler_X.transform(X)
+                pred_scaled = self.rocmlm.predict(X_scaled)
+                pred_original = self.rocmlm_scaler_y.inverse_transform(pred_scaled)
+                self.rocmlm_prediction_array_square = pred_original.reshape(
                     rocmlm_target_array_shape_square)
+            else:
+                print(f"File {rocmlm_path} does not exist!")
 
-                self.rocmlm_prediction_array_square = rocmlm_prediction_array_square
-
-            except Exception as e:
-                print(f"Error in load_pretrained_model():\n  {e}")
-        else:
-            print(f"File {file_path} does not exist !")
+        except Exception as e:
+            print(f"Error in load_pretrained_model():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _scale_arrays(self, feature_array, target_array):
@@ -490,7 +483,9 @@ class RocMLM:
             print(f"    features: {ftwrp}")
             print(f"    targets: {tgwrp}")
             print(f"    features array shape: {self.rocmlm_feature_array.shape}")
+            print(f"    features square shape: {self.rocmlm_feature_array_shape_square}")
             print(f"    targets array shape: {self.rocmlm_target_array.shape}")
+            print(f"    targets square shape: {self.rocmlm_target_array_shape_square}")
             print(f"    hyperparameters:")
             for key, value in self.rocmlm_hyperparams.items():
                 print(f"        {key}: {value}")
@@ -559,19 +554,23 @@ class RocMLM:
                 y_test_original, y_pred_original, multioutput="raw_values"))
             r2_test = r2_score(y_test_original, y_pred_original, multioutput="raw_values")
 
+            # Normalize RMSE: rmse / (max - min of y_test_original) * 100
+            y_range = np.ptp(y_test_original, axis=0)
+            normalized_rmse = (rmse_test / y_range) * 100
+
         except Exception as e:
             print(f"Error in _kfold_itr():\n  {e}")
             return (None, None, None, None)
 
-        return (loss_curve, rmse_test, r2_test, training_time)
+        return (loss_curve, normalized_rmse, r2_test, training_time)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_kfold_results(self, results):
         """
         """
         try:
-            M = self.rocmlm_feature_array_shape_square[0]
-            w = self.rocmlm_feature_array_shape_square[1]
+            S = self.rocmlm_feature_array_shape_square[0]
+            r = self.rocmlm_feature_array_shape_square[1]
 
             loss_curves = []
             training_times = []
@@ -596,20 +595,20 @@ class RocMLM:
             training_time_std = np.std(training_times)
 
             if any("sm" in sample or "sr" in sample for sample in self.gfem_sids):
-                sample_label = f"SMA{M}"
+                sample_label = f"SMA{S}"
             elif any("st" in sample for sample in self.gfem_sids):
-                sample_label = f"SMAT{M}"
+                sample_label = f"SMAT{S}"
             elif any("sm" in sample for sample in self.gfem_sids):
-                sample_label = f"SMAM{M}"
+                sample_label = f"SMAM{S}"
             elif any("sb" in sample for sample in self.gfem_sids):
-                sample_label = f"SMAB{M}"
+                sample_label = f"SMAB{S}"
             elif any("sr" in sample for sample in self.gfem_sids):
-                sample_label = f"SMAR{M}"
+                sample_label = f"SMAR{S}"
 
             cv_info = {
                 "model": [self.ml_algo],
                 "sample": [sample_label],
-                "size": [(w - 1) ** 2],
+                "size": [(r - 1) ** 2],
                 "n_targets": [len(self.rocmlm_targets)],
                 "k_folds": [self.kfolds],
                 "training_time_mean": [round(training_time_mean, 5)],
@@ -627,7 +626,7 @@ class RocMLM:
                 print(f"{self.rocmlm_label} performance:")
                 print(f"    training time: {training_time_mean:.5f} ± "
                       f"{training_time_std:.5f}")
-                print(f"    rmse test:")
+                print(f"    rmse test (normalized) %:")
                 for r, e, p in zip(rmse_test_mean, rmse_test_std, self.rocmlm_targets):
                     print(f"        {p}: {r:.5f} ± {e:.5f}")
                 print(f"    r2 test:")
@@ -678,7 +677,8 @@ class RocMLM:
                 raise Exception("No ML model! Call _configure_rocmlm() first ...")
 
             if not self.model_cross_validated:
-                raise Exception("ML model not cross validated! Call _kfold_cv() first ...")
+                print("Warning: ML model not cross validated. "
+                      "Cannot provide performance metrics ...")
 
             if self.rocmlm_feature_array.size == 0:
                 raise Exception("No training features!")
@@ -810,8 +810,8 @@ class RocMLM:
 
             # Filter based on minimum and maximum P and T values
             geotherm = geotherm[
-                (geotherm["P"] >= self.P_min) & (geotherm["P"] <= self.P_max) &
-                (geotherm["T"] >= self.T_min) & (geotherm["T"] <= self.T_max)
+                (geotherm["P"] >= self.gfem_P_min) & (geotherm["P"] <= self.gfem_P_max) &
+                (geotherm["T"] >= self.gfem_T_min) & (geotherm["T"] <= self.gfem_T_max)
             ]
 
             # Select relevant columns and round values
@@ -852,8 +852,8 @@ class RocMLM:
         try:
             array_size = (self.res + 1) * 10
             litho_P_gradient = 35e3
-            Z_min = self.P_min * litho_P_gradient
-            Z_max = self.P_max * litho_P_gradient
+            Z_min = self.gfem_P_min * litho_P_gradient
+            Z_max = self.gfem_P_max * litho_P_gradient
             z = np.linspace(Z_min, Z_max, array_size)
 
             # Initialize temperature array
@@ -898,7 +898,7 @@ class RocMLM:
         """
         try:
             if type not in {"targets", "predictions", "diff"}:
-                raise Exception("Unrecognized array image type !")
+                raise Exception("Unrecognized array image type!")
 
             check = True
 
@@ -952,252 +952,218 @@ class RocMLM:
             print(f"Error in _visualize_loss_curve():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, sid, sid_idx, palette="bone", type="targets",
+    def _get_geotherms_for_array_image(self, geotherm_type):
+        """
+        """
+        try:
+            geotherms = {}
+            if geotherm_type == "sub":
+                for seg in self.segs:
+                    if self.gfem_P_min < 6:
+                        geotherms[seg] = {
+                            "slabtop": self._get_subduction_geotherm(
+                                seg, slab_position="slabtop"),
+                            "slabmoho": self._get_subduction_geotherm(
+                                seg, slab_position="slabmoho"),
+                        }
+            elif geotherm_type == "craton":
+                for pot in self.pot_Ts:
+                    geotherms[pot] = self._get_mantle_geotherm(pot)
+            elif geotherm_type == "mor":
+                for pot in self.pot_Ts:
+                    geotherms[pot] = self._get_mantle_geotherm(
+                        pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
+                        crust_thickness=7e3, litho_thickness=1e3)
+
+        except Exception as e:
+            print(f"Error in _get_geotherms_for_array_image():\n  {e}")
+            return None
+
+        return geotherms
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_square_target_for_array_image(self, sid, target, target_index,
+                                           pred_array, target_array, plot_type):
+        """
+        """
+        try:
+            p = pred_array[:, :, target_index]
+            t = target_array[:, :, target_index]
+            rmse, r2 = None, None
+
+            if plot_type == "predictions":
+                square_target = p
+                filename = (f"{self.model_prefix}-{sid}-"
+                            f"{target.replace("_", "-")}-predictions.png")
+            elif plot_type == "targets":
+                square_target = t
+                filename = (f"{self.model_prefix}-{sid}-"
+                            f"{target.replace("_", "-")}-targets.png")
+            elif plot_type == "diff":
+                mask = np.isnan(t)
+                p[mask] = np.nan
+                np.seterr(divide="ignore", invalid="ignore")
+                square_target = 100 * (t - p) / np.abs(t)
+                valid_mask = ~np.isnan(t) & ~np.isnan(p)
+                t_valid = t[valid_mask]
+                p_valid = p[valid_mask]
+
+                if len(t_valid) == 0 or len(p_valid) == 0:
+                    print("Warning: no valid data points to calculate metrics!")
+                else:
+                    r2 = r2_score(t_valid, p_valid)
+                    rmse = np.sqrt(mean_squared_error(t_valid, p_valid))
+
+                filename = (f"{self.model_prefix}-{sid}-"
+                            f"{target.replace("_", "-")}-diff.png")
+
+        except Exception as e:
+            print(f"Error in _get_square_target_for_array_image():\n  {e}")
+            return None
+
+        return square_target, filename, r2, rmse
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_colormap_for_array_image(self, palette, reverse, discrete):
+        """
+        """
+        try:
+            palettes = {
+                "viridis": "viridis_r" if reverse else "viridis",
+                "bone": "bone_r" if reverse else "bone",
+                "pink": "pink_r" if reverse else "pink",
+                "seismic": "seismic_r" if reverse else "seismic",
+                "grey": "Greys_r" if reverse else "Greys",
+                "default": "Blues_r" if reverse else "Blues"
+            }
+            pal = palettes.get(palette, palettes["default"])
+            cmap = (ListedColormap(plt.colormaps[pal](np.linspace(0, 1, 256)))
+                    if discrete else plt.get_cmap(pal))
+            cmap.set_bad(color="0.9")
+
+        except Exception as e:
+            print(f"Error in _get_colormap_for_array_image():\n  {e}")
+            return None
+
+        return cmap
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_vmin_vmax_for_array_image(self, square_target, discrete):
+        """
+        """
+        try:
+            if discrete:
+                vmin = int(np.nanmin(np.unique(square_target)))
+                vmax = int(np.nanmax(np.unique(square_target)))
+            else:
+                non_nan_values = square_target[~np.isnan(square_target)]
+                vmin, vmax = ((np.min(non_nan_values), np.max(non_nan_values))
+                              if non_nan_values.size > 0 else (0, 0))
+
+        except Exception as e:
+            print(f"Error in _get_vmin_vmax_for_array_image():\n  {e}")
+            return None, None
+
+        return vmin, vmax
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _plot_geotherms_on_array_image(self, ax, geotherms, geotherm_type, linestyles):
+        """
+        """
+        try:
+            if geotherm_type == "sub":
+                for seg, gt in geotherms.items():
+                    ax.plot(gt["slabtop"]["T"], gt["slabtop"]["P"], linestyle="-",
+                            color="black", linewidth=2, label=seg)
+                    ax.plot(gt["slabmoho"]["T"], gt["slabmoho"]["P"], linestyle="--",
+                            color="black", linewidth=2)
+            elif geotherm_type in ["craton", "mor"]:
+                for i, (pot, gt) in enumerate(geotherms.items()):
+                    ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
+                            linewidth=2, label=pot)
+
+        except Exception as e:
+            print(f"Error in _plot_geotherms_on_array_image():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _visualize_array_image(self, sid, sid_idx, geotherm_type="sub", plot_type="targets",
                                figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
-        # Get self attributes
-        fig_dir = self.fig_dir
-        verbose = self.verbose
-        gfem_db = self.gfem_db
-        model_prefix = self.model_prefix
-        model_trained = self.model_trained
-        rocmlm_targets = self.rocmlm_targets
-        target_units_map = self.target_units_map
-        target_labels_map = self.target_labels_map
-        target_digits_map = self.target_digits_map
-        gfem_target_array_square = self.gfem_target_array_square
-        gfem_feature_array_square = self.gfem_feature_array_square
-        rocmlm_prediction_array_square = self.rocmlm_prediction_array_square
-
-        if type not in {"targets", "predictions", "diff"}:
-            raise Exception("Unrecognized array image type !")
-        if not model_trained:
-            raise Exception("No RocMLM model! Call train() first ...")
-        if gfem_target_array_square is None or gfem_target_array_square.size == 0:
-            raise Exception("No GFEM model target array !")
-        if not os.path.exists(fig_dir):
-            os.makedirs(fig_dir, exist_ok=True)
-        if type == "sub":
-            sub_gtt = {}
-            sub_gtm = {}
-            for seg in segs:
-                if P_min < 6:
-                    sub_gtt[seg] = self._get_subduction_geotherm(
-                        seg, slab_position="slabtop")
-                    sub_gtm[seg] = self._get_subduction_geotherm(
-                        seg, slab_position="slabmoho")
-                else:
-                    print("  P_min too high to plot subduction geotherms !")
-                    return None
-        elif type == "craton":
-            ad_gt = {}
-            for pot in pot_Ts:
-                ad_gt[pot] = self._get_mantle_geotherm(pot)
-        elif type == "mor":
-            ad_gt = {}
-            for pot in pot_Ts:
-                ad_gt[pot] = self._get_mantle_geotherm(
-                    pot, Qs=750e-3, A1=2.2e-8, k1=3.0,
-                    crust_thickness=7e3, litho_thickness=1e3)
-
-        plt.rcParams["font.size"] = fontsize
-
         try:
-            n_feats = gfem_feature_array_square.shape[-1] - 2
-            target_array = gfem_target_array_square[sid_idx, :, :, :]
-            feature_array = gfem_feature_array_square[sid_idx, :, :, :]
-            pred_array = rocmlm_prediction_array_square[sid_idx, :, :, :]
-            for i, target in enumerate(rocmlm_targets):
-                rmse, r2 = None, None
-                p = pred_array[:, :, i]
-                t = target_array[:, :, i]
+            plt.rcParams["font.size"] = fontsize
+            linestyles = ["-", "--", "-.", ":", (0, (3, 5, 1, 5))]
+
+            if plot_type not in {"targets", "predictions", "diff"}:
+                raise Exception("Unrecognized plot_type argument!")
+            if geotherm_type not in ["sub", "craton", "mor"]:
+                raise Exception("Unrecognized geotherm_type argument!")
+            if not self.model_trained:
+                raise Exception("No RocMLM! Call train() first ...")
+            if (self.gfem_target_array_square is None or
+                self.gfem_target_array_square.size == 0):
+                raise Exception("No GFEM target array!")
+
+            if not os.path.exists(self.fig_dir):
+                os.makedirs(self.fig_dir, exist_ok=True)
+
+            n_feats = self.gfem_feature_array_square.shape[-1] - 2
+            target_array = self.gfem_target_array_square[sid_idx, :, :, :]
+            feature_array = self.gfem_feature_array_square[sid_idx, :, :, :]
+            pred_array = self.rocmlm_prediction_array_square[sid_idx, :, :, :]
+
+            # Get geotherms
+            geotherms = self._get_geotherms_for_array_image(geotherm_type)
+
+            for i, target in enumerate(self.rocmlm_targets):
                 P = feature_array[:, :, 0 + n_feats]
                 T = feature_array[:, :, 1 + n_feats]
                 extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
-                if type == "predictions":
-                    square_array = p
-                    filename = (f"{model_prefix}-{sid}-"
-                                f"{target.replace("_", "-")}-predictions.png")
-                elif type == "targets":
-                    square_array = t
-                    filename = (f"{model_prefix}-{sid}-"
-                                f"{target.replace("_", "-")}-targets.png")
-                elif type == "diff":
-                    palette = "seismic"
-                    mask = np.isnan(t)
-                    p[mask] = np.nan
-                    np.seterr(divide="ignore", invalid="ignore")
-                    square_array = 100 * (t - p) / np.abs(t)
-                    valid_mask = ~np.isnan(t) & ~np.isnan(p)
-                    t_valid = t[valid_mask]
-                    p_valid = p[valid_mask]
-                    if len(t_valid) == 0 or len(p_valid) == 0:
-                        print("Warning: no valid data points to calculate metrics !")
-                    else:
-                        r2 = r2_score(t_valid, p_valid)
-                        rmse = np.sqrt(mean_squared_error(t_valid, p_valid))
 
-                    filename = (f"{model_prefix}-{sid}-"
-                                f"{target.replace("_", "-")}-diff.png")
-                target_units = target_units_map[target]
-                target_label = target_labels_map[target]
-                if target not in ["assemblage_index", "phase_assemblage_variance"]:
-                    title = f"{target_label} ({target_units})"
+                target_label = self.target_labels_map[target]
+                title = (f"{target_label} ({self.target_units_map.get(target, '')})")
+
+                # Get square array
+                square_target, filename, r2, rmse = self._get_square_target_for_array_image(
+                    sid, target, i, pred_array, target_array, plot_type)
+
+                # Determine color mapping
+                color_discrete = target in ["assemblage_index", "phase_assemblage_variance"]
+                color_reverse = target not in ["phase_assemblage_variance"]
+                palette = "seismic" if plot_type == "diff" else self.palette
+                cmap = self._get_colormap_for_array_image(
+                    palette, color_reverse, color_discrete)
+                vmin, vmax = self._get_vmin_vmax_for_array_image(
+                    square_target, color_discrete)
+
+                if plot_type == "diff":
+                    vmin = -np.max(np.abs(square_target))
+                    vmax = np.max(np.abs(square_target))
+
+                # Plot the array in 2d
+                fig, ax = plt.subplots(figsize=(figwidth, figheight))
+                im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
+                               origin="lower", vmin=vmin, vmax=vmax)
+
+                # Plot geotherms based on type
+                self._plot_geotherms_on_array_image(ax, geotherms, geotherm_type, linestyles)
+
+                # Finalize plot
+                ax.set_xlabel("T (K)")
+                ax.set_ylabel("P (GPa)")
+                if palette == "seismic":
+                    cbar = plt.colorbar(im, ax=ax, ticks=[vmin, 0, vmax], label="")
                 else:
-                    title = f"{target_label}"
-                if target in ["assemblage_index", "phase_assemblage_variance"]:
-                    color_discrete = True
-                else:
-                    color_discrete = False
-                if palette in ["grey"]:
-                    if target in ["phase_assemblage_variance"]:
-                        color_reverse = True
-                    else:
-                        color_reverse = False
-                else:
-                    if target in ["phase_assemblage_variance"]:
-                        color_reverse = False
-                    else:
-                        color_reverse = True
-                if not color_discrete:
-                    non_nan_values = square_array[np.logical_not(np.isnan(square_array))]
-                    if non_nan_values.size > 0:
-                        vmin = np.min(non_nan_values)
-                        vmax = np.max(non_nan_values)
-                    else:
-                        vmin = 0
-                        vmax = 0
-                else:
-                    vmin = int(np.nanmin(np.unique(square_array)))
-                    vmax = int(np.nanmax(np.unique(square_array)))
-                if color_discrete:
-                    num_colors = vmax - vmin + 1
-                    num_colors = max(num_colors, num_colors // 4)
-                    if palette == "viridis":
-                        if color_reverse:
-                            pal = plt.colormaps["viridis_r"]
-                        else:
-                            pal = plt.colormaps["viridis"]
-                    elif palette == "bone":
-                        if color_reverse:
-                            pal = plt.colormaps["bone_r"]
-                        else:
-                            pal = plt.colormaps["bone"]
-                    elif palette == "pink":
-                        if color_reverse:
-                            pal = plt.colormaps["pink_r"]
-                        else:
-                            pal = plt.colormaps["pink"]
-                    elif palette == "seismic":
-                        if color_reverse:
-                            pal = plt.colormaps["seismic_r"]
-                        else:
-                            pal = plt.colormaps["seismic"]
-                    elif palette == "grey":
-                        if color_reverse:
-                            pal = plt.colormaps["Greys_r"]
-                        else:
-                            pal = plt.colormaps["Greys"]
-                    elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
-                        if color_reverse:
-                            pal = plt.colormaps["Blues_r"]
-                        else:
-                            pal = plt.colormaps["Blues"]
-                    color_palette = pal(np.linspace(0, 1, num_colors))
-                    cmap = ListedColormap(color_palette)
-                    cmap.set_bad(color="0.9")
-                    fig, ax = plt.subplots(figsize=(figwidth, figheight))
-                    im = ax.imshow(square_array, extent=extent, aspect="auto", cmap=cmap,
-                                   origin="lower", vmin=vmin, vmax=vmax)
-                    if type == "sub":
-                        for seg, gt in sub_gtt.items():
-                            ax.plot(gt["T"], gt["P"], linestyle="-", color="black",
-                                    linewidth=2, label=seg)
-                        for seg, gt in sub_gtm.items():
-                            ax.plot(gt["T"], gt["P"], linestyle="--", color="black",
-                                    linewidth=2, label=seg)
-                    elif type == "craton":
-                        for i, (pot, gt) in enumerate(ad_gt.items()):
-                            ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                    linewidth=2, label=pot)
-                    elif type == "mor":
-                        for i, (pot, gt) in enumerate(ad_gt.items()):
-                            ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                    linewidth=2, label=pot)
-                    ax.set_xlabel("T (K)")
-                    ax.set_ylabel("P (GPa)")
-                    plt.colorbar(im, ax=ax, label="")
-                else:
-                    if palette == "viridis":
-                        if color_reverse:
-                            cmap = "viridis_r"
-                        else:
-                            cmap = "viridis"
-                    elif palette == "bone":
-                        if color_reverse:
-                            cmap = "bone_r"
-                        else:
-                            cmap = "bone"
-                    elif palette == "pink":
-                        if color_reverse:
-                            cmap = "pink_r"
-                        else:
-                            cmap = "pink"
-                    elif palette == "seismic":
-                        if color_reverse:
-                            cmap = "seismic_r"
-                        else:
-                            cmap = "seismic"
-                    elif palette == "grey":
-                        if color_reverse:
-                            cmap = "Greys_r"
-                        else:
-                            cmap = "Greys"
-                    elif palette not in ["viridis", "grey", "bone", "pink", "seismic"]:
-                        if color_reverse:
-                            cmap="Blues_r"
-                        else:
-                            cmap="Blues"
-                    if palette == "seismic":
-                        vmin = -np.max(np.abs(square_array))
-                        vmax = np.max(np.abs(square_array))
-                    else:
-                        vmin, vmax = vmin, vmax
-                        if vmin <= 1e-4: vmin = 0
-                    cmap = plt.colormaps[cmap]
-                    cmap.set_bad(color="0.9")
-                    fig, ax = plt.subplots()
-                    im = ax.imshow(square_array, extent=extent, aspect="auto", cmap=cmap,
-                                   origin="lower", vmin=vmin, vmax=vmax)
-                    if type == "sub":
-                        for seg, gt in sub_gtt.items():
-                            ax.plot(gt["T"], gt["P"], linestyle="-", color="black",
-                                    linewidth=2, label=seg)
-                        for seg, gt in sub_gtm.items():
-                            ax.plot(gt["T"], gt["P"], linestyle="--", color="black",
-                                    linewidth=2, label=seg)
-                    elif type == "craton":
-                        for i, (pot, gt) in enumerate(ad_gt.items()):
-                            ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                    linewidth=2, label=pot)
-                    elif type == "mor":
-                        for i, (pot, gt) in enumerate(ad_gt.items()):
-                            ax.plot(gt["T"], gt["P"], linestyle=linestyles[i], color="black",
-                                    linewidth=2, label=pot)
-                    ax.set_xlabel("T (K)")
-                    ax.set_ylabel("P (GPa)")
-                    if palette == "seismic":
-                        cbar = plt.colorbar(im, ax=ax, ticks=[vmin, 0, vmax], label="")
-                    else:
-                        cbar = plt.colorbar(im, ax=ax, label="",
-                                            ticks=np.linspace(vmin, vmax, num=4))
-                    cbar.ax.yaxis.set_major_formatter(
-                        plt.FormatStrFormatter(target_digits_map[target]))
+                    cbar = plt.colorbar(
+                        im, ax=ax, label="", ticks=np.linspace(vmin, vmax, num=4))
+                cbar.ax.yaxis.set_major_formatter(
+                    plt.FormatStrFormatter(self.target_digits_map[target]))
                 plt.title(title)
+
                 text_margin_x = 0.04
                 text_margin_y = 0.15
                 text_spacing_y = 0.1
+
                 if rmse and r2:
                     plt.text(text_margin_x, text_margin_y - (text_spacing_y * 0),
                              f"R$^2$: {r2:.3f}", transform=plt.gca().transAxes,
@@ -1208,7 +1174,8 @@ class RocMLM:
                              fontsize=fontsize * 0.833, horizontalalignment="left",
                              verticalalignment="bottom")
 
-                plt.savefig(f"{fig_dir}/{filename}")
+                # Save fig
+                plt.savefig(f"{self.fig_dir}/{filename}")
                 plt.close()
                 print(f"  Figure saved to: {filename} ...")
 
@@ -1216,19 +1183,18 @@ class RocMLM:
             print(f"Error in _visualize_array_image():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize(self, skip=20):
+    def visualize(self, n_samples=3):
         """
         """
         try:
+            skip = len(self.gfem_sids) // n_samples
             for sid_idx, sid in enumerate(self.gfem_sids[::skip]):
                 if not self._check_rocmlm_images(sid, type="diff"):
-                    self._visualize_array_image(sid, sid_idx, type="diff")
-
+                    self._visualize_array_image(sid, sid_idx, plot_type="diff")
                 if not self._check_rocmlm_images(sid, type="targets"):
-                    self._visualize_array_image(sid, sid_idx, type="targets")
-
+                    self._visualize_array_image(sid, sid_idx, plot_type="targets")
                 if not self._check_rocmlm_images(sid, type="predictions"):
-                    self._visualize_array_image(sid, sid_idx, type="predictions")
+                    self._visualize_array_image(sid, sid_idx, plot_type="predictions")
 
         except Exception as e:
             print(f"Error in visualize_rocmlm():\n  {e}")
@@ -1248,9 +1214,10 @@ class RocMLM:
             try:
                 self._configure_rocmlm()
                 self._print_rocmlm_info()
-                self._kfold_cv()
+                if self.cross_validate:
+                    self._kfold_cv()
+                    self._save_rocmlm_cv_info()
                 self._fit_training_data()
-                self._save_rocmlm_cv_info()
 
             except Exception as e:
                 print(f"Error in train():\n  {e}")
@@ -1264,47 +1231,51 @@ class RocMLM:
     #+ .1.6.           RocMLM Inference              !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def predict(self, xi, h2o, P, T):
+    def inference(self, **features):
         """
         """
-        # Get self attributes
-        model = self.ml_algo
-        scaler_X = self.rocmlm_scaler_X
-        scaler_y = self.rocmlm_scaler_y
-        model_trained = self.model_trained
-
         try:
-            if not model_trained:
-                raise Exception("No RocMLM model! Call train() first ...")
-            for var in [xi, h2o, P, T]:
-                if not isinstance(var, (list, np.ndarray)):
-                    raise TypeError(f"Inputs must be lists or numpy arrays !")
-            if all(var is not None for var in [xi, h2o, P, T]):
-                xi_array = np.asarray(xi)
-                h2o_array = np.asarray(h2o)
-                P_array = np.asarray(P)
-                T_array = np.asarray(T)
-                if (xi_array.shape[0] == h2o_array.shape[0] == P_array.shape[0] ==
-                    T_array.shape[0]):
-                    xi_array = xi_array.reshape(-1, 1)
-                    h2o_array = h2o_array.reshape(-1, 1)
-                    P_array = P_array.reshape(-1, 1)
-                    T_array = T_array.reshape(-1, 1)
-                    X = np.concatenate((xi_array, h2o_array, P_array, T_array), axis=1)
-                else:
-                    raise Exception("The arrays xi, h2o, P, and T are not the same size !")
-            else:
-                raise Exception("One or more of xi, h2o, P, T does not exist !")
+            if not self.model_trained:
+                raise Exception("No RocMLM! Call train() first ...")
+
+            # Ensure all necessary features are provided
+            training_features = self.rocmlm_features
+            missing_features = [f for f in training_features if f not in features]
+            if missing_features:
+                raise Exception(f"Missing required features: {missing_features}")
+
+            # Validate that all input features are lists or numpy arrays
+            for feature_name, feature_data in features.items():
+                if not isinstance(feature_data, (list, np.ndarray)):
+                    raise TypeError(f"Feature {feature_name} must be a list or numpy array!")
+
+            # Convert all feature inputs to numpy arrays and check dimensions
+            feature_arrays = [
+                np.asarray(features[f]).reshape(-1, 1) for f in training_features]
+            feature_shapes = [arr.shape[0] for arr in feature_arrays]
+
+            if len(set(feature_shapes)) != 1:
+                raise Exception("All feature arrays must have the same length!")
+
+            # Concatenate the feature arrays
+            X = np.concatenate(feature_arrays, axis=1)
+            X = np.nan_to_num(X)
+
             # Make predictions on features
-            X_scaled = scaler_X.transform(X)
+            X_scaled = self.rocmlm_scaler_X.transform(X)
             inference_start_time = time.time()
-            pred_scaled = model.predict(X_scaled)
+            pred_scaled = self.rocmlm.predict(X_scaled)
             inference_end_time = time.time()
-            inference_time = inference_end_time - inference_start_time
-            pred_original = scaler_y.inverse_transform(pred_scaled)
+            inference_time = (inference_end_time - inference_start_time) * 1e3
+            inference_time_per_node = inference_time / X.shape[0]
+            pred_original = self.rocmlm_scaler_y.inverse_transform(pred_scaled)
+
+            print(f"Model {self.model_prefix} inference:")
+            print(f"  {X.shape[0]} nodes completed in {inference_time:.4f} "
+                  f"milliseconds ({inference_time_per_node:.4f} ms per node)...")
 
         except Exception as e:
-            print(f"Error in predict():\n  {e}")
+            print(f"Error in inference():\n  {e}")
             return None
 
         return pred_original
@@ -1313,14 +1284,12 @@ class RocMLM:
 ## .2.              Train RocMLMs                !!! ##
 #######################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# train rocmlms !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"], config_yaml=None):
     """
     """
     try:
         if not gfem_models:
-            raise Exception("No GFEM models to compile !")
+            raise Exception("No GFEM models to compile!")
 
         models = []
         for algo in ml_algos:
@@ -1329,13 +1298,13 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"], config_yaml=None):
             model.train()
             models.append(model)
 
-        rocmlms = [m for m in models if not m.model_training_error]
-        error_count = len([m for m in models if m.model_training_error])
+        rocmlms = [m for m in models if m.model_trained]
+        error_count = len([m for m in models if not m.model_trained])
 
         if error_count > 0:
             print(f"Total RocMLMs with errors: {error_count}")
         else:
-            print("All RocMLMs built successfully !")
+            print("All RocMLMs built successfully!")
 
         print(":::::::::::::::::::::::::::::::::::::::::::::")
 
@@ -1346,28 +1315,26 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"], config_yaml=None):
     return rocmlms
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# main !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
     """
     from gfem import build_gfem_models
     try:
         gfems = []
-        gfem_configs = {"stx21m": "assets/config_yamls/dry-deep-mantle-stx21m.yaml",
-                        "stx21r": "assets/config_yamls/dry-deep-mantle-stx21r.yaml"}
+        configs = {"hp02m": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
+                   "hp02r": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml"}
 
-        for name, yaml in gfem_configs.items():
+        for name, yaml in configs.items():
             gfems.extend(build_gfem_models(config_yaml=yaml))
 
-        rocmlm_config = "assets/config_yamls/rocmlm-test.yaml"
-        rocmlms = train_rocmlms(gfems, config_yaml=rocmlm_config)
+        yaml = "assets/config_yamls/rocmlm-default.yaml"
+        rocmlms = train_rocmlms(gfems, config_yaml=yaml)
 
     except Exception as e:
         print(f"Error in main():\n  {e}")
 
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print("RocMLMs trained and visualized !")
+    print("RocMLMs trained and visualized!")
     print("=============================================")
 
     return None
