@@ -2940,7 +2940,6 @@ def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8
         else:
             raise Exception(f"Source {source} does not exist!")
 
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print(f"Building {perplex_db} GFEM models for {len(sids)} samples ...")
 
         # Set up the number of processes
@@ -2967,7 +2966,7 @@ def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8
         else:
             print("All GFEM models built successfully!")
 
-        print(":::::::::::::::::::::::::::::::::::::::::::::")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     except Exception as e:
         print(f"Error in build_gfem_models():\n  {e}")
@@ -3003,10 +3002,6 @@ def main():
 
     except Exception as e:
         print(f"Error in main():\n  {e}")
-
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print("GFEM models built and visualized!")
-    print("=============================================")
 
 if __name__ == "__main__":
     main()

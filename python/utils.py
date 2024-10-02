@@ -50,7 +50,7 @@ def print_session_info(condafile):
                 version = importlib.metadata.version(package_name)
                 print(f"      {package_name} version: {version}")
             except importlib.metadata.PackageNotFoundError:
-                print(f"      {package_name} not found ...")
+                print(f"      {package_name} version: ")
 
     os_info = platform.platform()
     print(f"  Operating System: {os_info}")
@@ -113,7 +113,6 @@ def compile_perplex():
 def main():
     """
     """
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     if not os.path.exists("assets"):
         url = ("https://files.osf.io/v1/resources/erdcz/providers/osfstorage/"
                "665d7b3dd835c427734cdd2d/?zip=")
@@ -122,14 +121,10 @@ def main():
     else:
         print("Data assets found!")
 
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
     if not os.path.exists("Perple_X"):
         compile_perplex()
     else:
         print("Perple_X programs found!")
-
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     print_session_info("python/conda-environment.yaml")
     print("=============================================")

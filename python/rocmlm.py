@@ -38,10 +38,9 @@ from matplotlib.colors import ListedColormap
 #######################################################
 class RocMLM:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, gfem_models, ml_algo="DT", tune=False, config_yaml=None, verbose=1):
+    def __init__(self, gfem_models, ml_algo="DT", config_yaml=None, verbose=1):
         """
         """
-        self.tune = tune
         self.ml_algo = ml_algo
         self.verbose = verbose
         self.config_yaml = config_yaml
@@ -67,8 +66,6 @@ class RocMLM:
                              f"{self.gfem_db}")
         self.fig_dir = (f"figs/rocmlm/{self.model_prefix}")
         self.rocmlm_path = f"{self.model_out_dir}/{self.model_prefix}-pretrained.pkl"
-        self.scaler_X_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_X.pkl"
-        self.scaler_y_path = f"{self.model_out_dir}/{self.model_prefix}-scaler_y.pkl"
 
         self._check_existing_model()
 
@@ -88,9 +85,12 @@ class RocMLM:
                     "seed": 42,
                     "digits": 3,
                     "nprocs": os.cpu_count() - 2,
+                    "kfolds": 5,
                     "palette": "bone",
                     "pot_Ts": [1173, 1573, 1773],
-                    "segs": ["Central_Cascadia", "Kamchatka"]
+                    "segs": ["Central_Cascadia", "Kamchatka"],
+                    "rocmlm_features": ["XI_FRAC", "H2O"],
+                    "rocmlm_targets": ["density", "Vp", "Vs", "melt_fraction", "H2O"]
                 }
 
             # Assign values from global options
@@ -99,7 +99,10 @@ class RocMLM:
             self.digits = global_options["digits"]
             self.nprocs = global_options["nprocs"]
             self.pot_Ts = global_options["pot_Ts"]
+            self.kfolds = global_options["kfolds"]
             self.palette = global_options["palette"]
+            self.rocmlm_features = global_options["rocmlm_features"]
+            self.rocmlm_targets = global_options["rocmlm_targets"]
 
             # Plot settings
             plt.rcParams.update({
@@ -127,16 +130,11 @@ class RocMLM:
                 with open(self.config_yaml, "r") as file:
                     config_data = yaml.safe_load(file)
                 rocmlm_options = config_data["rocmlm_options"]
-                ml_algorithms = config_data["ml_algorithms"]
             else:
                 rocmlm_options = {
-                    "kfolds": 5,
-                    "cross_validate": False,
-                    "rocmlm_features": ["XI_FRAC", "H2O"],
-                    "rocmlm_targets": ["density", "Vp", "Vs", "melt_fraction", "H2O"]
-                }
-                ml_algorithms = {
                     "KN": {
+                        "tune": False,
+                        "cross_validate": False,
                         "label": "K Neighbors",
                         "hyperparams": {
                             "weights": "distance",
@@ -147,6 +145,8 @@ class RocMLM:
                         }
                     },
                     "DT": {
+                        "tune": False,
+                        "cross_validate": False,
                         "label": "Decision Tree",
                         "hyperparams": {
                             "splitter": "best",
@@ -162,6 +162,8 @@ class RocMLM:
                         }
                     },
                     "NN": {
+                        "tune": False,
+                        "cross_validate": False,
                         "label": "Neural Network",
                         "hyperparams": {
                             "hidden_layer_sizes": [int(8), int(8), int(8), int(8), int(8)],
@@ -176,15 +178,13 @@ class RocMLM:
                     }
                 }
 
-            # Assign values from rocmlm_options and ml_algorithms
-            self.kfolds = rocmlm_options["kfolds"]
-            self.cross_validate = rocmlm_options["cross_validate"]
-            self.rocmlm_features = rocmlm_options["rocmlm_features"]
-            self.rocmlm_targets = rocmlm_options["rocmlm_targets"]
+            # Assign values from rocmlm_options and rocmlm_options
 
-            self.rocmlm_label = ml_algorithms[self.ml_algo]["label"]
-            self.rocmlm_gridsearch = ml_algorithms[self.ml_algo]["grid_search"]
-            default_hyperparams = ml_algorithms[self.ml_algo]["hyperparams"]
+            self.rocmlm_tune = rocmlm_options[self.ml_algo]["tune"]
+            self.rocmlm_label = rocmlm_options[self.ml_algo]["label"]
+            default_hyperparams = rocmlm_options[self.ml_algo]["hyperparams"]
+            self.rocmlm_gridsearch = rocmlm_options[self.ml_algo]["grid_search"]
+            self.rocmlm_cross_validate = rocmlm_options[self.ml_algo]["cross_validate"]
 
             if self.ml_algo == "KN":
                 self.default_rocmlm = KNeighborsRegressor(
@@ -312,19 +312,13 @@ class RocMLM:
             rocmlm_target_array_shape_square = (S, r, r, T)
             rocmlm_feature_array_shape_square = (S, r, r, F)
 
-            self.rocmlm_target_array = rocmlm_target_array
-            self.rocmlm_feature_array = rocmlm_feature_array
+            self.rocmlm_target_array = rocmlm_target_array.astype(np.float32)
             self.rocmlm_target_array_shape = rocmlm_target_array_shape
-            self.rocmlm_feature_array_shape = rocmlm_feature_array_shape
             self.rocmlm_target_array_shape_square = rocmlm_target_array_shape_square
-            self.rocmlm_feature_array_shape_square = rocmlm_feature_array_shape_square
 
-            gfem_target_array_square = \
-                rocmlm_target_array.reshape(rocmlm_target_array_shape_square)
-            gfem_feature_array_square = \
-                rocmlm_feature_array.reshape(rocmlm_feature_array_shape_square)
-            self.gfem_target_array_square = gfem_target_array_square
-            self.gfem_feature_array_square = gfem_feature_array_square
+            self.rocmlm_feature_array = rocmlm_feature_array.astype(np.float32)
+            self.rocmlm_feature_array_shape = rocmlm_feature_array_shape
+            self.rocmlm_feature_array_shape_square = rocmlm_feature_array_shape_square
 
         except Exception as e:
             print(f"Error in _get_rocmlm_training_data():\n  {e}")
@@ -337,8 +331,7 @@ class RocMLM:
             if os.path.exists(self.rocmlm_path):
                 if self.verbose >= 1:
                     print(f"Found pretrained model {self.model_prefix}!")
-                self.load_pretrained_model(
-                    self.rocmlm_path, self.scaler_X_path, self.scaler_y_path)
+                self._load_pretrained_rocmlm(self.rocmlm_path)
             else:
                 os.makedirs(self.model_out_dir, exist_ok=True)
 
@@ -346,38 +339,29 @@ class RocMLM:
             print(f"Error in _check_existing_model():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def load_pretrained_model(self, rocmlm_path, scaler_X_path, scaler_y_path):
+    def _load_pretrained_rocmlm(self, rocmlm_path):
         """
         """
         try:
-            if (os.path.exists(rocmlm_path) and  os.path.exists(scaler_X_path) and
-                os.path.exists(scaler_y_path)):
+            if (os.path.exists(rocmlm_path)):
                 if self.verbose >= 1:
-                    print(f"  Loading RocMLM object from {rocmlm_path} ...")
-                    print(f"  Loading RocMLM object from {scaler_X_path} ...")
-                    print(f"  Loading RocMLM object from {scaler_y_path} ...")
+                    print(f"Loading RocMLM object from {rocmlm_path} ...")
                     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
-                self.model_trained = True
-                self.rocmlm = joblib.load(rocmlm_path)
-                self.rocmlm_scaler_X = joblib.load(scaler_X_path)
-                self.rocmlm_scaler_y = joblib.load(scaler_y_path)
+                # Load RocMLM object
+                with open(rocmlm_path, "rb") as file:
+                    loaded_rocmlm = joblib.load(file)
 
-                rocmlm_target_array = self.rocmlm_target_array.copy()
-                rocmlm_feature_array = self.rocmlm_feature_array.copy()
-                rocmlm_target_array_shape_square = self.rocmlm_target_array_shape_square
+                # Update the current instance
+                self.__dict__.update(loaded_rocmlm.__dict__)
 
-                X, y = rocmlm_feature_array.copy(), rocmlm_target_array.copy()
-                X_scaled = self.rocmlm_scaler_X.transform(X)
-                pred_scaled = self.rocmlm.predict(X_scaled)
-                pred_original = self.rocmlm_scaler_y.inverse_transform(pred_scaled)
-                self.rocmlm_prediction_array_square = pred_original.reshape(
-                    rocmlm_target_array_shape_square)
+                if self.rocmlm is None:
+                    raise Exception("RocMLM model not loaded properly!")
             else:
                 print(f"File {rocmlm_path} does not exist!")
 
         except Exception as e:
-            print(f"Error in load_pretrained_model():\n  {e}")
+            print(f"Error in _load_pretrained_rocmlm():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _scale_arrays(self, feature_array, target_array):
@@ -422,7 +406,7 @@ class RocMLM:
             if self.verbose >= 1:
                 print(f"Configuring model {self.model_prefix} ...")
 
-            if self.tune:
+            if self.rocmlm_tune:
                 if self.verbose >= 1:
                     print(f"Tuning model {self.model_prefix} ...")
 
@@ -713,28 +697,15 @@ class RocMLM:
                 print(f"Training model {self.model_prefix} ...")
                 self.rocmlm.fit(X, y)
 
-            print(":::::::::::::::::::::::::::::::::::::::::::::")
-
             self.model_trained = True
             self.rocmlm_scaler_X = scaler_X
             self.rocmlm_scaler_y = scaler_y
 
+            # Delete gfem models to reduce disk space
+            del self.gfem_models
+
             with open(self.rocmlm_path, "wb") as file:
-                joblib.dump(self.rocmlm, file)
-            with open(self.scaler_X_path, "wb") as file:
-                joblib.dump(scaler_X, file)
-            with open(self.scaler_y_path, "wb") as file:
-                joblib.dump(scaler_y, file)
-
-            X, y = self.rocmlm_feature_array.copy(), self.rocmlm_target_array.copy()
-            X_scaled = scaler_X.transform(X)
-
-            pred_scaled = self.rocmlm.predict(X_scaled)
-            pred_original = scaler_y.inverse_transform(pred_scaled)
-            rocmlm_prediction_array_square = pred_original.reshape(
-                self.rocmlm_target_array_shape_square)
-
-            self.rocmlm_prediction_array_square = rocmlm_prediction_array_square
+                joblib.dump(self, file, compress=3)
 
         except Exception as e:
             print(f"Error in _fit_training_data():\n  {e}")
@@ -893,18 +864,18 @@ class RocMLM:
         return geotherm
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_rocmlm_images(self, sid, type="predictions"):
+    def _check_rocmlm_images(self, sid, plot_type="predictions"):
         """
         """
         try:
-            if type not in {"targets", "predictions", "diff"}:
-                raise Exception("Unrecognized array image type!")
+            if plot_type not in {"targets", "predictions", "diff"}:
+                raise Exception("Unrecognized array image plot_type!")
 
             check = True
 
             for target in self.rocmlm_targets:
                 path = (f"{self.fig_dir}/{self.model_prefix}-{sid}-"
-                        f"{target.replace("_", "-")}-{type}.png")
+                        f"{target.replace("_", "-")}-{plot_type}.png")
                 if not os.path.exists(path):
                     check = False
                     break
@@ -982,6 +953,22 @@ class RocMLM:
         return geotherms
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _get_square_predictions_for_array_image(self):
+        """
+        """
+        try:
+            X, y = self.rocmlm_feature_array.copy(), self.rocmlm_target_array.copy()
+            X_scaled = self.rocmlm_scaler_X.transform(X)
+
+            pred_scaled = self.rocmlm.predict(X_scaled)
+            pred_original = self.rocmlm_scaler_y.inverse_transform(pred_scaled)
+
+            return pred_original.reshape(self.rocmlm_target_array_shape_square)
+
+        except Exception as e:
+            print(f"Error in _get_square_predictions_for_array_image():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_square_target_for_array_image(self, sid, target, target_index,
                                            pred_array, target_array, plot_type):
         """
@@ -1013,6 +1000,7 @@ class RocMLM:
                 else:
                     r2 = r2_score(t_valid, p_valid)
                     rmse = np.sqrt(mean_squared_error(t_valid, p_valid))
+                    normalized_rmse = (rmse / np.ptp(t_valid)) * 100
 
                 filename = (f"{self.model_prefix}-{sid}-"
                             f"{target.replace("_", "-")}-diff.png")
@@ -1086,7 +1074,7 @@ class RocMLM:
             print(f"Error in _plot_geotherms_on_array_image():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, sid, sid_idx, geotherm_type="sub", plot_type="targets",
+    def _visualize_array_image(self, sid, sid_idx, plot_type="targets", geotherm_type=None,
                                figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
@@ -1096,24 +1084,28 @@ class RocMLM:
 
             if plot_type not in {"targets", "predictions", "diff"}:
                 raise Exception("Unrecognized plot_type argument!")
-            if geotherm_type not in ["sub", "craton", "mor"]:
+            if geotherm_type not in ["sub", "craton", "mor", None]:
                 raise Exception("Unrecognized geotherm_type argument!")
             if not self.model_trained:
                 raise Exception("No RocMLM! Call train() first ...")
-            if (self.gfem_target_array_square is None or
-                self.gfem_target_array_square.size == 0):
-                raise Exception("No GFEM target array!")
 
             if not os.path.exists(self.fig_dir):
                 os.makedirs(self.fig_dir, exist_ok=True)
 
-            n_feats = self.gfem_feature_array_square.shape[-1] - 2
-            target_array = self.gfem_target_array_square[sid_idx, :, :, :]
-            feature_array = self.gfem_feature_array_square[sid_idx, :, :, :]
-            pred_array = self.rocmlm_prediction_array_square[sid_idx, :, :, :]
+            gfem_target_array_square = \
+                self.rocmlm_target_array.reshape(self.rocmlm_target_array_shape_square)
+            gfem_feature_array_square = \
+                self.rocmlm_feature_array.reshape(self.rocmlm_feature_array_shape_square)
+            rocmlm_prediction_array_square = self._get_square_predictions_for_array_image()
 
-            # Get geotherms
-            geotherms = self._get_geotherms_for_array_image(geotherm_type)
+            n_feats = gfem_feature_array_square.shape[-1] - 2
+            target_array = gfem_target_array_square[sid_idx, :, :, :]
+            feature_array = gfem_feature_array_square[sid_idx, :, :, :]
+            pred_array = rocmlm_prediction_array_square[sid_idx, :, :, :]
+
+            if geotherm_type:
+                # Get geotherms
+                geotherms = self._get_geotherms_for_array_image(geotherm_type)
 
             for i, target in enumerate(self.rocmlm_targets):
                 P = feature_array[:, :, 0 + n_feats]
@@ -1145,8 +1137,10 @@ class RocMLM:
                 im = ax.imshow(square_target, extent=extent, aspect="auto", cmap=cmap,
                                origin="lower", vmin=vmin, vmax=vmax)
 
-                # Plot geotherms based on type
-                self._plot_geotherms_on_array_image(ax, geotherms, geotherm_type, linestyles)
+                if geotherm_type:
+                    # Plot geotherms based on type
+                    self._plot_geotherms_on_array_image(
+                        ax, geotherms, geotherm_type, linestyles)
 
                 # Finalize plot
                 ax.set_xlabel("T (K)")
@@ -1188,13 +1182,14 @@ class RocMLM:
         """
         try:
             skip = len(self.gfem_sids) // n_samples
-            for sid_idx, sid in enumerate(self.gfem_sids[::skip]):
-                if not self._check_rocmlm_images(sid, type="diff"):
-                    self._visualize_array_image(sid, sid_idx, plot_type="diff")
-                if not self._check_rocmlm_images(sid, type="targets"):
-                    self._visualize_array_image(sid, sid_idx, plot_type="targets")
-                if not self._check_rocmlm_images(sid, type="predictions"):
-                    self._visualize_array_image(sid, sid_idx, plot_type="predictions")
+
+            for i, sid in enumerate(self.gfem_sids[::skip]):
+                if not self._check_rocmlm_images(sid, "diff"):
+                    self._visualize_array_image(sid, i, "diff")
+                if not self._check_rocmlm_images(sid, "targets"):
+                    self._visualize_array_image(sid, i, "targets")
+                if not self._check_rocmlm_images(sid, "predictions"):
+                    self._visualize_array_image(sid, i, "predictions")
 
         except Exception as e:
             print(f"Error in visualize_rocmlm():\n  {e}")
@@ -1214,7 +1209,7 @@ class RocMLM:
             try:
                 self._configure_rocmlm()
                 self._print_rocmlm_info()
-                if self.cross_validate:
+                if self.rocmlm_cross_validate:
                     self._kfold_cv()
                     self._save_rocmlm_cv_info()
                 self._fit_training_data()
@@ -1270,7 +1265,6 @@ class RocMLM:
             inference_time_per_node = inference_time / X.shape[0]
             pred_original = self.rocmlm_scaler_y.inverse_transform(pred_scaled)
 
-            print(f"Model {self.model_prefix} inference:")
             print(f"  {X.shape[0]} nodes completed in {inference_time:.4f} "
                   f"milliseconds ({inference_time_per_node:.4f} ms per node)...")
 
@@ -1293,8 +1287,7 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"], config_yaml=None):
 
         models = []
         for algo in ml_algos:
-            tune = True if algo != "NN" else False
-            model = RocMLM(gfem_models, algo, tune=tune, config_yaml=config_yaml)
+            model = RocMLM(gfem_models, algo, config_yaml)
             model.train()
             models.append(model)
 
@@ -1306,13 +1299,34 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "NN"], config_yaml=None):
         else:
             print("All RocMLMs built successfully!")
 
-        print(":::::::::::::::::::::::::::::::::::::::::::::")
-
     except Exception as e:
         print(f"Error in train_rocmlms():\n  {e}")
         return None
 
     return rocmlms
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def load_pretrained_rocmlm(rocmlm_path):
+    """
+    """
+    try:
+        if (os.path.exists(rocmlm_path)):
+            print(f"Loading RocMLM object from {rocmlm_path} ...")
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
+            # Load RocMLM object
+            with open(rocmlm_path, "rb") as file:
+                model = joblib.load(file)
+
+            if model.rocmlm is None:
+                raise Exception("RocMLM model not loaded properly!")
+        else:
+            print(f"File {rocmlm_path} does not exist!")
+
+    except Exception as e:
+        print(f"Error in load_pretrained_rocmlm():\n  {e}")
+
+    return model
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
@@ -1332,12 +1346,6 @@ def main():
 
     except Exception as e:
         print(f"Error in main():\n  {e}")
-
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print("RocMLMs trained and visualized!")
-    print("=============================================")
-
-    return None
 
 if __name__ == "__main__":
     main()

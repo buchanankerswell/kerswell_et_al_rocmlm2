@@ -1795,8 +1795,6 @@ class MixingArray:
 ## .3.            Create Mixing Array            !!! ##
 #######################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# main !!
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
     Main function to manage the creation and visualization of mixing arrays.
@@ -1840,8 +1838,6 @@ def main():
             traceback.print_exc()
     else:
         print("Mixing arrays found !")
-
-    print("=============================================")
 
     return None
 

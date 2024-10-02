@@ -1,12 +1,12 @@
 import numpy as np
-from rocmlm import RocMLM
 from gfem import GFEMModel, build_gfem_models
+from rocmlm import RocMLM, load_pretrained_rocmlm
 
 def main():
     """
     """
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Train rocmlm and test inference speed
+    # Build training database and train RocMLM
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     gfems = []
     gfem_configs = ["assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
@@ -20,22 +20,22 @@ def main():
     mod_default.train()
     mod_default.visualize()
 
-    rocmlm_config = "assets/config_yamls/rocmlm-test.yaml"
-    mod_test = RocMLM(gfems, "DT", config_yaml=rocmlm_config)
-    mod_test.train()
-    mod_test.visualize()
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Load RocMLM from pkl file and Test inference speed
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # Simulate a 921x301 grid of dummy features
     xi = np.full(921*301, 1)
     h2o = np.full(921*301, 5)
-    r_mgsi = np.full(921*301, 0.8)
-    r_alsi = np.full(921*301, 0.03)
     P = np.full(921*301, 15)
     T = np.full(921*301, 1773)
 
+    pretrained_path = "rocmlms/DT-S248-R65-F4-T5-hp02-pretrained.pkl"
+    mod = load_pretrained_rocmlm(pretrained_path)
+    mod.visualize()
+
     for _ in range(10):
-        pred = mod_default.inference(P=P, T=T, XI_FRAC=xi, H2O=h2o)
-        pred = mod_test.inference(P=P, T=T, XI_FRAC=xi, H2O=h2o, R_MGSI=r_mgsi, R_ALSI=r_alsi)
+        pred = mod.inference(P=P, T=T, XI_FRAC=xi, H2O=h2o)
 
     return None
 
