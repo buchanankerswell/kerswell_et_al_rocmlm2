@@ -14,8 +14,7 @@ DATADIR = assets
 PYTHON = python/pca.py \
 				 python/gfem.py \
 				 python/utils.py \
-				 python/rocmlm.py \
-				 python/write-md-tables.py
+				 python/rocmlm.py
 # Cleanup directories
 DATAPURGE = log \
 						python/__pycache__ \
@@ -30,21 +29,18 @@ FIGSCLEAN = figs
 
 all: $(LOGFILE) $(PYTHON) gfems rocmlms
 
-write_md_tables: $(LOGFILE) $(PYTHON)
-	@$(CONDAPYTHON) -u python/write-md-tables.py $(LOG)
-
-test: $(LOGFILE) $(PYTHON) mixing_arrays
+test: $(LOGFILE) $(PYTHON) pca
 	@$(CONDAPYTHON) -u python/test.py $(LOG)
 	@echo "=============================================" $(LOG)
 
-rocmlms: $(LOGFILE) $(PYTHON) mixing_arrays
+rocmlms: $(LOGFILE) $(PYTHON) pca
 	@PYTHONWARNINGS="ignore" $(CONDAPYTHON) -u python/rocmlm.py $(LOG)
 	@echo "=============================================" $(LOG)
 
-gfems: mixing_arrays
+gfems: pca
 	@$(CONDAPYTHON) -u python/gfem.py $(LOG)
 
-mixing_arrays: initialize
+pca: initialize
 	@$(CONDAPYTHON) -u python/pca.py $(LOG)
 
 initialize: $(LOGFILE) $(PYTHON) create_conda_env get_assets
@@ -87,4 +83,4 @@ purge:
 clean: purge
 	@rm -rf $(DATACLEAN) $(FIGSCLEAN)
 
-.PHONY: clean purge find_conda_env create_conda_env remove_conda_env get_assets mixing_arrays gfems rocmlms initialize write_md_tables all
+.PHONY: clean purge find_conda_env create_conda_env remove_conda_env get_assets initialize pca gfems rocmlms all
