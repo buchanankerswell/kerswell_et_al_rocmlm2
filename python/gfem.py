@@ -737,8 +737,6 @@ class GFEMModel:
                     print(f"  Found {self.perplex_db} GFEM model for sample {self.sid}!")
 
                 try:
-                    self._get_normalized_sample_comp()
-                    self._get_sample_features()
                     self._get_results()
                     self._get_target_array()
                     self._get_pt_array()
@@ -2732,7 +2730,6 @@ class GFEMModel:
             if not self.model_built:
                 raise Exception("No GFEM model! Call build() first ...")
 
-            self._get_normalized_sample_comp()
             self._get_results()
             self._get_target_array()
             self._get_pt_array()
@@ -2792,6 +2789,9 @@ class GFEMModel:
             try:
                 self._build_perplex_model()
                 self._process_perplex_results()
+                self._get_results()
+                self._get_target_array()
+                self._get_pt_array()
                 break
 
             except Exception as e:

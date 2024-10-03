@@ -16,28 +16,30 @@ def main():
         gfems.extend(build_gfem_models(config_yaml=yaml))
 
     rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
-    mod_default = RocMLM(gfems, "DT", config_yaml=rocmlm_config)
-    mod_default.train()
-    mod_default.visualize()
+    mod = RocMLM(gfems, "NN", config_yaml=rocmlm_config)
+    mod.train()
+#    mod_default.visualize()
+
+#    mod_default = RocMLM(gfems, "DT", config_yaml=rocmlm_config)
+#    mod_default.train()
+#    mod_default.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Load RocMLM from pkl file and Test inference speed
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # Simulate a 921x301 grid of dummy features
-    xi = np.full(921*301, 1)
-    h2o = np.full(921*301, 5)
-    P = np.full(921*301, 15)
-    T = np.full(921*301, 1773)
-
-    pretrained_path = "rocmlms/DT-S248-R65-F4-T5-hp02-pretrained.pkl"
-    mod = load_pretrained_rocmlm(pretrained_path)
-    mod.visualize()
-
-    for _ in range(10):
-        pred = mod.inference(P=P, T=T, XI_FRAC=xi, H2O=h2o)
-
-    return None
+#    # Simulate a 921x301 grid of dummy features
+#    xi = np.full(921*301, 1)
+#    h2o = np.full(921*301, 5)
+#    P = np.full(921*301, 15)
+#    T = np.full(921*301, 1773)
+#
+#    pretrained_path = "rocmlms/DT-S248-R65-F4-T5-hp02-pretrained.pkl"
+#    mod = load_pretrained_rocmlm(pretrained_path)
+#    mod.visualize()
+#
+#    for _ in range(10):
+#        pred = mod.inference(P=P, T=T, XI_FRAC=xi, H2O=h2o)
 
 if __name__ == "__main__":
     main()

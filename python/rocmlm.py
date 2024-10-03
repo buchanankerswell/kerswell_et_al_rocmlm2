@@ -18,13 +18,17 @@ import concurrent.futures as cf
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # machine learning !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split, ParameterGrid
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting !!
@@ -32,6 +36,61 @@ from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.colors import ListedColormap
+
+#######################################################
+## .1.             PyTorch NN Class              !!! ##
+#######################################################
+class SimpleNN(nn.Module):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def __init__(self, input_size, hidden_layer_sizes, output_size, activation="relu"):
+        """
+        """
+        super(SimpleNN, self).__init__()
+
+        self.activation = activation
+        self.input_size = input_size
+        self.output_size = output_size
+        self.hidden_layer_sizes = hidden_layer_sizes
+
+        # Build the model layers
+        layers = []
+        prev_size = input_size
+
+        for size in hidden_layer_sizes:
+            layers.append(nn.Linear(prev_size, size))
+            if activation == "relu":
+                layers.append(nn.ReLU())
+            # Add more activation functions as needed here
+            prev_size = size
+
+        layers.append(nn.Linear(prev_size, output_size))
+        self.model = nn.Sequential(*layers)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def predict(self, x):
+        """
+        """
+        return self.model(x)
+
+    def forward(self, x):
+        """
+        """
+        return self.model(x)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def get_params(self):
+        """
+        """
+        params_info = {
+            "input_size": self.input_size,
+            "output_size": self.output_size,
+            "activation": self.activation,
+            "num_layers": len(self.hidden_layer_sizes) + 1,
+            "hidden_layer_sizes": self.hidden_layer_sizes
+        }
+
+        return params_info
+
 
 #######################################################
 ## .1.               RocMLM Class                !!! ##
@@ -46,8 +105,13 @@ class RocMLM:
         self.config_yaml = config_yaml
         self.gfem_models = sorted(gfem_models, key=lambda model: model.sid)
 
-        if self.ml_algo not in ["DT", "KN", "NN"]:
-            raise Exception("Unrecognized ml_algo! Must be 'DT', 'KN' or 'NN' ...")
+        if self.ml_algo not in ["DT", "KN", "MLP", "NN"]:
+            raise Exception("Unrecognized ml_algo! Must be 'DT', 'KN' or 'MLP' ...")
+
+        # Determine torch device
+        self.device = torch.device("mps" if torch.backends.mps.is_available() and
+                                   self.ml_algo == "NN" else "cpu")
+        print(f"Using device: {self.device}")
 
         self.model_trained = False
         self.model_cross_validated = False
@@ -161,52 +225,72 @@ class RocMLM:
                             "min_samples_split": [int(2), int(3), int(4), int(5), int(6)]
                         }
                     },
-                    "NN": {
+                    "MLP": {
                         "tune": False,
                         "cross_validate": False,
-                        "label": "Neural Network",
+                        "label": "Scikit-learn Neural Network",
                         "hyperparams": {
-                            "hidden_layer_sizes": [int(8), int(8), int(8), int(8), int(8)],
+                            "hidden_layer_sizes": [int(8), int(8), int(8)],
                             "max_iter": 200,
                             "learning_rate_init": 0.001
                         },
                         "grid_search": {
-                            "hidden_layer_sizes": [[int(8), int(8), int(8), int(8), int(8)]],
-                            "max_iter": [200],
+                            "hidden_layer_sizes": [[int(8), int(8), int(8)]],
+                            "learning_rate_init": [0.0001, 0.0005, 0.001]
+                        }
+                    },
+                    "NN": {
+                        "tune": False,
+                        "cross_validate": False,
+                        "label": "PyTorch Neural Network",
+                        "hyperparams": {
+                            "hidden_layer_sizes": [int(8), int(8), int(8)],
+                            "max_iter": 200,
+                            "learning_rate_init": 0.001
+                        },
+                        "grid_search": {
+                            "hidden_layer_sizes": [[int(8), int(8), int(8)]],
                             "learning_rate_init": [0.0001, 0.0005, 0.001]
                         }
                     }
                 }
 
             # Assign values from rocmlm_options and rocmlm_options
-
             self.rocmlm_tune = rocmlm_options[self.ml_algo]["tune"]
             self.rocmlm_label = rocmlm_options[self.ml_algo]["label"]
-            default_hyperparams = rocmlm_options[self.ml_algo]["hyperparams"]
             self.rocmlm_gridsearch = rocmlm_options[self.ml_algo]["grid_search"]
+            self.default_hyperparams = rocmlm_options[self.ml_algo]["hyperparams"]
             self.rocmlm_cross_validate = rocmlm_options[self.ml_algo]["cross_validate"]
 
             if self.ml_algo == "KN":
                 self.default_rocmlm = KNeighborsRegressor(
-                    weights=default_hyperparams["weights"],
-                    n_neighbors=default_hyperparams["n_neighbors"]
+                    weights=self.default_hyperparams["weights"],
+                    n_neighbors=self.default_hyperparams["n_neighbors"]
                 )
             elif self.ml_algo == "DT":
                 self.default_rocmlm = DecisionTreeRegressor(
-                    splitter=default_hyperparams["splitter"],
-                    max_features=default_hyperparams["max_features"],
-                    min_samples_leaf=default_hyperparams["min_samples_leaf"],
-                    min_samples_split=default_hyperparams["min_samples_split"],
+                    splitter=self.default_hyperparams["splitter"],
+                    max_features=self.default_hyperparams["max_features"],
+                    min_samples_leaf=self.default_hyperparams["min_samples_leaf"],
+                    min_samples_split=self.default_hyperparams["min_samples_split"],
                     random_state=self.seed
                 )
-            elif self.ml_algo == "NN":
+            elif self.ml_algo == "MLP":
                 self.default_rocmlm = MLPRegressor(
-                    hidden_layer_sizes=default_hyperparams["hidden_layer_sizes"],
-                    max_iter=default_hyperparams["max_iter"],
-                    learning_rate_init=default_hyperparams["learning_rate_init"],
+                    max_iter=self.default_hyperparams["max_iter"],
+                    hidden_layer_sizes=self.default_hyperparams["hidden_layer_sizes"],
+                    learning_rate_init=self.default_hyperparams["learning_rate_init"],
                     random_state=self.seed
                 )
-                self.max_iter = default_hyperparams["max_iter"]
+                self.max_iter = self.default_hyperparams["max_iter"]
+            elif self.ml_algo == "NN":
+                self.default_rocmlm = SimpleNN(
+                    input_size=len(self.rocmlm_features) + 2,
+                    hidden_layer_sizes=self.default_hyperparams["hidden_layer_sizes"],
+                    output_size=len(self.rocmlm_targets)
+                ).to(self.device)
+                self.max_iter = self.default_hyperparams["max_iter"]
+                self.default_lr = self.default_hyperparams["learning_rate_init"]
 
         except Exception as e:
             print(f"Error in _load_rocmlm_options():\n  {e}")
@@ -390,6 +474,117 @@ class RocMLM:
     #+ .1.2.               RocMLMs                   !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _tune_scikit_model(self, X, y):
+        """
+        """
+        try:
+            model = self.default_rocmlm
+            rocmlm_gridsearch = self.rocmlm_gridsearch
+
+            kf = KFold(n_splits=self.kfolds, shuffle=True, random_state=self.seed)
+
+            grid_search = GridSearchCV(
+                model, rocmlm_gridsearch, cv=kf, n_jobs=self.nprocs,
+                scoring="neg_root_mean_squared_error"
+            )
+            grid_search.fit(X, y)
+
+            if self.ml_algo == "KN":
+                model = KNeighborsRegressor(
+                    weights=grid_search.best_params_["weights"],
+                    n_neighbors=grid_search.best_params_["n_neighbors"]
+                )
+            elif self.ml_algo == "DT":
+                model = DecisionTreeRegressor(
+                    splitter=grid_search.best_params_["splitter"],
+                    max_features=grid_search.best_params_["max_features"],
+                    min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
+                    min_samples_split=grid_search.best_params_["min_samples_split"],
+                    random_state=self.seed
+                )
+            elif self.ml_algo == "MLP":
+                model = MLPRegressor(
+                    max_iter=self.max_iter,
+                    hidden_layer_sizes=grid_search.best_params_["hidden_layer_sizes"],
+                    learning_rate_init=grid_search.best_params_["learning_rate_init"],
+                    random_state=self.seed
+                )
+
+            self.rocmlm = model
+            self.rocmlm_hyperparams = self.rocmlm.get_params()
+
+        except Exception as e:
+            print(f"Error in _tune_scikit_model():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _tune_torch_nn(self, X, y):
+        """
+        """
+        try:
+            best_params = None
+            best_score = float("inf")
+            rocmlm_gridsearch = self.rocmlm_gridsearch
+
+            kf = KFold(n_splits=self.kfolds, shuffle=True, random_state=self.seed)
+
+            for params in ParameterGrid(rocmlm_gridsearch):
+                fold_scores = []
+
+                for train_idx, test_idx in kf.split(X, y):
+                    # Configure model
+                    model = SimpleNN(
+                        input_size=X.shape[1],
+                        hidden_layer_sizes=params["hidden_layer_sizes"],
+                        output_size=y.shape[1]
+                    ).to(self.device)
+                    optimizer = optim.Adam(
+                        model.parameters(), lr=params["learning_rate_init"])
+                    loss_fn = nn.MSELoss()
+
+                    # Convert to torch tensors
+                    X_train = torch.Tensor(X[train_idx]).to(self.device)
+                    y_train = torch.Tensor(y[train_idx]).to(self.device)
+                    X_test = torch.Tensor(X[test_idx]).to(self.device)
+                    y_test = torch.Tensor(y[test_idx]).to(self.device)
+
+                    # Train model on training set
+                    for epoch in range(self.max_iter):
+                        optimizer.zero_grad()
+                        y_pred = model.predict(X_train)
+                        loss = loss_fn(y_pred, y_train)
+                        loss.backward()
+                        optimizer.step()
+
+                    # Evaluate on test set
+                    with torch.no_grad():
+                        y_test_pred = model.predict(X_test)
+                        test_loss = loss_fn(y_test_pred, y_test).item()
+                        fold_scores.append(test_loss)
+
+                # Average score across folds
+                avg_score = np.mean(fold_scores)
+
+                if avg_score < best_score:
+                    best_score = avg_score
+                    best_params = params
+
+            if best_params:
+                best_model = SimpleNN(
+                    input_size=X.shape[1],
+                    hidden_layer_sizes=best_params["hidden_layer_sizes"],
+                    output_size=y.shape[1]
+                ).to(self.device)
+                best_lr = best_params["learning_rate_init"]
+
+                self.lr = best_lr
+                self.rocmlm = best_model
+
+            self.rocmlm_hyperparams = self.rocmlm.get_params()
+
+        except Exception as e:
+            print(f"Error in _tune_torch_nn():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _configure_rocmlm(self):
         """
         """
@@ -410,42 +605,17 @@ class RocMLM:
                 if self.verbose >= 1:
                     print(f"Tuning model {self.model_prefix} ...")
 
-                default_rocmlm = self.default_rocmlm
-                rocmlm_gridsearch = self.rocmlm_gridsearch
-
-                kf = KFold(n_splits=6, shuffle=True, random_state=self.seed)
-
-                grid_search = GridSearchCV(
-                    default_rocmlm, rocmlm_gridsearch, cv=kf, n_jobs=self.nprocs,
-                    scoring="neg_root_mean_squared_error"
-                )
-                grid_search.fit(X_scaled, y_scaled)
-
-                if self.ml_algo == "KN":
-                    self.default_rocmlm = KNeighborsRegressor(
-                        weights=grid_search.best_params_["weights"],
-                        n_neighbors=grid_search.best_params_["n_neighbors"]
-                    )
-                elif self.ml_algo == "DT":
-                    self.default_rocmlm = DecisionTreeRegressor(
-                        splitter=grid_search.best_params_["splitter"],
-                        max_features=grid_search.best_params_["max_features"],
-                        min_samples_leaf=grid_search.best_params_["min_samples_leaf"],
-                        min_samples_split=grid_search.best_params_["min_samples_split"],
-                        random_state=self.seed
-                    )
+                if self.ml_algo in ["DT", "KN", "MLP"]:
+                    self._tune_scikit_model(X_scaled, y_scaled)
                 elif self.ml_algo == "NN":
-                    self.default_rocmlm = MLPRegressor(
-                        hidden_layer_sizes=grid_search.best_params_["hidden_layer_sizes"],
-                        max_iter=grid_search.best_params_["max_iter"],
-                        learning_rate_init=grid_search.best_params_["learning_rate_init"],
-                        random_state=self.seed
-                    )
+                    self._tune_torch_nn(X_scaled, y_scaled)
+                else:
+                    raise Exception("Unrecognized ml_algo!")
             else:
-                default_rocmlm = self.default_rocmlm
-
-            self.rocmlm = default_rocmlm
-            self.rocmlm_hyperparams = self.rocmlm.get_params()
+                if self.ml_algo == "NN":
+                    self.lr = self.default_lr
+                self.rocmlm = self.default_rocmlm
+                self.rocmlm_hyperparams = self.rocmlm.get_params()
 
         except Exception as e:
             print(f"Error in _configure_rocmlm():\n  {e}")
@@ -479,6 +649,144 @@ class RocMLM:
             print(f"Error in _print_rocmlm_info():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _determine_batch_size(self, num_samples):
+        """
+        """
+        try:
+            if num_samples >= 5e5:
+                batch_size = 8192
+            elif num_samples < 5e5 and num_samples >= 1e5:
+                batch_size = 4096
+            elif num_samples < 1e5 and num_samples >= 5e4:
+                batch_size = 2048
+            elif num_samples < 5e4 and num_samples >= 1e4:
+                batch_size = 1024
+            elif num_samples < 1e4 and num_samples >= 5e3:
+                batch_size = 512
+            elif num_samples < 5e3 and num_samples >= 1e3:
+                batch_size = 256
+            else:
+                batch_size = min(num_samples, 64)
+
+            if self.device.type == "mps" and self.ml_algo == "NN":
+                batch_size = min(num_samples, batch_size * 2**4)
+
+        except Exception as e:
+            print(f"Error in _determine_batch_size():\n  {e}")
+            return None
+
+        return batch_size
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _train_mlp(self, X, y, X_test, y_test):
+        """
+        """
+        try:
+            batch_size = self._determine_batch_size(y.shape[0])
+            epoch_, train_loss_, test_loss_ = [], [], []
+
+            with tqdm(total=self.max_iter,
+                      desc=f"Training MLP with batch size {batch_size}",
+                      position=0) as pbar:
+                for epoch in range(self.max_iter):
+                    indices = np.arange(len(y))
+                    np.random.shuffle(indices)
+
+                    for start_idx in range(0, len(indices), batch_size):
+                        end_idx = start_idx + batch_size
+                        end_idx = min(end_idx, len(indices))
+                        batch_indices = indices[start_idx:end_idx]
+                        X_batch, y_batch = X[batch_indices], y[batch_indices]
+                        self.rocmlm.partial_fit(X_batch, y_batch)
+
+                    pbar.update(1)
+
+                train_loss = self.rocmlm.loss_
+                train_loss_.append(train_loss)
+                test_loss = mean_squared_error(y_test, self.rocmlm.predict(X_test))
+                test_loss_.append(test_loss)
+                epoch_.append(epoch + 1)
+
+            loss_curve = {
+                "epoch": epoch_, "train_loss": train_loss_, "test_loss": test_loss_}
+
+        except Exception as e:
+            print(f"Error in _train_mlp():\n  {e}")
+            return None
+
+        return loss_curve
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _train_torch_nn(self, X, y, X_test, y_test):
+        """
+        """
+        try:
+            batch_size = self._determine_batch_size(y.shape[0])
+            epoch_, train_loss_, test_loss_ = [], [], []
+
+            # Set model to training mode
+            self.rocmlm.to(self.device)
+            self.rocmlm.train()
+            optimizer = optim.Adam(self.rocmlm.parameters(), lr=self.lr)
+
+            # Train model on training set
+            with tqdm(total=self.max_iter,
+                      desc=f"Training NN with batch size: {batch_size}",
+                      position=0) as pbar:
+                for epoch in range(self.max_iter):
+                    indices = np.arange(len(y))
+                    np.random.shuffle(indices)
+
+                    for start_idx in range(0, len(indices), batch_size):
+                        end_idx = start_idx + batch_size
+                        end_idx = min(end_idx, len(indices))
+                        batch_indices = indices[start_idx:end_idx]
+                        X_batch, y_batch = X[batch_indices], y[batch_indices]
+
+                        # Convert to torch tensors
+                        X_train = torch.Tensor(X_batch).to(self.device)
+                        y_train = torch.Tensor(y_batch).to(self.device)
+
+                        # Training step
+                        optimizer.zero_grad()
+                        y_pred = self.rocmlm.predict(X_train)
+                        loss_fn = nn.MSELoss()
+                        loss = loss_fn(y_pred, y_train)
+                        loss.backward()
+                        optimizer.step()
+
+                    pbar.update(1)
+
+                    # Track training loss
+                    train_loss = loss.item()
+                    train_loss_.append(train_loss)
+
+                    # Convert to torch tensors
+                    X_tst = torch.Tensor(X_test).to(self.device)
+                    y_tst = torch.Tensor(y_test).to(self.device)
+
+                    # Evaluate on test set
+                    with torch.no_grad():
+                        y_test_tensor = torch.Tensor(X_tst)
+                        y_test_pred = self.rocmlm.predict(y_test_tensor)
+                        test_loss = loss_fn(y_test_pred, y_tst).item()
+                        test_loss_.append(test_loss)
+
+                    epoch_.append(epoch + 1)
+
+            loss_curve = {
+                "epoch": epoch_,
+                "train_loss": train_loss_,
+                "test_loss": test_loss_
+            }
+
+        except Exception as e:
+            print(f"Error in _train_torch_nn():\n  {e}")
+            return None
+
+        return loss_curve
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _kfold_itr(self, fold_args):
         """
         """
@@ -495,42 +803,29 @@ class RocMLM:
             X, X_test = X_scaled[train_index], X_scaled[test_idxex]
             y, y_test = y_scaled[train_index], y_scaled[test_idxex]
 
-            if "NN" in self.ml_algo:
-                num_samples = len(y)
-                batch_size = min(max(int(num_samples * 0.1), 8), num_samples)
+            training_start_time = time.time()
 
-                epoch_, train_loss_, test_loss_ = [], [], []
-                training_start_time = time.time()
-
-                for epoch in range(self.max_iter):
-                    indices = np.arange(len(y))
-                    np.random.shuffle(indices)
-
-                    for start_idx in range(0, len(indices), batch_size):
-                        end_idx = start_idx + batch_size
-                        end_idx = min(end_idx, len(indices))
-                        batch_indices = indices[start_idx:end_idx]
-                        X_batch, y_batch = X[batch_indices], y[batch_indices]
-                        self.rocmlm.partial_fit(X_batch, y_batch)
-
-                    train_loss = self.rocmlm.loss_
-                    train_loss_.append(train_loss)
-                    test_loss = mean_squared_error(y_test, self.rocmlm.predict(X_test))
-                    test_loss_.append(test_loss)
-                    epoch_.append(epoch + 1)
-
-                training_end_time = time.time()
-                loss_curve = {
-                    "epoch": epoch_, "train_loss": train_loss_, "test_loss": test_loss_}
+            if self.ml_algo == "MLP":
+                loss_curve = self._train_mlp(X, y, X_test, y_test)
+            elif self.ml_algo == "NN":
+                loss_curve = self._train_torch_nn(X, y, X_test, y_test)
             else:
-                training_start_time = time.time()
                 self.rocmlm.fit(X, y)
-                training_end_time = time.time()
                 loss_curve = None
+
+            training_end_time = time.time()
 
             training_time = training_end_time - training_start_time
 
-            y_pred_scaled = self.rocmlm.predict(X_test)
+            # For torch models with mps
+            if self.ml_algo == "NN" and self.device.type == "mps":
+                X_test = torch.Tensor(X_test).to(self.device)
+                y_pred_scaled = self.rocmlm.predict(X_test)
+                # Detach and convert tensor to NumPy
+                y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
+            else:
+                y_pred_scaled = self.rocmlm.predict(X_test)
+
             y_pred_original = scaler_y.inverse_transform(y_pred_scaled)
             y_test_original = scaler_y.inverse_transform(y_test)
 
@@ -566,7 +861,7 @@ class RocMLM:
                 r2_test_scores.append(r2_test)
                 training_times.append(training_time)
 
-            if "NN" in self.ml_algo:
+            if self.ml_algo == "MLP":
                 self._visualize_loss_curve(loss_curves)
 
             rmse_test_scores = np.stack(rmse_test_scores)
@@ -642,9 +937,15 @@ class RocMLM:
             fold_args = [
                 (train_idx, test_idx) for _, (train_idx, test_idx) in enumerate(kf.split(X))]
 
-            with cf.ProcessPoolExecutor(max_workers=self.nprocs) as executor:
-                results = list(tqdm(executor.map(self._kfold_itr, fold_args),
-                                    total=len(fold_args), desc="Cross-validating model ..."))
+            print("Cross-validating RocMLM ...")
+
+            # If running on MPS, run K-fold in serial
+            if self.device.type == "mps":
+                results = [self._kfold_itr(fold) for fold in fold_args]
+            else:
+                # Otherwise, run K-fold in parallel
+                with cf.ProcessPoolExecutor(max_workers=self.nprocs) as executor:
+                    results = list(executor.map(self._kfold_itr, fold_args))
 
             self.model_cross_validated = True
             self._process_kfold_results(results)
@@ -676,23 +977,10 @@ class RocMLM:
             X, X_test, y, y_test = \
                 train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=self.seed)
 
-            if "NN" in self.ml_algo:
-                num_samples = len(y)
-                batch_size = min(max(int(num_samples * 0.1), 8), num_samples)
-
-                with tqdm(total=self.max_iter, desc="Training NN", position=0) as pbar:
-                    for epoch in range(self.max_iter):
-                        indices = np.arange(len(y))
-                        np.random.shuffle(indices)
-
-                        for start_idx in range(0, len(indices), batch_size):
-                            end_idx = start_idx + batch_size
-                            end_idx = min(end_idx, len(indices))
-                            batch_indices = indices[start_idx:end_idx]
-                            X_batch, y_batch = X[batch_indices], y[batch_indices]
-                            self.rocmlm.partial_fit(X_batch, y_batch)
-
-                        pbar.update(1)
+            if self.ml_algo == "MLP":
+                self._train_mlp(X, y, X_test, y_test)
+            elif self.ml_algo == "NN":
+                self._train_torch_nn(X, y, X_test, y_test)
             else:
                 print(f"Training model {self.model_prefix} ...")
                 self.rocmlm.fit(X, y)
@@ -902,6 +1190,7 @@ class RocMLM:
                             merged_curves[key].extend(value)
                     else:
                         merged_curves[key] = value
+
             df = pd.DataFrame.from_dict(merged_curves, orient="index").transpose()
             df.sort_values(by="epoch", inplace=True)
 
@@ -1335,14 +1624,14 @@ def main():
     from gfem import build_gfem_models
     try:
         gfems = []
-        configs = {"hp02m": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
-                   "hp02r": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml"}
+        gfem_configs = ["assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
+                        "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml"]
 
-        for name, yaml in configs.items():
+        for yaml in gfem_configs:
             gfems.extend(build_gfem_models(config_yaml=yaml))
 
-        yaml = "assets/config_yamls/rocmlm-default.yaml"
-        rocmlms = train_rocmlms(gfems, config_yaml=yaml)
+        rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
+        rocmlms = train_rocmlms(gfems, config_yaml=rocmlm_config)
 
     except Exception as e:
         print(f"Error in main():\n  {e}")
