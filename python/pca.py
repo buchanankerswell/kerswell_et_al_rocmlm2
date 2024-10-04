@@ -1837,7 +1837,7 @@ def main():
             print(f"Error in main():\n  {e}")
             traceback.print_exc()
     else:
-        print("Mixing arrays found !")
+        print("Mixing arrays found!")
 
     return None
 

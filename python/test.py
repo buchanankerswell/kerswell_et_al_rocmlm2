@@ -9,20 +9,25 @@ def main():
     # Build training database and train RocMLM
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     gfems = []
-    gfem_configs = ["assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
-                    "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml"]
+#    gfem_configs = ["assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
+#                    "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml"]
+    gfem_configs = ["assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml"]
+    rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
 
     for yaml in gfem_configs:
         gfems.extend(build_gfem_models(config_yaml=yaml))
 
-    rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
-    mod = RocMLM(gfems, "NN", config_yaml=rocmlm_config)
+    mod = RocMLM(gfems[::32], "SimpleNet", config_yaml=rocmlm_config)
     mod.train()
-#    mod_default.visualize()
+#    mod.visualize()
 
-#    mod_default = RocMLM(gfems, "DT", config_yaml=rocmlm_config)
-#    mod_default.train()
-#    mod_default.visualize()
+    mod = RocMLM(gfems[::32], "UNet", config_yaml=rocmlm_config)
+    mod.train()
+#    mod.visualize()
+
+#    mod = RocMLM(gfems, "DT", config_yaml=rocmlm_config)
+#    mod.train()
+#    mod.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Load RocMLM from pkl file and Test inference speed
