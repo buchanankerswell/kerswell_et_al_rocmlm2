@@ -679,7 +679,8 @@ class RocMLM:
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
 
             # Prepare data using TensorDataset
-            dataset = TensorDataset(torch.Tensor(X), torch.Tensor(y))
+            dataset = TensorDataset(torch.tensor(X, dtype=torch.float32),
+                                    torch.tensor(y, dtype=torch.float32))
 
             for i, params in enumerate(ParameterGrid(rocmlm_gridsearch)):
                 fold_scores = []
@@ -926,8 +927,10 @@ class RocMLM:
             loss_fn = nn.MSELoss()
 
             # Prepare data using DataLoader
-            train_dataset = TensorDataset(torch.Tensor(X), torch.Tensor(y))
-            test_dataset = TensorDataset(torch.Tensor(X_test), torch.Tensor(y_test))
+            train_dataset = TensorDataset(torch.tensor(X, dtype=torch.float32),
+                                          torch.tensor(y, dtype=torch.float32))
+            test_dataset = TensorDataset(torch.tensor(X_test, dtype=torch.float32),
+                                         torch.tensor(y_test, dtype=torch.float32))
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
@@ -1020,13 +1023,13 @@ class RocMLM:
 
             if self.ml_algo in ["SimpleNet", "UNet"] and self.device.type == "mps":
                 if self.ml_algo == "UNet":
-                    X_test = torch.Tensor(X_test).to(self.device)
+                    X_test = torch.tensor(X_test, dtype=torch.float32).to(self.device)
                     y_pred_scaled = self.rocmlm.predict(X_test)
                     y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
                     y_pred_scaled = self._unshape_from_unet(y_pred_scaled)
                     y_test = self._unshape_from_unet(y_test)
                 elif self.ml_algo == "SimpleNet":
-                    X_test = torch.Tensor(X_test).to(self.device)
+                    X_test = torch.tensor(X_test, dtype=torch.float32).to(self.device)
                     y_pred_scaled = self.rocmlm.predict(X_test)
                     y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
             else:
@@ -1467,12 +1470,12 @@ class RocMLM:
             if self.ml_algo in ["SimpleNet", "UNet"] and self.device.type == "mps":
                 if self.ml_algo == "UNet":
                     X_scaled = self._shape_for_unet(X_scaled, "features")
-                    X_scaled = torch.Tensor(X_scaled).to(self.device)
+                    X_scaled = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
                     y_pred_scaled = self.rocmlm.predict(X_scaled)
                     y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
                     y_pred_scaled = self._unshape_from_unet(y_pred_scaled)
                 elif self.ml_algo == "SimpleNet":
-                    X_scaled = torch.Tensor(X_scaled).to(self.device)
+                    X_scaled = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
                     y_pred_scaled = self.rocmlm.predict(X_scaled)
                     y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
             else:
