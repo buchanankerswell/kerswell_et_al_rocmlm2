@@ -44,14 +44,13 @@ from matplotlib.colors import ListedColormap
 #######################################################
 class SimpleNet(nn.Module):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, input_size, hidden_layer_sizes, output_size, activation="relu"):
+    def __init__(self, input_size, hidden_layer_sizes, output_size):
         """
         """
         super(SimpleNet, self).__init__()
         self.input_size = input_size
         self.hidden_layer_sizes = hidden_layer_sizes
         self.output_size = output_size
-        self.activation = activation
 
         # Build the model layers
         layers = []
@@ -59,10 +58,7 @@ class SimpleNet(nn.Module):
 
         for size in hidden_layer_sizes:
             layers.append(nn.Linear(prev_size, size))
-            layers.append(nn.LeakyReLU(inplace=True) if self.activation == "relu"
-                          else nn.Sigmoid(inplace=True))
-#            layers.append(nn.ReLU(inplace=True) if self.activation == "relu"
-#                          else nn.Sigmoid(inplace=True))
+            layers.append(nn.LeakyReLU(inplace=True))
             prev_size = size
 
         layers.append(nn.Linear(prev_size, output_size))
@@ -75,19 +71,12 @@ class SimpleNet(nn.Module):
         return self.net(x)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def predict(self, x):
-        """
-        """
-        return self.net(x)
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def get_params(self):
         """
         """
         params_info = {
             "input_size": self.input_size,
             "output_size": self.output_size,
-            "activation": self.activation,
             "num_layers": len(self.hidden_layer_sizes) + 1,
             "hidden_layer_sizes": self.hidden_layer_sizes
         }
@@ -97,13 +86,11 @@ class SimpleNet(nn.Module):
 #######################################################
 class ImprovedNet(nn.Module):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, input_size, hidden_layer_sizes, output_size, activation="relu",
-                 dropout_rate=0.05):
+    def __init__(self, input_size, hidden_layer_sizes, output_size, dropout_rate=0.05):
         super(ImprovedNet, self).__init__()
         self.input_size = input_size
         self.hidden_layer_sizes = hidden_layer_sizes
         self.output_size = output_size
-        self.activation = activation
         self.dropout_rate = dropout_rate
 
         layers = []
@@ -112,10 +99,7 @@ class ImprovedNet(nn.Module):
         for size in hidden_layer_sizes:
             layers.append(nn.Linear(prev_size, size))
             layers.append(nn.BatchNorm1d(size))
-            layers.append(nn.LeakyReLU(inplace=True) if self.activation == "relu"
-                          else nn.Sigmoid(inplace=True))
-#            layers.append(nn.ReLU(inplace=True) if self.activation == "relu"
-#                          else nn.Sigmoid(inplace=True))
+            layers.append(nn.LeakyReLU(inplace=True))
             layers.append(nn.Dropout(dropout_rate))
             prev_size = size
 
@@ -129,19 +113,12 @@ class ImprovedNet(nn.Module):
         return self.net(x)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def predict(self, x):
-        """
-        """
-        return self.net(x)
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def get_params(self):
         """
         """
         params_info = {
             "input_size": self.input_size,
             "output_size": self.output_size,
-            "activation": self.activation,
             "dropout rate": self.dropout_rate,
             "num_layers": len(self.hidden_layer_sizes) + 1,
             "hidden_layer_sizes": self.hidden_layer_sizes
@@ -153,36 +130,33 @@ class ImprovedNet(nn.Module):
 class UNet(nn.Module):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, in_channels, out_channels, filters=[64, 128, 256, 512],
-                 bilinear=True, activation="relu"):
+                 bilinear=True):
         """
         """
-        super(UNet, self).__init__()
+        super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.filters = filters
         self.bilinear = bilinear
-        self.activation = activation
 
         # Input convolution layer
-        self.inc = DoubleConv(in_channels, filters[0], activation=self.activation)
+        self.inc = self.DoubleConv(in_channels, filters[0])
 
         # Encoder (downsampling path)
         self.encoder = nn.ModuleList()
         in_filter = filters[0]
         for out_filter in filters[1:]:
-            self.encoder.append(Down(in_filter, out_filter, activation=self.activation))
+            self.encoder.append(self.Down(in_filter, out_filter))
             in_filter = out_filter
 
         # Decoder (upsampling path)
-        factor = 2 if bilinear else 1
         self.decoder = nn.ModuleList()
         for out_filter in reversed(filters[:-1]):
-            self.decoder.append(
-                Up(in_filter, out_filter // factor, bilinear, activation=self.activation))
+            self.decoder.append(self.Up(in_filter, out_filter, bilinear))
             in_filter = out_filter
 
         # Final output convolution layer
-        self.outc = OutConv(filters[0], out_channels)
+        self.outc = self.OutConv(filters[0], out_channels)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def forward(self, x):
@@ -209,19 +183,12 @@ class UNet(nn.Module):
         return x
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def predict(self, x):
-        """
-        """
-        return self.forward(x)
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def get_params(self):
         """
         """
         params_info = {
             "in_channels": self.in_channels,
             "out_channels": self.out_channels,
-            "activation": self.activation,
             "bilinear": self.bilinear,
             "num filters": len(self.filters) + 1,
             "filter sizes": self.filters
@@ -229,81 +196,82 @@ class UNet(nn.Module):
 
         return params_info
 
-#######################################################
-class DoubleConv(nn.Module):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, in_channels, out_channels, mid_channels=None, activation="relu"):
-        super().__init__()
-        if not mid_channels:
-            mid_channels = out_channels
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.LeakyReLU(inplace=True) if activation == "relu" else nn.Sigmoid(inplace=True),
-#            nn.ReLU(inplace=True) if activation == "relu" else nn.Sigmoid(inplace=True),
-            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(inplace=True) if activation == "relu" else nn.Sigmoid(inplace=True),
-#            nn.ReLU(inplace=True) if activation == "relu" else nn.Sigmoid(inplace=True)
-        )
+    class DoubleConv(nn.Module):
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def __init__(self, in_channels, out_channels, mid_channels=None):
+            super().__init__()
+            if not mid_channels:
+                mid_channels = out_channels
+            self.double_conv = nn.Sequential(
+                nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(mid_channels),
+                nn.LeakyReLU(inplace=True),
+                nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(out_channels),
+                nn.LeakyReLU(inplace=True),
+            )
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def forward(self, x):
-        x = x.contiguous()
-        return self.double_conv(x)
-
-#######################################################
-class Down(nn.Module):
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, in_channels, out_channels, activation="relu"):
-        super().__init__()
-        self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
-            DoubleConv(in_channels, out_channels, activation=activation)
-        )
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def forward(self, x):
+            x = x.contiguous()
+            return self.double_conv(x)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def forward(self, x):
-        return self.maxpool_conv(x)
+    class Down(nn.Module):
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def __init__(self, in_channels, out_channels):
+            super().__init__()
+            self.maxpool_conv = nn.Sequential(
+                nn.MaxPool2d(2),
+                UNet.DoubleConv(in_channels, out_channels)
+            )
 
-#######################################################
-class Up(nn.Module):
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, in_channels, out_channels, bilinear=True, activation="relu"):
-        super().__init__()
-
-        # if bilinear, use the normal convolutions to reduce the number of channels
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2,
-                                   activation=activation)
-        else:
-            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2,
-                                         stride=2)
-            self.conv = DoubleConv(in_channels, out_channels, activation=activation)
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def forward(self, x):
+            return self.maxpool_conv(x)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def forward(self, x1, x2):
-        x1 = self.up(x1)
-        # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
+    class Up(nn.Module):
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def __init__(self, in_channels, out_channels, bilinear=False):
+            super().__init__()
+            self.bilinear = bilinear
 
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
+            if bilinear:
+                self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+            else:
+                self.up = nn.ConvTranspose2d(
+                    in_channels, in_channels // 2, kernel_size=2, stride=2)
 
-        x = torch.cat([x2, x1], dim=1)
-        return self.conv(x)
+            self.conv = UNet.DoubleConv(in_channels, out_channels)
 
-#######################################################
-class OutConv(nn.Module):
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def forward(self, x1, x2):
+            x1 = self.up(x1)
+
+            if self.bilinear:
+                x1 = self.conv(x1)
+
+            diffY = x2.size()[2] - x1.size()[2]
+            diffX = x2.size()[3] - x1.size()[3]
+
+            x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
+
+            x = torch.cat([x2, x1], dim=1)
+
+            return self.conv(x)
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, in_channels, out_channels):
-        super(OutConv, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+    class OutConv(nn.Module):
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def __init__(self, in_channels, out_channels):
+            super().__init__()
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def forward(self, x):
-        return self.conv(x)
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        def forward(self, x):
+            return self.conv(x)
 
 #######################################################
 ## .3.               RocMLM Class                !!! ##
@@ -328,6 +296,7 @@ class RocMLM:
             ["SimpleNet", "ImprovedNet", "UNet"] else "cpu")
         print(f"Using device: {self.device}")
 
+        self.rocmlm = None
         self.model_trained = False
         self.model_cross_validated = False
         self.model_out_dir = "rocmlms"
@@ -479,6 +448,7 @@ class RocMLM:
                         "label": "UNet",
                         "hyperparams": {
                             "filters": [int(64), int(128), int(256), int(512)],
+                            "bilinear": True,
                             "max_iter": 500,
                             "learning_rate_init": 1e-5,
                             "gamma": 0.99,
@@ -501,6 +471,7 @@ class RocMLM:
 
             self.lr = None
             self.gamma = None
+            self.bilinear = None
             self.max_iter = None
             self.patience = None
             self.dropout_rate = None
@@ -551,6 +522,7 @@ class RocMLM:
                     out_channels=len(self.rocmlm_targets),
                     filters=self.default_hyperparams["filters"]
                 ).to(self.device)
+                self.bilinear = self.default_hyperparams["bilinear"]
                 self.max_iter = self.default_hyperparams["max_iter"]
                 self.lr = self.default_hyperparams["learning_rate_init"]
                 self.gamma = self.default_hyperparams["gamma"]
@@ -706,7 +678,7 @@ class RocMLM:
                 self.__dict__.update(loaded_rocmlm.__dict__)
 
                 if self.rocmlm is None:
-                    raise Exception("RocMLM model not loaded properly!")
+                    raise Exception("RocMLM not loaded properly!")
             else:
                 print(f"File {rocmlm_path} does not exist!")
 
@@ -718,7 +690,7 @@ class RocMLM:
         """
         """
         try:
-            X, y = feature_array, target_array
+            X, y = feature_array.copy(), target_array.copy()
             X[~np.isfinite(X)] = np.nan
             y[~np.isfinite(y)] = np.nan
             X, y = np.nan_to_num(X), np.nan_to_num(y)
@@ -739,6 +711,140 @@ class RocMLM:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.2.               RocMLMs                   !!! ++
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _determine_batch_size(self, n_data):
+        """
+        """
+        try:
+            if n_data >= 2e6:  # n_data >= 2M
+                batch_size = 2048
+            elif n_data < 2e6 and n_data >= 5e5:  # 500k ≤ n_data < 2M
+                batch_size = 2048
+            elif n_data < 5e5 and n_data >= 1e5:  # 100k ≤ n_data < 500k
+                batch_size = 1024
+            elif n_data < 1e5 and n_data >= 5e4:  # 50k ≤ n_data < 100k
+                batch_size = 512
+            elif n_data < 5e4 and n_data >= 1e4:  # 10k ≤ n_data < 50k
+                batch_size = 256
+            elif n_data < 1e4 and n_data >= 5e3:  # 5k ≤ n_data < 10k
+                batch_size = 128
+            elif n_data < 5e3 and n_data >= 1e3:  # 1k ≤ n_data < 5k
+                batch_size = 64
+            else:  # n_data < 1k
+                batch_size = min(n_data, 32)
+
+            # Adjust for GPU/Neural Engine if using MPS and specific models
+            if (self.device.type == "mps" and self.ml_algo in
+                    ["SimpleNet", "ImprovedNet", "UNet"]):
+                batch_size = min(n_data, batch_size * 2**5)
+
+        except Exception as e:
+            print(f"Error in _determine_batch_size():\n  {e}")
+            return None
+
+        return batch_size
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _shape_for_unet(self, input_array, array_type):
+        """
+        """
+        try:
+            if array_type == "features":
+                square_shape = self.rocmlm_feature_array_shape_square
+            elif array_type == "targets":
+                square_shape = self.rocmlm_target_array_shape_square
+
+            # Reshape training data for UNet (n_samples, channels, height, width)
+            input_array = input_array.reshape(square_shape)
+            input_array = input_array.transpose(0, 3, 1, 2)
+
+        except Exception as e:
+            print(f"Error in _shape_for_unet():\n  {e}")
+            return None
+
+        return input_array
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _unshape_from_unet(self, input_array):
+        """
+        """
+        try:
+            input_array = input_array.transpose(0, 2, 3, 1)
+            input_array = input_array.reshape(-1, input_array.shape[-1])
+
+        except Exception as e:
+            print(f"Error in _unshape_from_unet():\n  {e}")
+            return None
+
+        return input_array
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _warmup_lr(self, epoch, warmup_epochs, base_lr, warmup_start_lr):
+        """
+        """
+        try:
+            if epoch < warmup_epochs:
+                lr = warmup_start_lr + (base_lr - warmup_start_lr) * (epoch / warmup_epochs)
+            else:
+                lr = base_lr
+
+        except Exception as e:
+            print(f"Error in _warmup_lr():\n  {e}")
+            return None
+
+        return lr
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _reset_all_weights(self, model):
+        """
+        """
+        try:
+            def weight_reset(m):
+                reset_parameters = getattr(m, "reset_parameters", None)
+                if callable(reset_parameters):
+                    m.reset_parameters()
+
+            with torch.no_grad():
+                model.apply(weight_reset)
+
+        except Exception as e:
+            print(f"Error in _reset_all_weights(): {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _do_batch_inference(self, X, batch_size):
+        """
+        """
+        try:
+            if self.rocmlm is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
+
+            y_pred_list = []
+
+            if hasattr(self.rocmlm, "eval"):
+                self.rocmlm.eval()
+
+            if hasattr(self.rocmlm, "predict"):  # If scikit-learn model
+                for i in range(0, X.shape[0], batch_size):
+                    batch_X = X[i:i + batch_size]
+                    batch_y_pred = self.rocmlm.predict(batch_X)
+                    y_pred_list.append(batch_y_pred)
+
+            else: # If PyTorch model
+                X = torch.tensor(X).to(self.device)
+                with torch.no_grad():
+                    for i in range(0, X.shape[0], batch_size):
+                        batch_X = X[i:i + batch_size]
+                        batch_y_pred = self.rocmlm(batch_X)
+                        y_pred_list.append(batch_y_pred.detach().cpu().numpy())
+
+            y_pred = np.concatenate(y_pred_list, axis=0)
+
+        except Exception as e:
+            print(f"Error in _do_batch_inference():\n  {e}")
+            return None
+
+        return y_pred
+
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _tune_scikit_model(self, X, y):
         """
@@ -775,53 +881,7 @@ class RocMLM:
             print(f"Error in _tune_scikit_model():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _determine_batch_size(self, num_samples):
-        """
-        """
-        try:
-            if num_samples >= 5e5:
-                batch_size = 8192
-            elif num_samples < 5e5 and num_samples >= 1e5:
-                batch_size = 4096
-            elif num_samples < 1e5 and num_samples >= 5e4:
-                batch_size = 2048
-            elif num_samples < 5e4 and num_samples >= 1e4:
-                batch_size = 1024
-            elif num_samples < 1e4 and num_samples >= 5e3:
-                batch_size = 512
-            elif num_samples < 5e3 and num_samples >= 1e3:
-                batch_size = 256
-            else:
-                batch_size = min(num_samples, 64)
-
-            if (self.device.type == "mps" and self.ml_algo in
-                    ["SimpleNet", "ImprovedNet", "UNet"]):
-                batch_size = min(num_samples, batch_size * 2**4)
-
-        except Exception as e:
-            print(f"Error in _determine_batch_size():\n  {e}")
-            return None
-
-        return batch_size
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _warmup_lr(self, epoch, warmup_epochs, base_lr, warmup_start_lr):
-        """
-        """
-        try:
-            if epoch < warmup_epochs:
-                lr = warmup_start_lr + (base_lr - warmup_start_lr) * (epoch / warmup_epochs)
-            else:
-                lr = base_lr
-
-        except Exception as e:
-            print(f"Error in _warmup_lr():\n  {e}")
-            return None
-
-        return lr
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _tune_torch_net(self, X, y, patience=10):
+    def _tune_torch_net(self, X, y):
         """
         """
         try:
@@ -874,8 +934,8 @@ class RocMLM:
 
                     # Convert test data to torch tensors and move to device
                     X_test, y_test = X[test_idx], y[test_idx]
-                    X_test_tensor = torch.tensor(X_test, dtype=torch.float32).to(self.device)
-                    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).to(self.device)
+                    X_test = torch.tensor(X_test).to(self.device)
+                    y_test = torch.tensor(y_test).to(self.device)
 
                     # Early stopping parameters
                     best_test_loss = float("inf")
@@ -902,15 +962,13 @@ class RocMLM:
                                 y_batch = y[batch_indices]
 
                                 # Convert to torch tensors and move to device
-                                X_train_tensor = torch.tensor(
-                                    X_batch, dtype=torch.float32).to(self.device)
-                                y_train_tensor = torch.tensor(
-                                    y_batch, dtype=torch.float32).to(self.device)
+                                X_train = torch.tensor(X_batch).to(self.device)
+                                y_train = torch.tensor(y_batch).to(self.device)
 
                                 # Forward pass and backpropagation
                                 optimizer.zero_grad()
-                                y_pred = model(X_train_tensor)
-                                loss = loss_fn(y_pred, y_train_tensor)
+                                y_pred = model(X_train)
+                                loss = loss_fn(y_pred, y_train)
                                 loss.backward()
                                 optimizer.step()
 
@@ -925,8 +983,8 @@ class RocMLM:
                             model.eval()
                             with torch.no_grad():
                                 # Forward pass for the test set
-                                y_test_pred = model(X_test_tensor)
-                                test_loss = loss_fn(y_test_pred, y_test_tensor).item()
+                                y_test_pred = model(X_test)
+                                test_loss = loss_fn(y_test_pred, y_test).item()
                                 test_loss_.append(test_loss)
 
                             # After warm-up, step the scheduler
@@ -950,7 +1008,7 @@ class RocMLM:
                                 patience_counter += 1
 
                             # Check if patience has been exceeded
-                            if patience_counter >= patience:
+                            if patience_counter >= self.patience:
                                 print(f"\n  Early stopping at epoch {epoch + 1}. "
                                       f"Best test loss: {best_test_loss:.4f}")
                                 break
@@ -1040,40 +1098,6 @@ class RocMLM:
 
         except Exception as e:
             print(f"Error in _tune_torch_net():\n  {e}")
-            traceback.print_exc()
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _shape_for_unet(self, input_array, array_type):
-        """
-        """
-        try:
-            if array_type == "features":
-                square_shape = self.rocmlm_feature_array_shape_square
-            elif array_type == "targets":
-                square_shape = self.rocmlm_target_array_shape_square
-
-            input_array = input_array.reshape(square_shape)
-            input_array = input_array.transpose(0, 3, 1, 2)
-
-        except Exception as e:
-            print(f"Error in _shape_for_unet():\n  {e}")
-            return None
-
-        return input_array
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _unshape_from_unet(self, input_array):
-        """
-        """
-        try:
-            input_array = input_array.transpose(0, 2, 3, 1)
-            input_array = input_array.reshape(-1, input_array.shape[-1])
-
-        except Exception as e:
-            print(f"Error in _shape_for_unet():\n  {e}")
-            return None
-
-        return input_array
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _configure_rocmlm(self):
@@ -1082,7 +1106,6 @@ class RocMLM:
         try:
             if self.rocmlm_feature_array.size == 0:
                 raise Exception("No training features!")
-
             if self.rocmlm_target_array.size == 0:
                 raise Exception("No training targets!")
 
@@ -1090,9 +1113,8 @@ class RocMLM:
                 self.rocmlm_feature_array, self.rocmlm_target_array)
 
             if self.ml_algo == "UNet":
-                # Reshape training data for UNet (n_samples, channels, height, width)
                 X_scaled = self._shape_for_unet(X_scaled, "features")
-                y_scaled = self._shape_for_unet(y_scaled, "targets")
+                y_scaled = self._shape_for_unet(X_scaled, "targets")
 
             if self.verbose >= 1:
                 print(f"Configuring model {self.model_prefix} ...")
@@ -1104,9 +1126,8 @@ class RocMLM:
                 if self.ml_algo in ["DT", "KN"]:
                     self._tune_scikit_model(X_scaled, y_scaled)
                 elif self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"]:
-                    self._tune_torch_net(X_scaled, y_scaled, self.patience)
-                else:
-                    raise Exception("Unrecognized ml_algo!")
+                    self._tune_torch_net(X_scaled, y_scaled)
+
             else:
                 self.rocmlm = self.default_rocmlm
                 self.rocmlm_hyperparams = self.rocmlm.get_params()
@@ -1125,7 +1146,7 @@ class RocMLM:
                                   subsequent_indent="                  ")
 
             print("+++++++++++++++++++++++++++++++++++++++++++++")
-            print(f"RocMLM model: {self.model_prefix}")
+            print(f"RocMLM: {self.model_prefix}")
             print("---------------------------------------------")
             print(f"    ML model:             {self.rocmlm_label}")
             print(f"    n gfem models:        {int(len(self.gfem_models))}")
@@ -1155,32 +1176,18 @@ class RocMLM:
             print(f"Error in _print_rocmlm_info():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _reset_all_weights(self, model):
+    def _train_torch_net(self, X, y, X_test, y_test):
         """
         """
         try:
-            @torch.no_grad()
-            def weight_reset(m):
-                reset_parameters = getattr(m, "reset_parameters", None)
-                if callable(reset_parameters):
-                    m.reset_parameters()
+            if self.rocmlm is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
 
-        except Exception as e:
-            print(f"Error in _reset_all_weights(): {e}")
-            return None
-
-        model.apply(fn=weight_reset)
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _train_torch_net(self, X, y, X_test, y_test, patience=10):
-        """
-        """
-        try:
             train_idx = np.arange(len(y))
             min_train_loss, max_train_loss = float("inf"), float("-inf")
             min_test_loss, max_test_loss = float("inf"), float("-inf")
             epoch_, train_loss_, test_loss_ = [], [], []
-            batch_size = self._determine_batch_size(len(y))
+            batch_size = self._determine_batch_size(len(X))
 
             # Reset weights before training
             print("  Resetting model weights ...")
@@ -1198,8 +1205,8 @@ class RocMLM:
             scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.gamma)
 
             # Convert test data to torch tensors and move to device
-            X_test_tensor = torch.tensor(X_test, dtype=torch.float32).to(self.device)
-            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).to(self.device)
+            X_test = torch.tensor(X_test).to(self.device)
+            y_test = torch.tensor(y_test).to(self.device)
 
             # Early stopping parameters
             best_test_loss = float("inf")
@@ -1228,15 +1235,13 @@ class RocMLM:
                         y_batch = y[batch_indices]
 
                         # Convert to torch tensors and move to device
-                        X_train_tensor = torch.tensor(
-                            X_batch, dtype=torch.float32).to(self.device)
-                        y_train_tensor = torch.tensor(
-                            y_batch, dtype=torch.float32).to(self.device)
+                        X_train = torch.tensor(X_batch).to(self.device)
+                        y_train = torch.tensor(y_batch).to(self.device)
 
                         # Forward pass and backpropagation
                         optimizer.zero_grad()
-                        y_pred = self.rocmlm(X_train_tensor)
-                        loss = loss_fn(y_pred, y_train_tensor)
+                        y_pred = self.rocmlm(X_train)
+                        loss = loss_fn(y_pred, y_train)
                         loss.backward()
                         optimizer.step()
 
@@ -1251,8 +1256,8 @@ class RocMLM:
                     self.rocmlm.eval()
                     with torch.no_grad():
                         # Forward pass for the test set
-                        y_test_pred = self.rocmlm(X_test_tensor)
-                        test_loss = loss_fn(y_test_pred, y_test_tensor).item()
+                        y_test_pred = self.rocmlm(X_test)
+                        test_loss = loss_fn(y_test_pred, y_test).item()
                         test_loss_.append(test_loss)
 
                     # After warm-up, step the scheduler
@@ -1276,7 +1281,7 @@ class RocMLM:
                         patience_counter += 1
 
                     # Check if patience has been exceeded
-                    if patience_counter >= patience:
+                    if patience_counter >= self.patience:
                         print(f"\n  Early stopping at epoch {epoch + 1}. "
                               f"Best test loss: {best_test_loss:.4f}")
                         break
@@ -1295,85 +1300,9 @@ class RocMLM:
 
         except Exception as e:
             print(f"Error in _train_torch_net(): {e}")
-            traceback.print_exc()
             return None
 
         return loss_curve
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _kfold_itr(self, fold_args):
-        """
-        """
-        try:
-            if self.rocmlm_feature_array.size == 0:
-                raise Exception("No training features!")
-
-            if self.rocmlm_target_array.size == 0:
-                raise Exception("No training targets!")
-
-            (train_index, test_idxex) = fold_args
-
-            X, y, _, scaler_y, X_scaled, y_scaled = \
-                self._scale_arrays(self.rocmlm_feature_array, self.rocmlm_target_array)
-
-            if self.ml_algo == "UNet":
-                # Reshape training data for UNet (n_samples, channels, height, width)
-                X_scaled = self._shape_for_unet(X_scaled, "features")
-                y_scaled = self._shape_for_unet(y_scaled, "targets")
-
-            X_train, X_test = X_scaled[train_index], X_scaled[test_idxex]
-            y_train, y_test = y_scaled[train_index], y_scaled[test_idxex]
-
-            training_start_time = time.time()
-
-            if self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"]:
-                loss_curve = self._train_torch_net(
-                    X_train, y_train, X_test, y_test, self.patience)
-                self._visualize_loss_curve(loss_curve)
-            else:
-                self.rocmlm.fit(X_train, y_train)
-
-            training_end_time = time.time()
-
-            training_time = training_end_time - training_start_time
-
-            if (self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"] and
-                    self.device.type == "mps"):
-                if self.ml_algo == "UNet":
-                    X_test = torch.tensor(X_test, dtype=torch.float32).to(self.device)
-                    y_pred_scaled = self.rocmlm.predict(X_test)
-                    y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
-                    y_pred_scaled = self._unshape_from_unet(y_pred_scaled)
-                    y_test = self._unshape_from_unet(y_test)
-                elif self.ml_algo in ["SimpleNet", "ImprovedNet"]:
-                    X_test = torch.tensor(X_test, dtype=torch.float32).to(self.device)
-                    y_pred_scaled = self.rocmlm.predict(X_test)
-                    y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
-            else:
-                if self.ml_algo == "UNet":
-                    y_pred_scaled = self.rocmlm(X_test)
-                    y_pred_scaled = self._unshape_from_unet(y_pred_scaled)
-                    y_test = self._unshape_from_unet(y_test)
-                else:
-                    y_pred_scaled = self.rocmlm.predict(X_test)
-
-            y_pred_original = scaler_y.inverse_transform(y_pred_scaled)
-            y_test_original = scaler_y.inverse_transform(y_test)
-
-            rmse_test = np.sqrt(mean_squared_error(
-                y_test_original, y_pred_original, multioutput="raw_values"))
-            r2_test = r2_score(y_test_original, y_pred_original, multioutput="raw_values")
-
-            # Normalize RMSE: rmse / (max - min of y_test_original) * 100
-            y_range = np.ptp(y_test_original, axis=0)
-            np.seterr(divide="ignore", invalid="ignore")
-            normalized_rmse = (rmse_test / y_range) * 100
-
-        except Exception as e:
-            print(f"Error in _kfold_itr():\n  {e}")
-            return (None, None, None, None)
-
-        return (normalized_rmse, r2_test, training_time)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_kfold_results(self, results):
@@ -1446,106 +1375,6 @@ class RocMLM:
             print(f"Error in _process_kfold_results():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _kfold_cv(self):
-        """
-        """
-        try:
-            if self.rocmlm_feature_array.size == 0:
-                raise Exception("No training features!")
-
-            if self.rocmlm_target_array.size == 0:
-                raise Exception("No training targets!")
-
-            X, _, _, _, _, _ = self._scale_arrays(
-                self.rocmlm_feature_array, self.rocmlm_target_array)
-
-            if self.ml_algo == "UNet":
-                # Reshape training data for UNet (n_samples, channels, height, width)
-                X = self._shape_for_unet(X, "features")
-
-            n_splits = min(self.kfolds, X.shape[0])
-
-            kf = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
-
-            fold_args = [
-                (train_idx, test_idx) for _, (train_idx, test_idx) in enumerate(kf.split(X))]
-
-            print("Cross-validating RocMLM ...")
-
-            # If running on MPS, run K-fold in serial
-            if self.device.type == "mps":
-                results = [self._kfold_itr(fold) for fold in fold_args]
-            else:
-                # Otherwise, run K-fold in parallel
-                with cf.ProcessPoolExecutor(max_workers=self.nprocs) as executor:
-                    results = list(executor.map(self._kfold_itr, fold_args))
-
-            self.model_cross_validated = True
-            self._process_kfold_results(results)
-
-        except Exception as e:
-            print(f"Error in _kfold_cv():\n  {e}")
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _fit_training_data(self):
-        """
-        """
-        try:
-            if self.rocmlm is None:
-                raise Exception("No ML model! Call _configure_rocmlm() first ...")
-
-            if not self.model_cross_validated:
-                print("Warning: ML model not cross validated. "
-                      "Cannot provide performance metrics ...")
-
-            if self.rocmlm_feature_array.size == 0:
-                raise Exception("No training features!")
-
-            if self.rocmlm_target_array.size == 0:
-                raise Exception("No training targets!")
-
-            # Scale data
-            _, _, scaler_X, scaler_y, X_scaled, y_scaled = \
-                self._scale_arrays(self.rocmlm_feature_array, self.rocmlm_target_array)
-
-            # Train-test split
-            if self.ml_algo != "UNet":
-                X, X_test, y, y_test = train_test_split(
-                    X_scaled, y_scaled, test_size=0.2, random_state=self.seed)
-            else:
-                # Reshape training data for UNet (n_samples, channels, height, width)
-                X_scaled = self._shape_for_unet(X_scaled, "features")
-                y_scaled = self._shape_for_unet(y_scaled, "targets")
-
-                all_idx = list(range(X_scaled.shape[0]))
-                train_idx, test_idx = train_test_split(
-                    all_idx, test_size=0.2, random_state=self.seed)
-
-                # Split data along n_samples
-                X, X_test  = X_scaled[train_idx], X_scaled[test_idx]
-                y, y_test = y_scaled[train_idx], y_scaled[test_idx]
-
-            if self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"]:
-                loss_curve = self._train_torch_net(X, y, X_test, y_test, self.patience)
-                self._visualize_loss_curve(loss_curve)
-            else:
-                print(f"Training model {self.model_prefix} ...")
-                self.rocmlm.fit(X, y)
-
-            self.model_trained = True
-            self.rocmlm_scaler_X = scaler_X
-            self.rocmlm_scaler_y = scaler_y
-
-            # Delete gfem models to reduce disk space
-            del self.gfem_models
-
-            with open(self.rocmlm_path, "wb") as file:
-                joblib.dump(self, file, compress=3)
-
-        except Exception as e:
-            print(f"Error in _fit_training_data():\n  {e}")
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _save_rocmlm_cv_info(self):
         """
         """
@@ -1567,6 +1396,147 @@ class RocMLM:
 
         except Exception as e:
             print(f"Error in _save_rocmlm_cv_info():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _kfold_itr(self, fold_args, X, y):
+        """
+        """
+        try:
+            if self.rocmlm is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
+
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
+            (train_index, test_idxex) = fold_args
+
+            X_train, X_test = X[train_index], X[test_idxex]
+            y_train, y_test = y[train_index], y[test_idxex]
+
+            training_start_time = time.time()
+
+            if self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"]:
+                loss_curve = self._train_torch_net(X_train, y_train, X_test, y_test)
+                self._visualize_loss_curve(loss_curve)
+            else:
+                self.rocmlm.fit(X_train, y_train)
+
+            training_end_time = time.time()
+            training_time = training_end_time - training_start_time
+
+            # Make predictions
+            batch_size = self._determine_batch_size(len(X_test))
+            y_pred = self._do_batch_inference(X_test, batch_size)
+
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred, multioutput="raw_values"))
+            r2 = r2_score(y_test, y_pred, multioutput="raw_values")
+
+            # Normalize RMSE: rmse / (max - min of y_test) * 100
+            y_range = np.ptp(y_test, axis=0)
+            np.seterr(divide="ignore", invalid="ignore")
+            normalized_rmse = (rmse / y_range) * 100
+
+        except Exception as e:
+            print(f"Error in _kfold_itr():\n  {e}")
+            return (None, None, None, None)
+
+        return (normalized_rmse, r2, training_time)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _kfold_cv(self):
+        """
+        """
+        try:
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
+            _, _, _, _, X_scaled, y_scaled = self._scale_arrays(
+                self.rocmlm_feature_array, self.rocmlm_target_array)
+
+            if self.ml_algo == "UNet":
+                X_scaled = self._shape_for_unet(X_scaled, "features")
+                y_scaled = self._shape_for_unet(y_scaled, "targets")
+
+            n_splits = min(self.kfolds, X_scaled.shape[0])
+            kf = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
+
+            fold_args = [(train_idx, test_idx) for train_idx, test_idx in kf.split(X_scaled)]
+
+            print("Cross-validating RocMLM ...")
+            if self.device.type == "mps":
+                results = [self._kfold_itr(fold, X_scaled, y_scaled) for fold in fold_args]
+            else:
+                with cf.ProcessPoolExecutor(max_workers=self.nprocs) as executor:
+                    results = list(executor.map(
+                        lambda fold: self._kfold_itr(fold, X_scaled, y_scaled), fold_args
+                    ))
+
+            self.model_cross_validated = True
+            self._process_kfold_results(results)
+
+        except Exception as e:
+            print(f"Error in _kfold_cv():\n  {e}")
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _fit_training_data(self):
+        """
+        """
+        try:
+            if self.rocmlm is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
+
+            if not self.model_cross_validated:
+                print("Warning: ML model not cross validated. "
+                      "Cannot provide performance metrics ...")
+
+            if self.rocmlm_feature_array.size == 0:
+                raise Exception("No training features!")
+            if self.rocmlm_target_array.size == 0:
+                raise Exception("No training targets!")
+
+            # Scale data
+            _, _, scaler_X, scaler_y, X_scaled, y_scaled = self._scale_arrays(
+                self.rocmlm_feature_array, self.rocmlm_target_array)
+
+            # Train-test split
+            if self.ml_algo != "UNet":
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X_scaled, y_scaled, test_size=0.2, random_state=self.seed)
+            else:
+                X_scaled = self._shape_for_unet(X_scaled, "features")
+                y_scaled = self._shape_for_unet(y_scaled, "targets")
+
+                all_idx = list(range(X_scaled.shape[0]))
+                train_idx, test_idx = train_test_split(
+                    all_idx, test_size=0.2, random_state=self.seed)
+
+                # Split data along n_samples
+                X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
+                y_train, y_test = y_scaled[train_idx], y_scaled[test_idx]
+
+            if self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"]:
+                loss_curve = self._train_torch_net(X_train, y_train, X_test, y_test)
+                self._visualize_loss_curve(loss_curve)
+            else:
+                print(f"Training model {self.model_prefix} ...")
+                self.rocmlm.fit(X_train, y_train)
+
+            self.model_trained = True
+            self.rocmlm_scaler_X = scaler_X
+            self.rocmlm_scaler_y = scaler_y
+
+            # Delete gfem models to reduce disk space
+            del self.gfem_models
+
+            with open(self.rocmlm_path, "wb") as file:
+                joblib.dump(self, file, compress=3)
+
+        except Exception as e:
+            print(f"Error in _fit_training_data():\n  {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.4.              Visualize                  !!! ++
@@ -1740,6 +1710,7 @@ class RocMLM:
 
             df = pd.DataFrame.from_dict(loss_curve, orient="index").transpose()
             df.sort_values(by="epoch", inplace=True)
+            df = df[df['epoch'] > df['epoch'].min()]
 
             plt.rcParams["font.size"] = fontsize
 
@@ -1788,41 +1759,6 @@ class RocMLM:
             return None
 
         return geotherms
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_square_predictions_for_array_image(self):
-        """
-        """
-        try:
-            X, y = self.rocmlm_feature_array.copy(), self.rocmlm_target_array.copy()
-            X_scaled = self.rocmlm_scaler_X.transform(X)
-
-            if (self.ml_algo in ["SimpleNet", "ImprovedNet", "UNet"]
-                    and self.device.type == "mps"):
-                if self.ml_algo == "UNet":
-                    X_scaled = self._shape_for_unet(X_scaled, "features")
-                    X_scaled = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
-                    y_pred_scaled = self.rocmlm.predict(X_scaled)
-                    y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
-                    y_pred_scaled = self._unshape_from_unet(y_pred_scaled)
-                elif self.ml_algo in ["SimpleNet", "ImprovedNet"]:
-                    X_scaled = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
-                    y_pred_scaled = self.rocmlm.predict(X_scaled)
-                    y_pred_scaled = y_pred_scaled.detach().cpu().numpy()
-            else:
-                if self.ml_algo == "UNet":
-                    X_test = self._shape_for_unet(X_test, "features")
-                    y_pred_scaled = self.rocmlm(X_test)
-                    y_pred_scaled = self._unshape_from_unet(y_pred_scaled)
-                else:
-                    y_pred_scaled = self.rocmlm.predict(X_scaled)
-
-            pred_original = self.rocmlm_scaler_y.inverse_transform(y_pred_scaled)
-
-            return pred_original.reshape(self.rocmlm_target_array_shape_square)
-
-        except Exception as e:
-            print(f"Error in _get_square_predictions_for_array_image():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_square_target_for_array_image(self, sid, target, target_index,
@@ -1948,16 +1884,28 @@ class RocMLM:
             if not os.path.exists(self.fig_dir):
                 os.makedirs(self.fig_dir, exist_ok=True)
 
-            gfem_target_array_square = \
-                self.rocmlm_target_array.reshape(self.rocmlm_target_array_shape_square)
-            gfem_feature_array_square = \
-                self.rocmlm_feature_array.reshape(self.rocmlm_feature_array_shape_square)
-            rocmlm_prediction_array_square = self._get_square_predictions_for_array_image()
+            X, y, _, scaler_y, X_scaled, _ = self._scale_arrays(
+                self.rocmlm_feature_array, self.rocmlm_target_array)
 
-            n_feats = gfem_feature_array_square.shape[-1] - 2
-            target_array = gfem_target_array_square[sid_idx, :, :, :]
-            feature_array = gfem_feature_array_square[sid_idx, :, :, :]
-            pred_array = rocmlm_prediction_array_square[sid_idx, :, :, :]
+            X_square = X.reshape(self.rocmlm_feature_array_shape_square)
+            y_square = y.reshape(self.rocmlm_target_array_shape_square)
+
+            if self.ml_algo == "UNet":
+                X_scaled = self._shape_for_unet(X_scaled, "features")
+
+            batch_size = self._determine_batch_size(len(X_scaled))
+            y_pred = self._do_batch_inference(X_scaled, batch_size)
+
+            if self.ml_algo == "UNet":
+                y_pred = self._unshape_from_unet(y_pred)
+
+            y_pred = scaler_y.inverse_transform(y_pred)
+            pred_square = y_pred.reshape(self.rocmlm_target_array_shape_square)
+
+            n_feats = X_square.shape[-1] - 2
+            target_array = y_square[sid_idx, :, :, :]
+            feature_array = X_square[sid_idx, :, :, :]
+            pred_array = pred_square[sid_idx, :, :, :]
 
             if geotherm_type:
                 # Get geotherms
@@ -2086,6 +2034,9 @@ class RocMLM:
         """
         """
         try:
+            if self.rocmlm is None:
+                raise Exception("No RocMLM! Load or train RocMLM first ...")
+
             if not self.model_trained:
                 raise Exception("No RocMLM! Call train() first ...")
 
@@ -2115,11 +2066,11 @@ class RocMLM:
             # Make predictions on features
             X_scaled = self.rocmlm_scaler_X.transform(X)
             inference_start_time = time.time()
-            pred_scaled = self.rocmlm.predict(X_scaled)
+            y_pred = self.rocmlm.predict(X)
             inference_end_time = time.time()
             inference_time = (inference_end_time - inference_start_time) * 1e3
             inference_time_per_node = inference_time / X.shape[0]
-            pred_original = self.rocmlm_scaler_y.inverse_transform(pred_scaled)
+            y_pred = self.rocmlm_scaler_y.inverse_transform(y_pred)
 
             print(f"  {X.shape[0]} nodes completed in {inference_time:.4f} "
                   f"milliseconds ({inference_time_per_node:.4f} ms per node)...")
@@ -2128,7 +2079,7 @@ class RocMLM:
             print(f"Error in inference():\n  {e}")
             return None
 
-        return pred_original
+        return y_pred
 
 #######################################################
 def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "SimpleNet", "ImprovedNet", "UNet"],
@@ -2173,7 +2124,7 @@ def load_pretrained_rocmlm(rocmlm_path):
                 model = joblib.load(file)
 
             if model.rocmlm is None:
-                raise Exception("RocMLM model not loaded properly!")
+                raise Exception("RocMLM not loaded properly!")
         else:
             print(f"File {rocmlm_path} does not exist!")
 
