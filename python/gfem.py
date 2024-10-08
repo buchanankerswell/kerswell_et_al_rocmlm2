@@ -839,7 +839,7 @@ class GFEMModel:
             Exception: If any error occurs during geotherm calculation.
         """
         try:
-            array_size = (self.res + 1) * 10
+            array_size = (self.res) * 10
             litho_P_gradient = 35e3
             Z_min = self.P_min * litho_P_gradient
             Z_max = self.P_max * litho_P_gradient
@@ -925,8 +925,8 @@ class GFEMModel:
                 f"intermediate_savrpc    T\n"
                 f"warn_no_limit          F\n"
                 f"grid_levels            1 1\n"
-                f"x_nodes                {int(self.res / 4)} {self.res + 1}\n"
-                f"y_nodes                {int(self.res / 4)} {self.res + 1}\n"
+                f"x_nodes                {self.res // 4} {self.res}\n"
+                f"y_nodes                {self.res // 4} {self.res}\n"
                 f"bounds                 VRH\n"
                 f"vrh/hs_weighting       0.5\n"
                 f"Anderson-Gruneisen     F\n"
@@ -1761,17 +1761,28 @@ class GFEMModel:
             encoded_assemblages = self._encode_assemblages(results["phase_assemblage"])
             results["assemblage_index"] = encoded_assemblages
 
-            # Write results to CSV
-            df = pd.DataFrame.from_dict(results)
+            # Create results df
+            results_df = pd.DataFrame.from_dict(results)
+
+            # Create feature df
+            f_cols = [c + "_FEAT" for c in self.features]
+            f_vals = self.sample_features
+            feature_data = {c: [v] * len(results_df) for c, v in zip(f_cols, f_vals)}
+            feature_df = pd.DataFrame(feature_data)
+
+            # Concat feature df with results
+            df = pd.concat([results_df, feature_df], axis=1)
 
             if self.verbose >= 1:
                 print(f"  Writing Perple_X results to {self.model_out_dir}/results.csv ...")
 
+            # Write results to CSV
             df.to_csv(f"{self.model_out_dir}/results.csv", index=False)
             self.model_built = True
 
         except Exception as e:
             print(f"Error in _process_perplex_results():\n  {e}")
+            traceback.print_exc()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_results(self):
@@ -2104,7 +2115,7 @@ class GFEMModel:
         """
         """
         try:
-            square_target = self.target_array[:, index].reshape(self.res + 1, self.res + 1)
+            square_target = self.target_array[:, index].reshape(self.res, self.res)
 
             if gradient:
                 edges_x = cv2.Sobel(square_target, cv2.CV_64F, 1, 0, ksize=3)
@@ -2271,8 +2282,8 @@ class GFEMModel:
         """
         try:
             plt.rcParams["font.size"] = fontsize
-            P = self.results["P"].reshape(self.res + 1, self.res + 1)
-            T = self.results["T"].reshape(self.res + 1, self.res + 1)
+            P = self.results["P"].reshape(self.res, self.res)
+            T = self.results["T"].reshape(self.res, self.res)
 
             if not self.model_built:
                 raise Exception("No GFEM model! Call build() first ...")
