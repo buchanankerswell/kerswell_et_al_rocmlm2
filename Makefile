@@ -23,7 +23,7 @@ DATAPURGE = log \
 						$(DATADIR)/gfem_summaries \
 						$(DATADIR)/earthchem-pca.csv \
 						$(DATADIR)/earthchem-counts.csv
-DATACLEAN = assets Perple_X gfems rocmlms
+DATACLEAN = assets Perple_X gfems pretrained_rocmlms
 FIGSPURGE =
 FIGSCLEAN = figs
 

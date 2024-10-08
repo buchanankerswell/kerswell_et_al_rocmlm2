@@ -8,7 +8,7 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Build training database and train RocMLM
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gfem_config = "assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml"
+    gfem_config = "assets/config_yamls/demo-dataset.yaml"
     rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
 
     gfems = build_gfem_models(config_yaml=gfem_config)
