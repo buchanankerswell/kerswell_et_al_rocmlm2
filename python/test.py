@@ -12,9 +12,7 @@ def main():
     rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
 
     gfems = build_gfem_models(config_yaml=gfem_config)
-
     paths = glob.glob("gfems/*/results.csv")
-    paths = paths[::16]
 
 #    mod = RocMLM(paths, "SimpleNet", config_yaml=rocmlm_config)
 #    mod.train()
