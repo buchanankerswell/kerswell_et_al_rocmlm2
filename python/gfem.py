@@ -179,7 +179,7 @@ class GFEMModel:
             })
 
         except Exception as e:
-            print(f"Error in _load_perplex_options():\n  {e}")
+            print(f"Error in _load_perplex_options(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_perplex_options(self):
@@ -238,8 +238,8 @@ class GFEMModel:
                         "melt_mod": "melt(HGPH)",
                         "fluid_in_properties": "N",
                         "fluid_in_assemblages": "Y",
-                        "td_data_file": f"assets/hp02-td",
-                        "sl_data_file": f"assets/hp-sl",
+                        "td_data_file": "assets/hp02-td",
+                        "sl_data_file": "assets/hp-sl",
                         "em_exclude": ["anL", "enL", "foL", "fo8L", "foHL", "diL", "woGL",
                                        "liz", "ak", "pswo", "wo"],
                         "sl_include": ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)",
@@ -253,8 +253,8 @@ class GFEMModel:
                         "melt_mod": "melt(HGPH)",
                         "fluid_in_properties": "N",
                         "fluid_in_assemblages": "Y",
-                        "td_data_file": f"assets/hp11-td",
-                        "sl_data_file": f"assets/hp-sl",
+                        "td_data_file": "assets/hp11-td",
+                        "sl_data_file": "assets/hp-sl",
                         "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
                                        "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
                                        "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
@@ -270,8 +270,8 @@ class GFEMModel:
                         "melt_mod": "melt(HGPH)",
                         "fluid_in_properties": "N",
                         "fluid_in_assemblages": "Y",
-                        "td_data_file": f"assets/hp622-td",
-                        "sl_data_file": f"assets/hp-sl",
+                        "td_data_file": "assets/hp622-td",
+                        "sl_data_file": "assets/hp-sl",
                         "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
                                        "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
                                        "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
@@ -287,8 +287,8 @@ class GFEMModel:
                         "melt_mod": "melt(HGPH)",
                         "fluid_in_properties": "N",
                         "fluid_in_assemblages": "Y",
-                        "td_data_file": f"assets/hp633-td",
-                        "sl_data_file": f"assets/hp-sl",
+                        "td_data_file": "assets/hp633-td",
+                        "sl_data_file": "assets/hp-sl",
                         "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
                                        "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
                                        "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
@@ -304,8 +304,8 @@ class GFEMModel:
                         "melt_mod": "",
                         "fluid_in_properties": "N",
                         "fluid_in_assemblages": "Y",
-                        "td_data_file": f"assets/stx21-td",
-                        "sl_data_file": f"assets/stx21-sl",
+                        "td_data_file": "assets/stx21-td",
+                        "sl_data_file": "assets/stx21-sl",
                         "em_exclude": ["ca-pv"],
                         "sl_include": ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring",
                                        "Opx", "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
@@ -329,7 +329,7 @@ class GFEMModel:
             self.fluid_in_assemblages = config["fluid_in_assemblages"]
 
         except Exception as e:
-            print(f"Error in _load_perplex_options():\n  {e}")
+            print(f"Error in _load_perplex_options(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_target_maps(self):
@@ -504,7 +504,7 @@ class GFEMModel:
             self.targets = [t for t in self.target_labels_map.keys() if t not in ["P", "T"]]
 
         except Exception as e:
-            print(f"Error in _load_target_maps():\n  {e}")
+            print(f"Error in _load_target_maps(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_sample_features(self):
@@ -532,7 +532,7 @@ class GFEMModel:
                 df["SAMPLEID"] == self.sid, self.features].values.flatten().tolist()
 
         except Exception as e:
-            print(f"Error in _get_sample_features():\n  {e}")
+            print(f"Error in _get_sample_features(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_normalized_sample_comp(self):
@@ -589,7 +589,7 @@ class GFEMModel:
             ]
 
         except Exception as e:
-            print(f"Error in _get_normalized_sample_comp():\n  {e}")
+            print(f"Error in _get_normalized_sample_comp(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _generate_perplex_config_strings(self):
@@ -601,6 +601,9 @@ class GFEMModel:
                            "CR2O3": "Cr2O3", "H2O": "H2O"}
             oxides = [oxides_list[key] for key in oxides_list if key in self.ox_gfem]
             oxides_string = "\n".join(oxides)
+            norm_sample_comp_string = " ".join(map(str, self.norm_sample_comp))
+            em_exclude_string = "\n".join(self.em_exclude)
+            sl_include_string = "\n".join(self.sl_include)
             if self.perplex_db not in ["hp11", "hp622", "hp633"]:
                 oxides_string = oxides_string.upper()
 
@@ -622,14 +625,14 @@ class GFEMModel:
                     f"{self.T_min} {self.T_max}\n"
                     f"{self.P_min * 1e4} {self.P_max * 1e4}\n"
                     f"Y\n"
-                    f"{' '.join(map(str, self.norm_sample_comp))}\n"
+                    f"{norm_sample_comp_string}\n"
                     f"N\n"
                     f"Y\n"
                     f"N\n"
-                    f"{'\n'.join(self.em_exclude)}\n\n"
+                    f"{em_exclude_string}\n\n"
                     f"Y\n"
                     f"solution-models\n"
-                    f"{'\n'.join(self.sl_include)}\n\n"
+                    f"{sl_include_string}\n\n"
                     f"{self.sid}\n"
                 )
 
@@ -676,14 +679,14 @@ class GFEMModel:
                     f"{self.T_min} {self.T_max}\n"
                     f"{self.P_min * 1e4} {self.P_max * 1e4}\n"
                     f"Y\n"
-                    f"{' '.join(map(str, self.norm_sample_comp))}\n"
+                    f"{norm_sample_comp_string}\n"
                     f"N\n"
                     f"Y\n"
                     f"N\n"
-                    f"{'\n'.join(self.em_exclude)}\n\n"
+                    f"{em_exclude_string}\n\n"
                     f"Y\n"
                     f"solution-models\n"
-                    f"{'\n'.join(self.sl_include)}\n\n"
+                    f"{sl_include_string}\n\n"
                     f"{self.sid}\n"
                 )
 
@@ -710,7 +713,7 @@ class GFEMModel:
                 )
 
         except Exception as e:
-            print(f"Error in _generate_perplex_config_strings():\n  {e}")
+            print(f"Error in _generate_perplex_config_strings(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_for_existing_model(self):
@@ -742,7 +745,7 @@ class GFEMModel:
                     self._get_pt_array()
 
                 except Exception as e:
-                    print(f"Error in _check_for_existing_model():\n  {e}")
+                    print(f"Error in _check_for_existing_model(): {e}")
                     traceback.print_exc()
 
             else:
@@ -807,7 +810,7 @@ class GFEMModel:
             geotherm = geotherm[["P", "T"]].round(3)
 
         except Exception as e:
-            print(f"Error in _get_subduction_geotherm():\n  {e}")
+            print(f"Error in _get_subduction_geotherm(): {e}")
             return None
 
         return geotherm
@@ -876,7 +879,7 @@ class GFEMModel:
                 {"P": P_geotherm, "T": T_geotherm}).sort_values(by=["P", "T"])
 
         except Exception as e:
-            print(f"Error in _get_mantle_geotherm():\n  {e}")
+            print(f"Error in _get_mantle_geotherm(): {e}")
             return None
 
         return geotherm
@@ -898,10 +901,10 @@ class GFEMModel:
             shutil.copy(self.sl_data_file, f"{self.model_out_dir}/solution-models")
 
         except FileNotFoundError as e:
-            print(f"Error: One or more source files not found:\n  {e}")
+            print(f"Error: One or more source files not found: {e}")
 
         except Exception as e:
-            print(f"An error occurred while copying files:\n  {e}")
+            print(f"An error occurred while copying files: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_build_options(self):
@@ -947,7 +950,7 @@ class GFEMModel:
                 file.write("numeric_field_label T")
 
         except IOError as e:
-            print(f"Error writing BUILD options files:\n  {e}")
+            print(f"Error writing BUILD options files: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_build_config(self):
@@ -966,7 +969,7 @@ class GFEMModel:
                 file.write(self.build_config)
 
         except IOError as e:
-            print(f"Error writing BUILD configuration file:\n  {e}")
+            print(f"Error writing BUILD configuration file: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_vertex_config(self):
@@ -984,7 +987,7 @@ class GFEMModel:
                 file.write(f"{self.sid}")
 
         except IOError as e:
-            print(f"Error writing VERTEX configuration file:\n  {e}")
+            print(f"Error writing VERTEX configuration file: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_werami_config(self):
@@ -1102,7 +1105,7 @@ class GFEMModel:
                     f.write(g)
 
         except Exception as e:
-            print(f"Error writing WERAMI geotherm configuration files:\n  {e}")
+            print(f"Error writing WERAMI geotherm configuration files: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_pssect_config(self):
@@ -1120,7 +1123,7 @@ class GFEMModel:
                 file.write(f"{self.sid}\nN")
 
         except IOError as e:
-            print(f"Error writing PSSECT configuration file:\n  {e}")
+            print(f"Error writing PSSECT configuration file: {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_config(self):
@@ -1154,7 +1157,7 @@ class GFEMModel:
             self._write_perplex_pssect_config()
 
         except Exception as e:
-            print(f"Error in _write_perplex_config():\n  {e}")
+            print(f"Error in _write_perplex_config(): {e}")
             traceback.print_exc()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1216,7 +1219,7 @@ class GFEMModel:
             print("  --------------------")
 
         except Exception as e:
-            print(f"Error in _print_perplex_info():\n  {e}")
+            print(f"Error in _print_perplex_info(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _replace_in_file(self, filepath, replacements):
@@ -1246,7 +1249,7 @@ class GFEMModel:
                 file.write(file_data)
 
         except Exception as e:
-            print(f"Error in _replace_in_file():\n  {e}")
+            print(f"Error in _replace_in_file(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _run_command_line_program(self, program_path, config_file):
@@ -1298,9 +1301,9 @@ class GFEMModel:
                 print(f"{stdout.decode()}")
 
         except subprocess.CalledProcessError as e:
-            print(f"Error in _run_command_line_program():\n  {e}")
+            print(f"Error in _run_command_line_program(): {e}")
         except IOError as e:
-            print(f"IO Error occurred in _run_command_line_program():\n  {e}")
+            print(f"IO Error occurred in _run_command_line_program(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_build(self):
@@ -1336,7 +1339,7 @@ class GFEMModel:
             self._run_command_line_program("Perple_X/build", config_path)
 
         except Exception as e:
-            print(f"Error in _perplex_build():\n  {e}")
+            print(f"Error in _perplex_build(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_vertex(self):
@@ -1376,7 +1379,7 @@ class GFEMModel:
             self._run_command_line_program("Perple_X/vertex", config_path)
 
         except Exception as e:
-            print(f"Error in _perplex_vertex():\n  {e}")
+            print(f"Error in _perplex_vertex(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_werami(self):
@@ -1449,7 +1452,7 @@ class GFEMModel:
                     os.remove(f"{self.model_out_dir}/{self.sid}_1.tab")
 
         except Exception as e:
-            print(f"Error in _perplex_werami():\n  {e}")
+            print(f"Error in _perplex_werami(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_pssect(self):
@@ -1484,7 +1487,7 @@ class GFEMModel:
             os.remove(f"{self.model_out_dir}/{self.sid}_assemblages.txt")
 
         except Exception as e:
-            print(f"Error in _perplex_build():\n  {e}")
+            print(f"Error in _perplex_build(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _build_perplex_model(self):
@@ -1512,7 +1515,7 @@ class GFEMModel:
             self._perplex_pssect()
 
         except Exception as e:
-            print(f"Error in _build_perplex_model():\n  {e}")
+            print(f"Error in _build_perplex_model(): {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.2.        Post-process GFEM Models         !!! ++
@@ -1592,7 +1595,7 @@ class GFEMModel:
                 raise Exception(f"No data was read from the files!")
 
         except Exception as e:
-            print(f"Error in _read_perplex_targets():\n  {e}")
+            print(f"Error in _read_perplex_targets(): {e}")
             return None
 
         return results
@@ -1640,7 +1643,7 @@ class GFEMModel:
                     assemblage_dict[i] = assemblages
 
         except Exception as e:
-            print(f"Error in _read_perplex_assemblages():\n  {e}")
+            print(f"Error in _read_perplex_assemblages(): {e}")
             return None
 
         return assemblage_dict
@@ -1696,7 +1699,7 @@ class GFEMModel:
                     encoded_assemblages.append(encoded_assemblage)
 
         except Exception as e:
-            print(f"Error in _encode_assemblages():\n  {e}")
+            print(f"Error in _encode_assemblages(): {e}")
             return None
 
         return encoded_assemblages
@@ -1781,7 +1784,7 @@ class GFEMModel:
             self.model_built = True
 
         except Exception as e:
-            print(f"Error in _process_perplex_results():\n  {e}")
+            print(f"Error in _process_perplex_results(): {e}")
             traceback.print_exc()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1813,7 +1816,7 @@ class GFEMModel:
                             for column, values in df.to_dict(orient="list").items()}
 
         except Exception as e:
-            print(f"Error in _get_results():\n  {e}")
+            print(f"Error in _get_results(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_pt_array(self):
@@ -1842,7 +1845,7 @@ class GFEMModel:
             self.pt_array = np.stack((P, T), axis=-1).copy()
 
         except Exception as e:
-            print(f"Error in _get_pt_array():\n  {e}")
+            print(f"Error in _get_pt_array(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_target_array(self):
@@ -1872,7 +1875,7 @@ class GFEMModel:
             self.target_array = np.stack(target_array_list, axis=-1).copy()
 
         except Exception as e:
-            print(f"Error in _get_target_array():\n  {e}")
+            print(f"Error in _get_target_array(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _extract_target_along_geotherm(self, target, geotherm):
@@ -1912,7 +1915,7 @@ class GFEMModel:
             df = pd.DataFrame({"P": geo_P, "T": geo_T, target: target_interp})
 
         except Exception as e:
-            print(f"Error in _extract_target_along_geotherm():\n  {e}")
+            print(f"Error in _extract_target_along_geotherm(): {e}")
             return None
 
         return df
@@ -1990,7 +1993,7 @@ class GFEMModel:
             ]
 
         except Exception as e:
-            print(f"Error in _check_model_array_surfs():\n  {e}")
+            print(f"Error in _check_model_array_surfs(): {e}")
             return None
 
         # Check if the number of existing figures matches the number of targets to visualize
@@ -2105,7 +2108,7 @@ class GFEMModel:
                         crust_thickness=7e3, litho_thickness=1e3)
 
         except Exception as e:
-            print(f"Error in _get_geotherms_for_array_image():\n  {e}")
+            print(f"Error in _get_geotherms_for_array_image(): {e}")
             return None
 
         return geotherms
@@ -2125,7 +2128,7 @@ class GFEMModel:
                                  if max_val > 0 else np.zeros_like(edges_x))
 
         except Exception as e:
-            print(f"Error in _get_square_target_for_array_image():\n  {e}")
+            print(f"Error in _get_square_target_for_array_image(): {e}")
             return None
 
         return square_target
@@ -2149,7 +2152,7 @@ class GFEMModel:
             cmap.set_bad(color="0.9")
 
         except Exception as e:
-            print(f"Error in _get_colormap_for_array_image():\n  {e}")
+            print(f"Error in _get_colormap_for_array_image(): {e}")
             return None
 
         return cmap
@@ -2168,7 +2171,7 @@ class GFEMModel:
                               if non_nan_values.size > 0 else (0, 0))
 
         except Exception as e:
-            print(f"Error in _get_vmin_vmax_for_array_image():\n  {e}")
+            print(f"Error in _get_vmin_vmax_for_array_image(): {e}")
             return None, None
 
         return vmin, vmax
@@ -2190,7 +2193,7 @@ class GFEMModel:
                             linewidth=2, label=pot)
 
         except Exception as e:
-            print(f"Error in _plot_geotherms_on_array_image():\n  {e}")
+            print(f"Error in _plot_geotherms_on_array_image(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _visualize_array_image(self, geotherm_type="sub", palette="bone", gradient=False,
@@ -2238,7 +2241,7 @@ class GFEMModel:
                 square_target = self._get_square_target_for_array_image(i, gradient)
 
                 if gradient:
-                    filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                    filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
                                 f"grad-{geotherm_type}.png")
                     title = f"{target_label} Gradient"
 
@@ -2273,7 +2276,7 @@ class GFEMModel:
                 print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
-            print(f"Error in _visualize_array_image():\n  {e}")
+            print(f"Error in _visualize_array_image(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _visualize_array_surf(self, palette="bone", gradient=False, figwidth=6.3,
@@ -2312,7 +2315,7 @@ class GFEMModel:
                 square_target = self._get_square_target_for_array_image(i, gradient)
 
                 if gradient:
-                    filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                    filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
                                 f"grad-surf.png")
                     title = f"{target_label} Gradient"
 
@@ -2353,7 +2356,7 @@ class GFEMModel:
                 print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
-            print(f"Error in _visualize_array_surf():\n  {e}")
+            print(f"Error in _visualize_array_surf(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _generate_subduction_profiles(self, target, slab_position):
@@ -2362,7 +2365,7 @@ class GFEMModel:
         try:
             Pprof, tprof, labels = [], [], []
             for j, seg in enumerate(self.segs):
-                filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+                filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
                             f"depth-profile-sub-{slab_position}.png")
 
                 gt = self._get_subduction_geotherm(seg, slab_position=slab_position)
@@ -2374,7 +2377,7 @@ class GFEMModel:
                 tprof.append(df_gt[target])
 
         except Exception as e:
-            print(f"Error in _generate_subduction_profiles():\n  {e}")
+            print(f"Error in _generate_subduction_profiles(): {e}")
             return None, None, None, None
 
         return filename, Pprof, tprof, labels
@@ -2385,7 +2388,7 @@ class GFEMModel:
         """
         try:
             Pprof, tprof, labels = [], [], []
-            filename = (f"{self.sid}-{self.perplex_db}-{target.replace("_", "-")}-"
+            filename = (f"{self.sid}-{self.perplex_db}-{target.replace('_', '-')}-"
                         f"depth-profile-{geotherm_type}.png")
 
             for j, pot in enumerate(self.pot_Ts):
@@ -2403,7 +2406,7 @@ class GFEMModel:
                 tprof.append(df_gt[target])
 
         except Exception as e:
-            print(f"Error in _generate_mantle_profiles():\n  {e}")
+            print(f"Error in _generate_mantle_profiles(): {e}")
             return None, None, None, None
 
         return filename, Pprof, tprof, labels
@@ -2477,7 +2480,7 @@ class GFEMModel:
                 print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
-            print(f"Error in _visualize_depth_profiles():\n  {e}")
+            print(f"Error in _visualize_depth_profiles(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_werami_geotherm_paths(self, geotherm_type):
@@ -2510,7 +2513,7 @@ class GFEMModel:
                         raise Exception(f"No werami data found at {path}!")
 
         except Exception as e:
-            print(f"Error in _check_werami_geotherm_paths():\n  {e}")
+            print(f"Error in _check_werami_geotherm_paths(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _prepare_geotherm_paths_for_assemblages(self, geotherm_type, slab_position):
@@ -2543,7 +2546,7 @@ class GFEMModel:
                             crust_thickness=7e3, litho_thickness=1e3))
 
         except Exception as e:
-            print(f"Error in _prepare_geotherm_paths_for_assemblages():\n  {e}")
+            print(f"Error in _prepare_geotherm_paths_for_assemblages(): {e}")
             return None, None, None, None
 
         return tabfiles, filenames, gts, labels
@@ -2595,7 +2598,7 @@ class GFEMModel:
             color_map = {col_name: colors[idx] for idx, col_name in enumerate(phase_names)}
 
         except Exception as e:
-            print(f"Error in _get_phase_names_for_assemblages():\n  {e}")
+            print(f"Error in _get_phase_names_for_assemblages(): {e}")
             return None, None
 
         return phase_names, color_map
@@ -2623,7 +2626,7 @@ class GFEMModel:
                 col for col in df.columns if (df[col] < modal_thresh).all()])
 
         except Exception as e:
-            print(f"Error in _get_geotherm_assemblage_from_tabfile():\n  {e}")
+            print(f"Error in _get_geotherm_assemblage_from_tabfile(): {e}")
             return None
 
         return df
@@ -2731,7 +2734,7 @@ class GFEMModel:
                 print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
-            print(f"Error in _visualize_geotherm_assemblages():\n  {e}")
+            print(f"Error in _visualize_geotherm_assemblages(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize(self):
@@ -2775,7 +2778,7 @@ class GFEMModel:
                     geotherm_type="sub", slab_position="slabmoho")
 
         except Exception as e:
-            print(f"Error in visualize():\n  {e}")
+            print(f"Error in visualize(): {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.4.           Build GFEM Models             !!! ++
@@ -2806,7 +2809,7 @@ class GFEMModel:
                 break
 
             except Exception as e:
-                print(f"Error in build():\n  {e}")
+                print(f"Error in build(): {e}")
                 traceback.print_exc()
 
                 if retry < max_retries - 1:
@@ -2843,7 +2846,7 @@ def get_sample_ids(filepath, batch="all", n_batches=8):
         sampleids = df["SAMPLEID"].values
 
     except Exception as e:
-        print(f"Error in get_sample_ids():\n  {e}")
+        print(f"Error in get_sample_ids(): {e}")
         return None
 
     return sampleids
@@ -2879,7 +2882,7 @@ def gfem_itr(args):
             iteration.build()
 
     except Exception as e:
-        print(f"Error in gfem_itr():\n  {e}")
+        print(f"Error in gfem_itr(): {e}")
         return None
 
     return iteration
@@ -2980,7 +2983,7 @@ def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8
         print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     except Exception as e:
-        print(f"Error in build_gfem_models():\n  {e}")
+        print(f"Error in build_gfem_models(): {e}")
         return None
 
     return gfems
@@ -3012,7 +3015,7 @@ def main():
             build_gfem_models(config_yaml=yaml)
 
     except Exception as e:
-        print(f"Error in main():\n  {e}")
+        print(f"Error in main(): {e}")
 
 if __name__ == "__main__":
     main()

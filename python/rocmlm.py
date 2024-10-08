@@ -595,7 +595,7 @@ class RocMLM:
             np.random.seed(self.seed)
 
         except Exception as e:
-            print(f"Error in _load_global_options():\n  {e}")
+            print(f"Error in _load_global_options(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_rocmlm_options(self):
@@ -758,7 +758,7 @@ class RocMLM:
                 self.weight_decay = self.default_hyperparams["weight_decay"]
 
         except Exception as e:
-            print(f"Error in _load_rocmlm_options():\n  {e}")
+            print(f"Error in _load_rocmlm_options(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _shape_for_unet(self, input_array, array_type):
@@ -777,7 +777,7 @@ class RocMLM:
             input_array = input_array.reshape(-1, C, R, R)
 
         except Exception as e:
-            print(f"Error in _shape_for_unet():\n  {e}")
+            print(f"Error in _shape_for_unet(): {e}")
             return None
 
         return input_array
@@ -798,7 +798,7 @@ class RocMLM:
             input_array = input_array.reshape(-1, C)
 
         except Exception as e:
-            print(f"Error in _unshape_from_unet():\n  {e}")
+            print(f"Error in _unshape_from_unet(): {e}")
             return None
 
         return input_array
@@ -862,7 +862,7 @@ class RocMLM:
                 scaled_dataset, batch_size=self.csv_batch_size, collate_fn=self._collate_fn)
 
         except Exception as e:
-            print(f"Error in _scale_dataloader():\n  {e}")
+            print(f"Error in _scale_dataloader(): {e}")
             return None, None, None
 
         return scaled_dataloader, scaler_X, scaler_y
@@ -892,7 +892,7 @@ class RocMLM:
                 batch_size=self.csv_batch_size, shuffle=False, collate_fn=collate_fn)
 
         except Exception as e:
-            print(f"Error in _train_test_split_dataloader():\n  {e}")
+            print(f"Error in _train_test_split_dataloader(): {e}")
             return None, None
 
         return train_loader, test_loader
@@ -930,7 +930,7 @@ class RocMLM:
                 self._train_test_split_dataloader(self.loader_scaled)
 
         except Exception as e:
-            print(f"Error in _load_training_data():\n  {e}")
+            print(f"Error in _load_training_data(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_pretrained_rocmlm(self, rocmlm_path):
@@ -955,7 +955,7 @@ class RocMLM:
                 print(f"File {rocmlm_path} does not exist!")
 
         except Exception as e:
-            print(f"Error in _load_pretrained_rocmlm():\n  {e}")
+            print(f"Error in _load_pretrained_rocmlm(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_existing_model(self):
@@ -970,7 +970,7 @@ class RocMLM:
                 os.makedirs(self.model_out_dir, exist_ok=True)
 
         except Exception as e:
-            print(f"Error in _check_existing_model():\n  {e}")
+            print(f"Error in _check_existing_model(): {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.2.               RocMLMs                   !!! ++
@@ -986,7 +986,7 @@ class RocMLM:
                 lr = base_lr
 
         except Exception as e:
-            print(f"Error in _warmup_lr():\n  {e}")
+            print(f"Error in _warmup_lr(): {e}")
             return None
 
         return lr
@@ -1027,7 +1027,7 @@ class RocMLM:
                     y_pred = y_pred.detach().cpu().numpy()
 
         except Exception as e:
-            print(f"Error in _do_inference():\n  {e}")
+            print(f"Error in _do_inference(): {e}")
             return None
 
         return y_pred
@@ -1059,7 +1059,7 @@ class RocMLM:
             y_pred = np.concatenate(y_pred_list, axis=0)
 
         except Exception as e:
-            print(f"Error in _do_batch_inference():\n  {e}")
+            print(f"Error in _do_batch_inference(): {e}")
             return None
 
         return y_pred
@@ -1080,7 +1080,7 @@ class RocMLM:
             y = np.concatenate(y_list, axis=0)
 
         except Exception as e:
-            print(f"Error in _load_all_data_from_dataloader():\n  {e}")
+            print(f"Error in _load_all_data_from_dataloader(): {e}")
 
         return X, y
 
@@ -1121,7 +1121,7 @@ class RocMLM:
             self.rocmlm_hyperparams = self.rocmlm.get_params()
 
         except Exception as e:
-            print(f"Error in _tune_scikit_model():\n  {e}")
+            print(f"Error in _tune_scikit_model(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _tune_torch_net(self):
@@ -1353,7 +1353,7 @@ class RocMLM:
             self.rocmlm_hyperparams = self.rocmlm.get_params()
 
         except Exception as e:
-            print(f"Error in _tune_torch_net():\n  {e}")
+            print(f"Error in _tune_torch_net(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _configure_rocmlm(self):
@@ -1377,7 +1377,7 @@ class RocMLM:
                 self.rocmlm_hyperparams = self.rocmlm.get_params()
 
         except Exception as e:
-            print(f"Error in _configure_rocmlm():\n  {e}")
+            print(f"Error in _configure_rocmlm(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _print_rocmlm_info(self):
@@ -1424,7 +1424,7 @@ class RocMLM:
             print("---------------------------------------------")
 
         except Exception as e:
-            print(f"Error in _print_rocmlm_info():\n  {e}")
+            print(f"Error in _print_rocmlm_info(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _train_torch_net(self, train_loader, test_loader):
@@ -1608,7 +1608,7 @@ class RocMLM:
             self.cv_info = cv_info
 
         except Exception as e:
-            print(f"Error in _process_kfold_results():\n  {e}")
+            print(f"Error in _process_kfold_results(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _save_rocmlm_cv_info(self):
@@ -1631,7 +1631,7 @@ class RocMLM:
             df.to_csv(filepath, index=False)
 
         except Exception as e:
-            print(f"Error in _save_rocmlm_cv_info():\n  {e}")
+            print(f"Error in _save_rocmlm_cv_info(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _kfold_itr(self, train_loader, test_loader):
@@ -1674,7 +1674,7 @@ class RocMLM:
             normalized_rmse = (rmse / y_range) * 100
 
         except Exception as e:
-            print(f"Error in _kfold_itr():\n  {e}")
+            print(f"Error in _kfold_itr(): {e}")
             traceback.print_exc()
             return (None, None, None, None)
 
@@ -1712,7 +1712,7 @@ class RocMLM:
             self._process_kfold_results(fold_results)
 
         except Exception as e:
-            print(f"Error in _kfold_cv():\n  {e}")
+            print(f"Error in _kfold_cv(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _train_scikit_learn_model(self, train_loader):
@@ -1723,7 +1723,7 @@ class RocMLM:
             self.rocmlm.fit(X, y)
 
         except Exception as e:
-            print(f"Error in _train_scikit_learn_model():\n  {e}")
+            print(f"Error in _train_scikit_learn_model(): {e}")
             traceback.print_exc()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1751,7 +1751,7 @@ class RocMLM:
                 joblib.dump(self, file, compress=3)
 
         except Exception as e:
-            print(f"Error in _fit_training_data():\n  {e}")
+            print(f"Error in _fit_training_data(): {e}")
             traceback.print_exc()
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1810,7 +1810,7 @@ class RocMLM:
             geotherm = geotherm[["P", "T"]].round(3)
 
         except Exception as e:
-            print(f"Error in _get_subduction_geotherm():\n  {e}")
+            print(f"Error in _get_subduction_geotherm(): {e}")
             return None
 
         return geotherm
@@ -1879,7 +1879,7 @@ class RocMLM:
                 {"P": P_geotherm, "T": T_geotherm}).sort_values(by=["P", "T"])
 
         except Exception as e:
-            print(f"Error in _get_mantle_geotherm():\n  {e}")
+            print(f"Error in _get_mantle_geotherm(): {e}")
             return None
 
         return geotherm
@@ -1896,13 +1896,13 @@ class RocMLM:
 
             for target in self.rocmlm_targets:
                 path = (f"{self.fig_dir}/{self.model_prefix}-{self.sids[idx]}-"
-                        f"{target.replace("_", "-")}-{plot_type}.png")
+                        f"{target.replace('_', '-')}-{plot_type}.png")
                 if not os.path.exists(path):
                     check = False
                     break
 
         except Exception as e:
-            print(f"Error in _check_rocmlm_images():\n  {e}")
+            print(f"Error in _check_rocmlm_images(): {e}")
             return None
 
         return check
@@ -1944,7 +1944,7 @@ class RocMLM:
             print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
-            print(f"Error in _visualize_loss_curve():\n  {e}")
+            print(f"Error in _visualize_loss_curve(): {e}")
             traceback.print_exc()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1972,7 +1972,7 @@ class RocMLM:
                         crust_thickness=7e3, litho_thickness=1e3)
 
         except Exception as e:
-            print(f"Error in _get_geotherms_for_array_image():\n  {e}")
+            print(f"Error in _get_geotherms_for_array_image(): {e}")
             return None
 
         return geotherms
@@ -1990,11 +1990,11 @@ class RocMLM:
             if plot_type == "predictions":
                 square_target = p
                 filename = (f"{self.model_prefix}-{self.sids[idx]}-"
-                            f"{target.replace("_", "-")}-predictions.png")
+                            f"{target.replace('_', '-')}-predictions.png")
             elif plot_type == "targets":
                 square_target = t
                 filename = (f"{self.model_prefix}-{self.sids[idx]}-"
-                            f"{target.replace("_", "-")}-targets.png")
+                            f"{target.replace('_', '-')}-targets.png")
             elif plot_type == "diff":
                 mask = np.isnan(t)
                 p[mask] = np.nan
@@ -2012,10 +2012,10 @@ class RocMLM:
                     normalized_rmse = (rmse / np.ptp(t_valid)) * 100
 
                 filename = (f"{self.model_prefix}-{self.sids[idx]}-"
-                            f"{target.replace("_", "-")}-diff.png")
+                            f"{target.replace('_', '-')}-diff.png")
 
         except Exception as e:
-            print(f"Error in _get_square_target_for_array_image():\n  {e}")
+            print(f"Error in _get_square_target_for_array_image(): {e}")
             return None
 
         return square_target, filename, r2, rmse
@@ -2039,7 +2039,7 @@ class RocMLM:
             cmap.set_bad(color="0.9")
 
         except Exception as e:
-            print(f"Error in _get_colormap_for_array_image():\n  {e}")
+            print(f"Error in _get_colormap_for_array_image(): {e}")
             return None
 
         return cmap
@@ -2058,7 +2058,7 @@ class RocMLM:
                               if non_nan_values.size > 0 else (0, 0))
 
         except Exception as e:
-            print(f"Error in _get_vmin_vmax_for_array_image():\n  {e}")
+            print(f"Error in _get_vmin_vmax_for_array_image(): {e}")
             return None, None
 
         return vmin, vmax
@@ -2080,7 +2080,7 @@ class RocMLM:
                             linewidth=2, label=pot)
 
         except Exception as e:
-            print(f"Error in _plot_geotherms_on_array_image():\n  {e}")
+            print(f"Error in _plot_geotherms_on_array_image(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _visualize_array_image(self, idx, plot_type="targets", geotherm_type=None,
@@ -2184,8 +2184,7 @@ class RocMLM:
                 print(f"  Figure saved to: {filename} ...")
 
         except Exception as e:
-            print(f"Error in _visualize_array_image():\n  {e}")
-            traceback.print_exc()
+            print(f"Error in _visualize_array_image(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def visualize(self, indices=[0, 1]):
@@ -2201,7 +2200,7 @@ class RocMLM:
                     self._visualize_array_image(i, "predictions")
 
         except Exception as e:
-            print(f"Error in visualize_rocmlm():\n  {e}")
+            print(f"Error in visualize_rocmlm(): {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.5.             Train RocMLMs               !!! ++
@@ -2224,7 +2223,7 @@ class RocMLM:
                 self._fit_training_data()
 
             except Exception as e:
-                print(f"Error in train():\n  {e}")
+                print(f"Error in train(): {e}")
                 traceback.print_exc()
 
                 if retry < max_retries - 1:
@@ -2281,7 +2280,7 @@ class RocMLM:
                   f"milliseconds ({inference_time_per_node:.4f} ms per node)...")
 
         except Exception as e:
-            print(f"Error in inference():\n  {e}")
+            print(f"Error in inference(): {e}")
             return None
 
         return y_pred
@@ -2310,7 +2309,7 @@ def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "SimpleNet", "ImprovedNet",
             print("All RocMLMs built successfully!")
 
     except Exception as e:
-        print(f"Error in train_rocmlms():\n  {e}")
+        print(f"Error in train_rocmlms(): {e}")
         return None
 
     return rocmlms
@@ -2334,7 +2333,7 @@ def load_pretrained_rocmlm(rocmlm_path):
             print(f"File {rocmlm_path} does not exist!")
 
     except Exception as e:
-        print(f"Error in load_pretrained_rocmlm():\n  {e}")
+        print(f"Error in load_pretrained_rocmlm(): {e}")
 
     return model
 
@@ -2355,7 +2354,7 @@ def main():
         rocmlms = train_rocmlms(gfems, config_yaml=rocmlm_config)
 
     except Exception as e:
-        print(f"Error in main():\n  {e}")
+        print(f"Error in main(): {e}")
 
 if __name__ == "__main__":
     main()

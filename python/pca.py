@@ -126,7 +126,7 @@ class MixingArray:
             self.earthchem_raw = data.copy()
 
         except Exception as e:
-            print(f"Error in _read_earthchem_data():\n  {e}")
+            print(f"Error in _read_earthchem_data(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _convert_to_cr2o3(self, df):
@@ -171,7 +171,7 @@ class MixingArray:
             data.loc[condition, "CR"] = np.nan
 
         except Exception as e:
-            print(f"Error in _convert_to_cr2o3():\n  {e}")
+            print(f"Error in _convert_to_cr2o3(): {e}")
             return None
 
         return data
@@ -218,7 +218,7 @@ class MixingArray:
             data.loc[condition, "NI"] = np.nan
 
         except Exception as e:
-            print(f"Error in _convert_to_nio():\n  {e}")
+            print(f"Error in _convert_to_nio(): {e}")
             return None
 
         return data
@@ -303,7 +303,7 @@ class MixingArray:
             data.loc[condition, ["FE2O3", "FEO", "FEOT"]] = np.nan
 
         except Exception as e:
-            print(f"Error in _convert_to_fe2o3t():\n  {e}")
+            print(f"Error in _convert_to_fe2o3t(): {e}")
             return None
 
         return data
@@ -359,7 +359,7 @@ class MixingArray:
                 self.ox_data + self.volatiles].sum(axis=1).round(self.digits)
 
         except Exception as e:
-            print(f"Error in _normalize_volatile_free():\n  {e}")
+            print(f"Error in _normalize_volatile_free(): {e}")
             return None
 
         return data
@@ -443,7 +443,7 @@ class MixingArray:
             data.loc[condition, ["FEO", "FE2O3", "FE2O3T"]] = np.nan
 
         except Exception as e:
-            print(f"Error in _convert_to_feot():\n  {e}")
+            print(f"Error in _convert_to_feot(): {e}")
             return None
 
         return data
@@ -624,7 +624,7 @@ class MixingArray:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
         except Exception as e:
-            print(f"Error in _process_earthchem_data():\n  {e}")
+            print(f"Error in _process_earthchem_data(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _normalize_sample_composition(self, row):
@@ -679,7 +679,7 @@ class MixingArray:
                       self.digits) for comp, oxide in zip(subset_sample, ox_sub)]
 
         except Exception as e:
-            print(f"Error in _normalize_sample_composition():\n  {e}")
+            print(f"Error in _normalize_sample_composition(): {e}")
             return None
 
         return normalized_comps
@@ -776,7 +776,7 @@ class MixingArray:
                 df_bench.to_csv(df_bench_pca_path, index=False)
 
         except Exception as e:
-            print(f"Error in _process_benchmark_samples_pca():\n  {e}")
+            print(f"Error in _process_benchmark_samples_pca(): {e}")
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #+ .1.1.         Create Mixing Arrays            !!! ++
@@ -907,7 +907,7 @@ class MixingArray:
             self.earthchem_pca = data.copy()
 
         except Exception as e:
-            print(f"Error in _run_pca():\n  {e}")
+            print(f"Error in _run_pca(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _add_h2o(self, df):
@@ -953,7 +953,7 @@ class MixingArray:
                 df.groupby(level=0).cumcount().map(lambda x: f"-h2o{str(x).zfill(3)}"))
 
         except Exception as e:
-            print(f"Error in _add_h2o():\n  {e}")
+            print(f"Error in _add_h2o(): {e}")
             return None
 
         return df
@@ -1387,7 +1387,7 @@ class MixingArray:
             self._process_benchmark_samples_pca()
 
         except Exception as e:
-            print(f"Error in create_mixing_array():\n  {e}")
+            print(f"Error in create_mixing_array(): {e}")
             traceback.print_exc()
 
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1834,7 +1834,7 @@ def main():
             print("Mixing array visualized !")
 
         except Exception as e:
-            print(f"Error in main():\n  {e}")
+            print(f"Error in main(): {e}")
             traceback.print_exc()
     else:
         print("Mixing arrays found!")

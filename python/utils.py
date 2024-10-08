@@ -25,7 +25,7 @@ def get_conda_packages(condafile):
         with open(condafile, "r") as file:
             conda_data = yaml.safe_load(file)
     except (IOError, yaml.YAMLError) as e:
-        print(f"Error in get_conda_packages():\n {e}")
+        print(f"Error in get_conda_packages(): {e}")
         return None
 
     return conda_data.get("dependencies", [])
@@ -93,7 +93,7 @@ def download_and_unzip(url, filename, destination):
     except zipfile.BadZipFile as e:
         raise Exception(f"The downloaded file is not a valid zip file !")
     except Exception as e:
-        raise Exception(f"An unexpected error occurred:\n  {e}")
+        raise Exception(f"An unexpected error occurred: {e}")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def compile_perplex():
@@ -103,11 +103,11 @@ def compile_perplex():
         config_dir = "assets/config"
         url = ("https://www.perplex.ethz.ch/perplex/ibm_and_mac_archives/OSX/"
                "previous_version/Perple_X_7.0.9_OSX_ARM_SP_Apr_16_2023.zip")
-        print(f"Installing Perple_X from:\n  {url}")
+        print(f"Installing Perple_X from: {url}")
         download_and_unzip(url, "dynamic.zip", "Perple_X")
         print("Perple_X install successful!")
     except Exception as e:
-        print(f"Error in compile_perplex():\n  {e}")
+        print(f"Error in compile_perplex(): {e}")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
@@ -116,7 +116,7 @@ def main():
     if not os.path.exists("assets"):
         url = ("https://files.osf.io/v1/resources/erdcz/providers/osfstorage/"
                "665d7b3dd835c427734cdd2d/?zip=")
-        print(f"Downloading assets from OSF:\n  {url}")
+        print(f"Downloading assets from OSF: {url}")
         download_and_unzip(url, "all", "assets")
     else:
         print("Data assets found!")
