@@ -13,21 +13,27 @@ def main():
 
     gfems = build_gfem_models(config_yaml=gfem_config)
     paths = glob.glob("gfems/*/results.csv")
+    paths = paths[::4]
 
-#    mod = RocMLM(paths, "SimpleNet", config_yaml=rocmlm_config)
-#    mod.train()
+    mod = RocMLM(paths, "SimpleNet", config_yaml=rocmlm_config)
+    mod.train()
+    mod.visualize()
 
-#    mod = RocMLM(paths, "ImprovedNet", config_yaml=rocmlm_config)
-#    mod.train()
+    mod = RocMLM(paths, "ImprovedNet", config_yaml=rocmlm_config)
+    mod.train()
+    mod.visualize()
 
     mod = RocMLM(paths, "UNet", config_yaml=rocmlm_config)
     mod.train()
+    mod.visualize()
 
-#    mod = RocMLM(paths, "KN", config_yaml=rocmlm_config)
-#    mod.train()
+    mod = RocMLM(paths, "KN", config_yaml=rocmlm_config)
+    mod.train()
+    mod.visualize()
 
-#    mod = RocMLM(paths, "DT", config_yaml=rocmlm_config)
-#    mod.train()
+    mod = RocMLM(paths, "DT", config_yaml=rocmlm_config)
+    mod.train()
+    mod.visualize()
 
 if __name__ == "__main__":
     main()

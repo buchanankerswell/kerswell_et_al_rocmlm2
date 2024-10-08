@@ -369,6 +369,7 @@ class RocMLM:
         self.ml_algo = ml_algo
         self.verbose = verbose
         self.gfem_paths = gfem_paths
+        self.sids = [f.split("/")[1].split("_")[0] for f in gfem_paths]
         self.config_yaml = config_yaml
 
         if (len(self.gfem_paths) == 0 or
@@ -397,7 +398,7 @@ class RocMLM:
                              f"S{self.square_X_shape[0]}-"
                              f"F{self.square_X_shape[1]}-"
                              f"T{self.square_y_shape[1]}-"
-                             f"R{self.square_y_shape[2]}-")
+                             f"R{self.square_y_shape[2]}")
 
         self.fig_dir = (f"figs/{self.model_out_dir}/{self.model_prefix}")
         self.rocmlm_path = f"{self.model_out_dir}/{self.model_prefix}.pkl"
@@ -452,6 +453,144 @@ class RocMLM:
                 "legend.fontsize": "small",
                 "figure.autolayout": True
             })
+
+            self.target_units_map = {
+                "T":                         "K",
+                "P":                         "bar",
+                "mass":                      "g",
+                "moles":                     "mol",
+                "density":                   "kg/m3",
+                "melt_fraction":             "vol%",
+                "expansivity":               "1/K",
+                "compressibility":           "1/bar",
+                "molar_enthalpy":            "J/mol",
+                "molar_entropy":             "J/K/mol",
+                "molar_volume":              "J/bar/mol",
+                "molar_heat_capacity":       "J/K/mol",
+                "heat_capacity_ratio":       "",
+                "Vp":                        "km/s",
+                "Vp_dP":                     "km/s/bar",
+                "Vp_dT":                     "km/s/K",
+                "Vs":                        "km/s",
+                "Vs_dP":                     "km/s/bar",
+                "Vs_dT":                     "km/s/K",
+                "sound_velocity":            "km/s",
+                "sound_velocity_dP":         "km/s/bar",
+                "sound_velocity_dT":         "km/s/K",
+                "Vp/Vs":                     "",
+                "bulk_modulus":              "bar",
+                "bulk_modulus_dP":           "",
+                "bulk_modulus_dT":           "bar/K",
+                "shear_modulus":             "bar",
+                "shear_modulus_dP":          "",
+                "shear_modulus_dT":          "bar/K",
+                "molar_gibbs_free_energy":   "kg/m3",
+                "gruneisen_thermal_ratio":   "",
+                "assemblage_index":          "",
+                "phase_assemblage_variance": "",
+                "SIO2":                      "wt.%",
+                "AL203":                     "wt.%",
+                "CAO":                       "wt.%",
+                "MGO":                       "wt.%",
+                "FEO":                       "wt.%",
+                "NA20":                      "wt.%",
+                "K2O":                       "wt.%",
+                "TIO2":                      "wt.%",
+                "CR2O3":                     "wt.%",
+                "H2O":                       "wt.%",
+            }
+
+            self.target_digits_map = {
+                "T":                         "%.1f",
+                "P":                         "%.1f",
+                "mass":                      "%.1f",
+                "moles":                     "%.1f",
+                "density":                   "%.1f",
+                "melt_fraction":             "%.0f",
+                "expansivity":               "%.1f",
+                "compressibility":           "%.1f",
+                "molar_enthalpy":            "%.1f",
+                "molar_entropy":             "%.0f",
+                "molar_volume":              "%.1f",
+                "molar_heat_capacity":       "%.0f",
+                "heat_capacity_ratio":       "%.1f",
+                "Vp":                        "%.1f",
+                "Vp_dP":                     "%.1f",
+                "Vp_dT":                     "%.1f",
+                "Vs":                        "%.1f",
+                "Vs_dP":                     "%.1f",
+                "Vs_dT":                     "%.1f",
+                "sound_velocity":            "%.1f",
+                "sound_velocity_dP":         "%.1f",
+                "sound_velocity_dT":         "%.1f",
+                "Vp/Vs":                     "%.1f",
+                "bulk_modulus":              "%.1f",
+                "bulk_modulus_dP":           "%.1f",
+                "bulk_modulus_dT":           "%.1f",
+                "shear_modulus":             "%.1f",
+                "shear_modulus_dP":          "%.1f",
+                "shear_modulus_dT":          "%.1f",
+                "molar_gibbs_free_energy":   "%.1f",
+                "gruneisen_thermal_ratio":   "%.1f",
+                "assemblage_index":          "%.0f",
+                "phase_assemblage_variance": "%.0f",
+                "SIO2":                      "%.1f",
+                "AL203":                     "%.1f",
+                "CAO":                       "%.1f",
+                "MGO":                       "%.1f",
+                "FEO":                       "%.1f",
+                "NA20":                      "%.1f",
+                "K2O":                       "%.1f",
+                "TIO2":                      "%.1f",
+                "CR2O3":                     "%.1f",
+                "H2O":                       "%.1f",
+            }
+
+            self.target_labels_map = {
+                "T":                         "T",
+                "P":                         "P",
+                "mass":                      "Mass",
+                "moles":                     "Moles",
+                "density":                   "Density",
+                "melt_fraction":             "Melt",
+                "expansivity":               "Expansivity",
+                "compressibility":           "Compressibility",
+                "molar_enthalpy":            "Enthalpy",
+                "molar_entropy":             "Entropy",
+                "molar_volume":              "Volume",
+                "molar_heat_capacity":       "Cp",
+                "heat_capacity_ratio":       "Cp/Cv",
+                "Vp":                        "Vp",
+                "Vp_dP":                     "dVp/dP",
+                "Vp_dT":                     "dVp/dT",
+                "Vs":                        "Vs",
+                "Vs_dP":                     "dVs/dP",
+                "Vs_dT":                     "dVs/dT",
+                "sound_velocity":            "V0",
+                "sound_velocity_dP":         "dV0/dP",
+                "sound_velocity_dT":         "dV0/dT",
+                "Vp/Vs":                     "Vp/Vs",
+                "bulk_modulus":              "Ks",
+                "bulk_modulus_dP":           "dKs/dP",
+                "bulk_modulus_dT":           "dKs/dT",
+                "shear_modulus":             "Gs",
+                "shear_modulus_dP":          "dGs/dP",
+                "shear_modulus_dT":          "dGs/dT",
+                "molar_gibbs_free_energy":   "G",
+                "gruneisen_thermal_ratio":   "Gruneisen",
+                "assemblage_index":          "Assemblage Index",
+                "phase_assemblage_variance": "Assemblage Variance",
+                "SIO2":                      "SIO2",
+                "AL203":                     "AL203",
+                "CAO":                       "CAO",
+                "MGO":                       "MGO",
+                "FEO":                       "FEO",
+                "NA20":                      "NA20",
+                "K2O":                       "K2O",
+                "TIO2":                      "TIO2",
+                "CR2O3":                     "CR2O3",
+                "H2O":                       "H2O",
+            }
 
             np.random.seed(self.seed)
 
@@ -778,11 +917,11 @@ class RocMLM:
             self.square_X_shape = (S, F, R, R)
             self.square_y_shape = (S, T, R, R)
 
-            self.data = GFEMDataset(
+            data = GFEMDataset(
                 self.gfem_paths, self.rocmlm_features, self.rocmlm_targets)
 
             self.loader_raw = DataLoader(
-                self.data, batch_size=self.csv_batch_size, collate_fn=self._collate_fn)
+                data, batch_size=self.csv_batch_size, collate_fn=self._collate_fn)
 
             self.loader_scaled, self.scaler_X, self.scaler_y = \
                 self._scale_dataloader(self.loader_raw)
@@ -869,7 +1008,32 @@ class RocMLM:
             print(f"Error in _reset_all_weights(): {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _do_batch_inference(self, test_loader):
+    def _do_inference(self, X):
+        """
+        """
+        try:
+            if self.rocmlm is None:
+                raise Exception("No ML model! Call _configure_rocmlm() first ...")
+
+            if hasattr(self.rocmlm, "eval"):
+                self.rocmlm.eval()
+
+            with torch.no_grad():
+                if hasattr(self.rocmlm, "predict"):
+                    y_pred = self.rocmlm.predict(X)
+                else:
+                    X = torch.tensor(X, dtype=torch.float32).to(self.device)
+                    y_pred = self.rocmlm(X)
+                    y_pred = y_pred.detach().cpu().numpy()
+
+        except Exception as e:
+            print(f"Error in _do_inference():\n  {e}")
+            return None
+
+        return y_pred
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _do_batch_inference(self, dataloader):
         """
         """
         try:
@@ -882,7 +1046,7 @@ class RocMLM:
                 self.rocmlm.eval()
 
             with torch.no_grad():
-                for X_batch, _ in test_loader:
+                for X_batch, _ in dataloader:
                     X_batch = X_batch
 
                     if hasattr(self.rocmlm, "predict"):
@@ -930,7 +1094,7 @@ class RocMLM:
             model = self.default_rocmlm
             rocmlm_gridsearch = self.rocmlm_gridsearch
 
-            n_samples = len(self.data)
+            n_samples = len(self.loader_scaled.dataset)
             n_splits = min(self.kfolds, n_samples)
             kf = KFold(n_splits=self.kfolds, shuffle=True, random_state=self.seed)
 
@@ -973,7 +1137,7 @@ class RocMLM:
             best_score = float("inf")
             rocmlm_gridsearch = self.rocmlm_gridsearch
 
-            n_samples = len(self.data)
+            n_samples = len(self.loader_scaled.dataset)
             n_splits = min(self.kfolds, n_samples)
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
 
@@ -1037,7 +1201,7 @@ class RocMLM:
                     patience_counter = 0
 
                     # Training loop with progress bar
-                    desc = f"  Training {self.rocmlm_label} with DataLoader ..."
+                    desc = f"  Training {self.rocmlm_label} ..."
                     with tqdm(total=self.max_iter, desc=desc, position=0) as pbar:
                         for epoch in range(self.max_iter):
                             # Warm-up learning rate schedule
@@ -1233,7 +1397,7 @@ class RocMLM:
             print(f"RocMLM: {self.model_prefix}")
             print("---------------------------------------------")
             print(f"    ML model:             {self.rocmlm_label}")
-            print(f"    n gfem models:        {len(self.data)}")
+            print(f"    n gfem models:        {len(self.loader_scaled.dataset)}")
             print(f"    gfem batch size:      {self.csv_batch_size}")
             print(f"    total dataset size:   {S*R*R}")
             print(f"    X array shape:        {(S*R*R, F)}")
@@ -1298,7 +1462,7 @@ class RocMLM:
             patience_counter = 0
 
             # Training loop with progress bar
-            desc = f"  Training {self.rocmlm_label} with DataLoader ..."
+            desc = f"  Training {self.rocmlm_label} ..."
             with tqdm(total=self.max_iter, desc=desc, position=0) as pbar:
                 for epoch in range(self.max_iter):
                     # Warm-up learning rate schedule
@@ -1526,7 +1690,7 @@ class RocMLM:
             else:
                 collate_fn = self._collate_fn
 
-            n_samples = len(self.data)
+            n_samples = len(self.loader_scaled.dataset)
             n_splits = min(self.kfolds, n_samples)
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
 
@@ -1721,7 +1885,7 @@ class RocMLM:
         return geotherm
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _check_rocmlm_images(self, sid, plot_type="predictions"):
+    def _check_rocmlm_images(self, idx, plot_type="predictions"):
         """
         """
         try:
@@ -1731,7 +1895,7 @@ class RocMLM:
             check = True
 
             for target in self.rocmlm_targets:
-                path = (f"{self.fig_dir}/{self.model_prefix}-{sid}-"
+                path = (f"{self.fig_dir}/{self.model_prefix}-{self.sids[idx]}-"
                         f"{target.replace("_", "-")}-{plot_type}.png")
                 if not os.path.exists(path):
                     check = False
@@ -1814,22 +1978,22 @@ class RocMLM:
         return geotherms
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _get_square_target_for_array_image(self, sid, target, target_index,
-                                           pred_array, target_array, plot_type):
+    def _get_square_target_for_array_image(self, idx, target, target_idx, pred_array,
+                                           target_array, plot_type):
         """
         """
         try:
-            p = pred_array[:, :, target_index]
-            t = target_array[:, :, target_index]
+            p = pred_array[:, :, target_idx]
+            t = target_array[:, :, target_idx]
             rmse, r2 = None, None
 
             if plot_type == "predictions":
                 square_target = p
-                filename = (f"{self.model_prefix}-{sid}-"
+                filename = (f"{self.model_prefix}-{self.sids[idx]}-"
                             f"{target.replace("_", "-")}-predictions.png")
             elif plot_type == "targets":
                 square_target = t
-                filename = (f"{self.model_prefix}-{sid}-"
+                filename = (f"{self.model_prefix}-{self.sids[idx]}-"
                             f"{target.replace("_", "-")}-targets.png")
             elif plot_type == "diff":
                 mask = np.isnan(t)
@@ -1847,7 +2011,7 @@ class RocMLM:
                     rmse = np.sqrt(mean_squared_error(t_valid, p_valid))
                     normalized_rmse = (rmse / np.ptp(t_valid)) * 100
 
-                filename = (f"{self.model_prefix}-{sid}-"
+                filename = (f"{self.model_prefix}-{self.sids[idx]}-"
                             f"{target.replace("_", "-")}-diff.png")
 
         except Exception as e:
@@ -1919,7 +2083,7 @@ class RocMLM:
             print(f"Error in _plot_geotherms_on_array_image():\n  {e}")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def _visualize_array_image(self, sid, sid_idx, plot_type="targets", geotherm_type=None,
+    def _visualize_array_image(self, idx, plot_type="targets", geotherm_type=None,
                                figwidth=6.3, figheight=4.725, fontsize=22):
         """
         """
@@ -1937,44 +2101,33 @@ class RocMLM:
             if not os.path.exists(self.fig_dir):
                 os.makedirs(self.fig_dir, exist_ok=True)
 
-            X, y, _, scaler_y, X_scaled, _ = self._scale_arrays(
-                self.rocmlm_feature_array, self.rocmlm_target_array)
+            X, y = self.loader_raw.dataset[idx]
+            X_scaled, y_scaled = self.loader_scaled.dataset[idx]
 
-            X_square = X.reshape(self.square_X_shape)
-            y_square = y.reshape(self.square_y_shape)
+            P, T = X[:, 0], X[:, 1]
+            extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
 
-            if self.ml_algo == "UNet":
-                X_scaled = self._shape_for_unet(X_scaled, "features")
+            y_pred = self._do_inference(X_scaled)
+            y_pred = self.scaler_y.inverse_transform(y_pred)
 
-            batch_size = self._determine_batch_size(len(X_scaled))
-            y_pred = self._do_batch_inference(X_scaled, batch_size)
+            F = self.square_X_shape[1]
+            T = self.square_y_shape[1]
+            R = self.square_y_shape[2]
 
-            if self.ml_algo == "UNet":
-                y_pred = self._unshape_from_unet(y_pred)
-
-            y_pred = scaler_y.inverse_transform(y_pred)
-            pred_square = y_pred.reshape(self.square_y_shape)
-
-            n_feats = X_square.shape[-1] - 2
-            target_array = y_square[sid_idx, :, :, :]
-            feature_array = X_square[sid_idx, :, :, :]
-            pred_array = pred_square[sid_idx, :, :, :]
+            feature_array = X.reshape(R, R, F)
+            target_array = y.reshape(R, R, T)
+            pred_array = y_pred.reshape(R, R, T)
 
             if geotherm_type:
-                # Get geotherms
                 geotherms = self._get_geotherms_for_array_image(geotherm_type)
 
             for i, target in enumerate(self.rocmlm_targets):
-                P = feature_array[:, :, 0 + n_feats]
-                T = feature_array[:, :, 1 + n_feats]
-                extent = [np.nanmin(T), np.nanmax(T), np.nanmin(P), np.nanmax(P)]
-
                 target_label = self.target_labels_map[target]
                 title = (f"{target_label} ({self.target_units_map.get(target, '')})")
 
                 # Get square array
                 square_target, filename, r2, rmse = self._get_square_target_for_array_image(
-                    sid, target, i, pred_array, target_array, plot_type)
+                    idx, target, i, pred_array, target_array, plot_type)
 
                 # Determine color mapping
                 color_discrete = target in ["assemblage_index", "phase_assemblage_variance"]
@@ -2032,21 +2185,20 @@ class RocMLM:
 
         except Exception as e:
             print(f"Error in _visualize_array_image():\n  {e}")
+            traceback.print_exc()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize(self, n_samples=3):
+    def visualize(self, indices=[0, 1]):
         """
         """
         try:
-            skip = len(self.gfem_sids) // n_samples
-
-            for i, sid in enumerate(self.gfem_sids[::skip]):
-                if not self._check_rocmlm_images(sid, "diff"):
-                    self._visualize_array_image(sid, i, "diff")
-                if not self._check_rocmlm_images(sid, "targets"):
-                    self._visualize_array_image(sid, i, "targets")
-                if not self._check_rocmlm_images(sid, "predictions"):
-                    self._visualize_array_image(sid, i, "predictions")
+            for i  in indices:
+                if not self._check_rocmlm_images(i, "diff"):
+                    self._visualize_array_image(i, "diff")
+                if not self._check_rocmlm_images(i, "targets"):
+                    self._visualize_array_image(i, "targets")
+                if not self._check_rocmlm_images(i, "predictions"):
+                    self._visualize_array_image(i, "predictions")
 
         except Exception as e:
             print(f"Error in visualize_rocmlm():\n  {e}")
