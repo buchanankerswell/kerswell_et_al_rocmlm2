@@ -31,78 +31,14 @@ from matplotlib.colors import ListedColormap
 #######################################################
 class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, perplex_db="stx21", sid="PYR", source="assets/benchmark-samples.csv",
-                 res=32, P_min=0.1, P_max=8.1, T_min=273, T_max=1973, config_yaml=None,
-                 verbose=1):
+    def __init__(self, sid, config_yaml, verbose=1):
         """
-        Initializes the GFEMModel with the given parameters or a configuration YAML file.
-
-        Parameters:
-            perplex_db (str): Thermodynamic dataset for Perple_X (default: 'hp02').
-                              Accepted values: ['hp02', 'hp11', 'hp622', 'hp633', 'stx21'].
-            sid (str): Sample ID to identify the model, must be present in the source file.
-            source (str): Path to the CSV file containing sample IDs and chemical
-                          compositions.
-            res (int): Resolution of the model grid (default: 32).
-            P_min (float): Minimum pressure for the model in GPa (default: 0.1 GPa).
-            P_max (float): Maximum pressure for the model in GPa (default: 8.1 GPa).
-            T_min (float): Minimum temperature for the model in K (default: 273 K).
-            T_max (float): Maximum temperature for the model in K (default: 1973 K).
-            config_yaml (str, optional): Path to a YAML file containing configuration
-                                         parameters to override defaults.
-            verbose (int): Verbosity level (default: 1).
-
-        Attributes:
-            config_yaml (str): Stores the path to the configuration YAML file (if provided).
-            verbose (int): Verbosity level for output and logging.
-            model_built (bool): Indicates whether the GFEM model has been successfully built.
-            timeout (int): Computed timeout based on resolution, used for time-limited tasks.
-            model_out_dir (str): Directory path where model output files will be stored.
-            log_file (str): File path for the log output of the model.
-            fig_dir (str): Directory path where figures will be stored.
-
-        Raises:
-            ValueError: If an unrecognized thermodynamic dataset is provided.
-
-        Notes:
-            If a config_yaml is provided, all other parameters (except verbose) are ignored
-            and values are loaded from the YAML file instead.
         """
-        if config_yaml:
-            if not os.path.exists(config_yaml):
-                raise Exception(f"No config_yaml found at {config_yaml}!")
-            with open(config_yaml, "r") as file:
-                config_data = yaml.safe_load(file)
-            perplex_options = config_data["perplex_options"]
-            self.res = perplex_options["res"]
-            self.sid = perplex_options["sid"]
-            self.P_min = perplex_options["P_min"]
-            self.P_max = perplex_options["P_max"]
-            self.T_min = perplex_options["T_min"]
-            self.T_max = perplex_options["T_max"]
-            self.source = perplex_options["source"]
-            self.perplex_db = perplex_options["perplex_db"]
-        else:
-            self.res = res
-            self.sid = sid
-            self.P_min = P_min
-            self.P_max = P_max
-            self.T_min = T_min
-            self.T_max = T_max
-            self.source = source
-            self.perplex_db = perplex_db
-
+        self.sid = sid
         self.config_yaml = config_yaml
         self.verbose = verbose
 
         self.model_built = False
-        self.timeout = (self.res**2) * 3
-        self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
-        self.log_file = f"{self.model_out_dir}/log-{self.sid}"
-        self.fig_dir = f"figs/{self.model_out_dir}"
-
-        if perplex_db not in ["hp02", "hp11", "hp622", "hp633", "stx21"]:
-            raise ValueError(f"Unrecognized thermodynamic dataset: {perplex_db}")
 
         self._load_global_options()
         self._load_perplex_options()
@@ -115,55 +51,20 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_global_options(self):
         """
-        Loads and configures global options for the GFEM model. If a configuration YAML file
-        is provided, options are loaded from the file; otherwise, default values are used.
-
-        Global options include:
-            - Random seed for reproducibility
-            - Numerical precision (digits) for model outputs
-            - Potential temperatures (pot_Ts) for depth profile calculations
-            - Segments (segs) for geographical profiles (e.g., subduction zones)
-            - Target properties (targets_to_visualize) for visualization (e.g., density)
-            - Plot settings for visual output (e.g., figure resolution, axis color)
-
-        Attributes:
-            seed (int): Random seed used for ensuring reproducibility of results.
-            digits (int): Number of digits for rounding numerical values in outputs.
-            pot_Ts (list): List of potential temperatures in Kelvin for depth profile
-                           calculations.
-            segs (list): List of segment names representing specific geographic regions.
-            targets_to_visualize (list): List of rock properties (e.g., density, Vp, Vs)
-                                         for visualization.
-
-        Notes:
-            - If a config_yaml is provided, the global options are read from the file.
-            - Plot settings are updated using matplotlib's rcParams for consistent figure
-              output.
-
-        Exceptions:
-            Logs an error message if any issue occurs while loading global options.
         """
         try:
-            if self.config_yaml:
-                if not os.path.exists(self.config_yaml):
-                    raise Exception(f"No config_yaml found at {self.config_yaml}!")
-                with open(self.config_yaml, "r") as file:
-                    config_data = yaml.safe_load(file)
-                global_options = config_data["global_options"]
-            else:
-                global_options = {
-                    "seed": 42,
-                    "digits": 3,
-                    "pot_Ts": [1173, 1573, 1773],
-                    "segs": ["Central_Cascadia", "Kamchatka"],
-                    "targets_to_visualize": ["density", "Vp", "Vs", "melt_fraction", "H2O"]
-                }
+            if not os.path.exists(self.config_yaml):
+                raise Exception(f"No config_yaml found at {self.config_yaml}!")
 
-            # Assign values from global options
+            with open(self.config_yaml, "r") as file:
+                config_data = yaml.safe_load(file)
+
+            global_options = config_data["global_options"]
+
+            self.segs = global_options["segs"]
             self.seed = global_options["seed"]
             self.digits = global_options["digits"]
             self.pot_Ts = global_options["pot_Ts"]
-            self.segs = global_options["segs"]
             self.targets_to_visualize = global_options["targets_to_visualize"]
 
             # Plot settings
@@ -184,133 +85,33 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_perplex_options(self):
         """
-        Loads and configures options specific to Perple_X based on the selected
-        thermodynamic dataset.
-
-        This method handles:
-            - Loading of oxides used in the Gibbs Free Energy Minimization (GFEM) model.
-            - Setting up configuration strings for Perple_X programs like Build and Werami.
-            - Assigning temperature, melt, fluid, and solid properties from the selected
-              dataset.
-            - Defining excluded mineral phases and selected phases for the model.
-
-        Attributes:
-            ox_gfem (list): List of oxides included in the GFEM model.
-            T_melt (int or str): Melting temperature (in Kelvin) or a default value for melt.
-            melt_mod (str): Modifier for the melt model used in Perple_X.
-            td_data_file (str): Path to the thermodynamic data file.
-            sl_data_file (str): Path to the solution model data file.
-            melt_is_fluid (str): Indicator for whether melt behaves as fluid.
-            em_exclude (list): Sorted list of excluded mineral phases.
-            sl_include (list): Sorted list of included solid phases in the assemblages.
-            fluid_in_properties (str): Indicator for including fluid in thermodynamic
-                                       properties.
-            fluid_in_assemblages (str): Indicator for including fluid in assemblages.
-
-        Raises:
-            ValueError: If the specified thermodynamic dataset configuration is missing
-                        or unrecognized.
-
-        Notes:
-            - If a config_yaml is provided, options are loaded from the file.
-            - Each dataset (e.g., 'hp02', 'hp11', 'hp622', etc.) has its own set of
-              predefined configurations, which include temperature settings,
-              included/excluded phases, and file paths for data sources.
-
-        Exceptions:
-            Logs an error message if any issue occurs during the loading of Perple_X options.
         """
         try:
-            if self.config_yaml:
-                if not os.path.exists(self.config_yaml):
-                    raise Exception(f"No config_yaml found at {self.config_yaml}!")
-                with open(self.config_yaml, "r") as file:
-                    config_data = yaml.safe_load(file)
-                perplex_options = config_data["perplex_options"]
-                self.ox_gfem = perplex_options["ox_gfem"]
-                perplex_datasets = config_data["perplex_datasets"]
-            else:
-                self.ox_gfem = ["SIO2", "AL2O3", "CAO", "MGO", "FEO", "NA2O", "H2O"]
-                perplex_datasets = {
-                    "hp02": {
-                        "T_melt": 1100,
-                        "melt_is_fluid": "T",
-                        "melt_mod": "melt(HGPH)",
-                        "fluid_in_properties": "N",
-                        "fluid_in_assemblages": "Y",
-                        "td_data_file": "assets/hp02-td",
-                        "sl_data_file": "assets/hp-sl",
-                        "em_exclude": ["anL", "enL", "foL", "fo8L", "foHL", "diL", "woGL",
-                                       "liz", "ak", "pswo", "wo"],
-                        "sl_include": ["O(HGP)", "Cpx(HGP)", "Omph(GHP)", "Opx(HGP)",
-                                       "Sp(HP)", "Gt(HGP)", "Maj", "feldspar", "cAmph(G)",
-                                       "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                       "melt(HGPH)"]
-                    },
-                    "hp11": {
-                        "T_melt": 1100,
-                        "melt_is_fluid": "T",
-                        "melt_mod": "melt(HGPH)",
-                        "fluid_in_properties": "N",
-                        "fluid_in_assemblages": "Y",
-                        "td_data_file": "assets/hp11-td",
-                        "sl_data_file": "assets/hp-sl",
-                        "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
-                                       "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
-                                       "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
-                                       "cen", "glt", "cgh", "dsp", "fctd"],
-                        "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                                       "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                                       "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                       "Anth", "melt(HGPH)"]
-                    },
-                    "hp622": {
-                        "T_melt": 1100,
-                        "melt_is_fluid": "T",
-                        "melt_mod": "melt(HGPH)",
-                        "fluid_in_properties": "N",
-                        "fluid_in_assemblages": "Y",
-                        "td_data_file": "assets/hp622-td",
-                        "sl_data_file": "assets/hp-sl",
-                        "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
-                                       "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
-                                       "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
-                                       "cen", "glt", "cgh", "dsp", "fctd"],
-                        "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                                       "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                                       "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                       "Anth", "melt(HGPH)"]
-                    },
-                    "hp633": {
-                        "T_melt": 1100,
-                        "melt_is_fluid": "T",
-                        "melt_mod": "melt(HGPH)",
-                        "fluid_in_properties": "N",
-                        "fluid_in_assemblages": "Y",
-                        "td_data_file": "assets/hp633-td",
-                        "sl_data_file": "assets/hp-sl",
-                        "em_exclude": ["foWL", "fojL", "foL", "fa8L", "faTL", "foTL", "perL",
-                                       "neL", "fo8L", "diL", "dijL", "abL", "jdjL", "enL",
-                                       "naph", "prl", "liz", "ne", "anl", "tap", "cg", "hen",
-                                       "cen", "glt", "cgh", "dsp", "fctd"],
-                        "sl_include": ["O(HGP)", "Ring", "Wus", "Cpx(HGP)", "Omph(GHP)",
-                                       "Opx(HGP)", "Sp(HGP)", "Gt(HGP)", "Maj", "feldspar",
-                                       "cAmph(G)", "Chl(W)", "Atg(PN)", "A-phase", "B", "T",
-                                       "Anth", "melt(HGPH)"]
-                    },
-                    "stx21": {
-                        "T_melt": "default",
-                        "melt_is_fluid": "T",
-                        "melt_mod": "",
-                        "fluid_in_properties": "N",
-                        "fluid_in_assemblages": "Y",
-                        "td_data_file": "assets/stx21-td",
-                        "sl_data_file": "assets/stx21-sl",
-                        "em_exclude": ["ca-pv"],
-                        "sl_include": ["C2/c", "Wus", "Pv", "Pl", "Sp", "O", "Wad", "Ring",
-                                       "Opx", "Cpx", "Aki", "Gt", "Ppv", "CF", "NaAl"]
-                    }
-                }
+            if not os.path.exists(self.config_yaml):
+                raise Exception(f"No config_yaml found at {self.config_yaml}!")
+
+            with open(self.config_yaml, "r") as file:
+                config_data = yaml.safe_load(file)
+
+            perplex_options = config_data["perplex_options"]
+            perplex_datasets = config_data["perplex_datasets"]
+
+            self.res = perplex_options["res"]
+            self.P_min = perplex_options["P_min"]
+            self.P_max = perplex_options["P_max"]
+            self.T_min = perplex_options["T_min"]
+            self.T_max = perplex_options["T_max"]
+            self.source = perplex_options["source"]
+            self.ox_gfem = perplex_options["ox_gfem"]
+            self.perplex_db = perplex_options["perplex_db"]
+
+            if self.perplex_db not in ["hp02", "hp11", "hp622", "hp633", "stx21"]:
+                raise ValueError(f"Unrecognized thermodynamic dataset: {self.perplex_db}")
+
+            self.timeout = (self.res**2) * 3
+            self.model_out_dir = f"gfems/{self.sid}_{self.perplex_db}_{self.res}"
+            self.log_file = f"{self.model_out_dir}/log-{self.sid}"
+            self.fig_dir = f"figs/{self.model_out_dir}"
 
             # Get the configuration for the selected database
             config = perplex_datasets[self.perplex_db]
@@ -334,18 +135,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_target_maps(self):
         """
-        Initializes mappings for werami output, including unit conversions, digit
-        formatting, and labels for various variables. Adds mappings for oxides present
-        in the `ox_gfem` attribute.
-
-        Attributes:
-            self.melt_mod: Melt modifier string for melt fraction.
-            self.ox_gfem: List of oxides to map for output.
-
-        Outputs:
-            Initializes `werami_output_map`, `target_units_map`, arget_digits_map`,
-            `target_labels_map` attributes.
-            Populates `targets` with keys from the label map except 'P' and 'T'.
         """
         try:
             # Initialize werami output maps
@@ -509,17 +298,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_sample_features(self):
         """
-        Loads and extracts features for the given sample ID from the data source.
-
-        Extracts all columns except "SAMPLEID" from the dataset corresponding
-        to the sample ID (sid). If the sample ID is not found, an exception is raised.
-
-        Attributes:
-            features (list): List of feature names (column headers excluding "SAMPLEID").
-            sample_features (list): Flattened list of feature values for the given sample.
-
-        Raises:
-            ValueError: If the sample ID is not found in the dataset.
         """
         try:
             df = pd.read_csv(self.source)
@@ -537,19 +315,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_normalized_sample_comp(self):
         """
-        Normalizes the sample composition based on oxides from the PCA and the GFEM model.
-
-        This method retrieves the sample composition for the specified sample ID (`sid`),
-        ensures that the oxides in the GFEM model (`ox_gfem`) match those in the PCA,
-        and normalizes the sample composition to a total of 100 wt.% (excluding H2O).
-
-        Attributes:
-            norm_sample_comp (list): List of normalized sample composition values.
-            ox_gfem (list): List of oxides reordered to match the PCA dataset.
-
-        Raises:
-            ValueError: If the sample ID is not found or if the PCA does not contain
-            enough oxides to match the GFEM model.
         """
         try:
             df = pd.read_csv(self.source)
@@ -718,18 +483,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_for_existing_model(self):
         """
-        Checks for an existing GFEM model for the given sample. If found,
-        retrieves results and data arrays; otherwise, it prepares the output directory.
-
-        Inputs:
-            self.sid: Sample identifier.
-            self.verbose: Verbosity level for logging.
-            self.perplex_db: Perple_X database associated with the GFEM model.
-            self.model_out_dir: Output directory for model files.
-
-        Outputs:
-            Sets self.model_built to True if a valid model is found;
-            otherwise, prepares the output directory.
         """
         if os.path.exists(self.model_out_dir):
             if (os.path.exists(f"{self.model_out_dir}/results.csv") and
@@ -760,21 +513,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_subduction_geotherm(self, segment="Central_Cascadia", slab_position="slabmoho"):
         """
-        Retrieves the subduction geotherm data for a specified segment and slab position.
-
-        Parameters:
-            segment (str): The name of the subduction segment (default is
-                           "Central_Cascadia").
-            slab_position (str): Position of the slab (either "slabmoho" or "slabtop";
-                                 default is "slabmoho").
-
-        Returns:
-            pd.DataFrame: A DataFrame containing the pressure (P) and temperature (T) data
-                          for the specified slab position and segment.
-
-        Raises:
-            Exception: If the segment data file does not exist or if the slab position
-            is unrecognized.
         """
         try:
             path = f"assets/D80/{segment}.txt"
@@ -820,26 +558,6 @@ class GFEMModel:
                              A2=2.2e-8, k1=2.3, k2=3.0, mantle_adiabat=0.5e-3,
                              crust_thickness=35e3, litho_thickness=150e3):
         """
-        Calculates the geotherm for a 1D layered lithospheric cooling model.
-
-        Parameters:
-            Qs (float): Surface heat flux (W/m²).
-            Ts (float): Surface temperature (K).
-            A1 (float): Heat production in layer 1 (W/m³).
-            A2 (float): Heat production in layer 2 (W/m³).
-            k1 (float): Thermal conductivity in layer 1 (W/m·K).
-            k2 (float): Thermal conductivity in layer 2 (W/m·K).
-            mantle_potential (float): Mantle potential temperature (K).
-            mantle_adiabat (float): Mantle adiabatic gradient (K/m).
-            crust_thickness (float): Crustal thickness (m).
-            litho_thickness (float): Lithospheric thickness (m).
-
-        Returns:
-            pd.DataFrame: A DataFrame containing pressure (P) and temperature (T) values
-                          for the calculated geotherm.
-
-        Raises:
-            Exception: If any error occurs during geotherm calculation.
         """
         try:
             array_size = (self.res) * 10
@@ -887,14 +605,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_td_data(self):
         """
-        Copies thermodynamic data files to the model output directory.
-
-        The method copies the thermodynamic data file and the solution model file to
-        designated directories within the model output directory.
-
-        Raises:
-            FileNotFoundError: If the source files do not exist.
-            Exception: If an error occurs during file copying.
         """
         try:
             shutil.copy(self.td_data_file, f"{self.model_out_dir}/td-data")
@@ -909,16 +619,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_build_options(self):
         """
-        Writes build options and plot options for the Perplex model to configuration files.
-
-        This method generates and saves the build options to a file named 'build-options'
-        and the plot options to 'perplex_plot_option.dat' within the model output directory.
-
-        The configuration includes various parameters related to the composition system,
-        grid levels, nodes, melting conditions, and more.
-
-        Raises:
-            IOError: If an error occurs while writing to the output files.
         """
         try:
             build_options = (
@@ -955,14 +655,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_build_config(self):
         """
-        Writes the Perplex build configuration to a file.
-
-        This method saves the build configuration stored in the
-        `self.build_config` attribute to a file named 'build-config'
-        in the specified model output directory.
-
-        Raises:
-            IOError: If an error occurs while writing to the output file.
         """
         try:
             with open(f"{self.model_out_dir}/build-config", "w") as file:
@@ -974,13 +666,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_vertex_config(self):
         """
-        Writes the sample ID to the vertex minimize configuration file.
-
-        This method saves the sample ID (`self.sid`) to a file named
-        'vertex-minimize' in the specified model output directory.
-
-        Raises:
-            IOError: If an error occurs while writing to the output file.
         """
         try:
             with open(f"{self.model_out_dir}/vertex-minimize", "w") as file:
@@ -992,15 +677,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_werami_config(self):
         """
-        Writes the Werami configuration files for targets and phases.
-
-        This method saves the Werami target configuration (`self.werami_target_config`)
-        to a file named 'werami-targets' and the Werami phase configuration
-        (`self.werami_phase_config`) to a file named 'werami-phases' in the specified
-        model output directory.
-
-        Raises:
-            IOError: If an error occurs while writing to the output files.
         """
         try:
             with open(f"{self.model_out_dir}/werami-targets", "w") as file:
@@ -1015,16 +691,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_werami_geotherm_configs(self):
         """
-        Writes Werami geotherm configurations for subduction and cratonic geotherms.
-
-        This method generates geotherm data for specified segments and potential
-        temperatures, saves them to tab-separated files, and creates corresponding Werami
-        configuration files.
-        It handles both slab top and slab moho positions for subduction zones, and cratonic
-        geotherms based on defined potential temperatures.
-
-        Raises:
-            Exception: If an error occurs during the generation or writing of files.
         """
         try:
             werami_geotherms_top = []
@@ -1110,13 +776,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_pssect_config(self):
         """
-        Writes the sample ID to the PSSECT configuration file.
-
-        This method saves the sample ID (`self.sid`) to a file named
-        'pssect-draw' in the specified model output directory.
-
-        Raises:
-            IOError: If an error occurs while writing to the output file.
         """
         try:
             with open(f"{self.model_out_dir}/pssect-draw", "w") as file:
@@ -1128,21 +787,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _write_perplex_config(self):
         """
-        Writes various configuration files for the Perplex model.
-
-        This method generates and saves multiple configuration files necessary for
-        building the Perplex model. It only executes the write operations if the
-        model has not been built yet. The following configuration files are created:
-            - TD data
-            - Build options
-            - Build configuration
-            - Vertex configuration
-            - Werami configuration
-            - Werami geotherm configurations
-            - PSSECT configuration
-
-        Raises:
-            IOError: If an error occurs during file writing operations.
         """
         try:
             if self.model_built:
@@ -1163,15 +807,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _print_perplex_info(self):
         """
-        Prints detailed information about the Perple_X model configuration.
-
-        This method outputs various attributes of the Perple_X model, including
-        the sample ID, pressure and temperature ranges, GFEM system, target
-        and feature lists, and configuration details. The information is formatted
-        for better readability, with line wrapping applied to long lists.
-
-        Raises:
-            Exception: If any error occurs during the printing process.
         """
         try:
             # Prepare formatted strings for output
@@ -1224,19 +859,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _replace_in_file(self, filepath, replacements):
         """
-        Replaces specified strings in a file with given values.
-
-        This method reads the contents of the specified file, replaces all occurrences
-        of each key in the `replacements` dictionary with its corresponding value,
-        and writes the modified content back to the same file.
-
-        Parameters:
-            filepath (str): The path to the file in which replacements should be made.
-            replacements (dict): A dictionary where keys are strings to be replaced and
-                                 values are the strings to replace them with.
-
-        Raises:
-            Exception: If an error occurs during file reading or writing.
         """
         try:
             with open(filepath, "r") as file:
@@ -1254,21 +876,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _run_command_line_program(self, program_path, config_file):
         """
-        Executes a command-line program with the specified configuration file.
-
-        This method runs a program located at `program_path`, using the provided
-        `config_file` as its input. It captures the standard output and error,
-        logs them, and checks the return code to determine if the program executed
-        successfully.
-
-        Parameters:
-            program_path (str): The path to the executable program to run.
-            config_file (str): The path to the configuration file to use as input.
-
-        Raises:
-            RuntimeError: If the program exits with a non-zero return code.
-            IOError: If an error occurs while reading the config file or writing to the
-            log file.
         """
         try:
             os.chmod(program_path, 0o755)
@@ -1308,16 +915,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_build(self):
         """
-        Builds the Perple_X model if it has not been built already.
-
-        This method checks for the existence of the build configuration file and
-        the output data file. If the model has not been built and the necessary
-        configuration is present, it modifies the build options and runs the build
-        program.
-
-        Raises:
-            Exception: If the configuration file is missing or an error occurs
-            during the build process.
         """
         try:
             if self.model_built:
@@ -1344,15 +941,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_vertex(self):
         """
-        Runs the Perple_X vertex program to calculate the vertex configuration.
-
-        This method checks for the existence of the necessary configuration and
-        build output files. If the vertex file does not exist, it modifies the
-        build options and runs the vertex program.
-
-        Raises:
-            Exception: If the configuration or build output files are missing or
-            an error occurs during the vertex program execution.
         """
         try:
             if self.model_built:
@@ -1384,16 +972,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_werami(self):
         """
-        Runs the Perple_X werami program to generate various configuration files.
-
-        This method checks for the existence of required configuration and build
-        output files, modifies the build options, and executes the werami program
-        for various segments and potential temperatures. It also manages the output
-        files by copying and deleting as necessary.
-
-        Raises:
-            Exception: If the configuration or build output files are missing or
-            an error occurs during the werami program execution.
         """
         try:
             if self.model_built:
@@ -1457,16 +1035,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _perplex_pssect(self):
         """
-        Runs the Perple_X pssect program to generate the assemblages output.
-
-        This method checks for the existence of the configuration file and
-        executes the pssect program. It also manages the output files by
-        copying the generated assemblages file and removing the temporary
-        file.
-
-        Raises:
-            Exception: If the configuration file is missing or an error occurs
-            during the pssect program execution.
         """
         try:
             if self.model_built:
@@ -1492,16 +1060,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _build_perplex_model(self):
         """
-        Constructs the Perple_X model by executing a series of configuration
-        and build steps.
-
-        This method orchestrates the entire process of building the Perple_X
-        model by writing the necessary configuration files, printing model
-        information, and running the build, vertex, werami, and pssect steps.
-
-        Raises:
-            Exception: If an error occurs during any step of the model building
-            process.
         """
         try:
             if self.model_built:
@@ -1522,21 +1080,6 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def _read_perplex_targets(self):
         """
-        Reads the Perple_X target and supplemental data from specified files.
-
-        This method reads data from 'targets.tab' and 'supplemental.tab' files
-        located in the model output directory. It extracts relevant data based
-        on defined mappings, converts units where necessary, and stores the
-        results in a structured format.
-
-        Returns:
-            dict: A dictionary containing processed data from the files, with
-            keys corresponding to variable names defined in `self.werami_output_map`.
-            Each key maps to a list of values read from the files.
-
-        Raises:
-            Exception: If there are issues reading the files, if no column headers
-            are found, or if no data is read from the files.
         """
         try:
             werami_targets = f"{self.model_out_dir}/targets.tab"
@@ -1603,19 +1146,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _read_perplex_assemblages(self):
         """
-        Reads the assemblages from either a CSV or a text file.
-
-        This method checks if an assemblages CSV file exists in the output
-        directory. If it does, it reads the assemblages from the CSV file.
-        If not, it reads from a text file, parsing the lines to create a
-        dictionary of assemblages.
-
-        Returns:
-            dict: A dictionary mapping line numbers to lists of assemblages.
-                  Returns None if an error occurs or if the model is built.
-
-        Raises:
-            Exception: If an error occurs during file reading or parsing.
         """
         try:
             if self.model_built:
@@ -1651,23 +1181,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _encode_assemblages(self, assemblages):
         """
-        Encodes assemblages into unique indices and saves them to a CSV file.
-
-        This method takes a list of assemblages, generates unique indices for
-        each unique assemblage (sorted and non-empty), and saves the mapping
-        of assemblages to indices in a CSV file. It returns a list of encoded
-        indices for the input assemblages.
-
-        Parameters:
-            assemblages (list): A list of assemblages, where each assemblage
-                                is a list of components.
-
-        Returns:
-            list: A list of encoded indices corresponding to the input
-                  assemblages. Returns None if an error occurs.
-
-        Raises:
-            Exception: If an error occurs during encoding or file writing.
         """
         try:
             unique_assemblages = {}
@@ -1707,16 +1220,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _process_perplex_results(self):
         """
-        Processes the results from Perple_X and writes them to a CSV file.
-
-        This method reads the output files from Perple_X, constructs a
-        DataFrame with relevant data, calculates phase assemblages and
-        their variances, and encodes assemblages into indices. The final
-        results are saved to a CSV file.
-
-        Raises:
-            Exception: If required files are missing or an error occurs
-                        during processing or file writing.
         """
         try:
             if self.model_built:
@@ -1790,15 +1293,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_results(self):
         """
-        Retrieves results from the saved CSV file and stores them in a dictionary.
-
-        This method checks if the GFEM model has been built, verifies the
-        existence of the results file, and reads the results into a
-        dictionary where each key corresponds to a column in the CSV.
-
-        Raises:
-            Exception: If the GFEM model is not built or if the results
-                        file does not exist.
         """
         try:
             if not self.model_built:
@@ -1821,17 +1315,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_pt_array(self):
         """
-        Constructs a 2D array of pressure and temperature (P-T) values from
-        the GFEM model results.
-
-        This method checks if the GFEM model has been built and if results
-        are available. It then creates a 2D array where the first column
-        contains pressure values and the second column contains temperature
-        values.
-
-        Raises:
-            Exception: If the GFEM model is not built or if the model results
-                        are not available.
         """
         try:
             if not self.model_built:
@@ -1850,15 +1333,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _get_target_array(self):
         """
-        Constructs a 2D array of target values from the GFEM model results.
-
-        This method checks if the GFEM model has been built and if results
-        are available. It then creates a 2D array containing target values,
-        excluding specified columns.
-
-        Raises:
-            Exception: If the GFEM model is not built or if the model results
-                        are not available.
         """
         try:
             if not self.model_built:
@@ -1880,24 +1354,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _extract_target_along_geotherm(self, target, geotherm):
         """
-        Extracts target values along a specified geotherm using linear interpolation.
-
-        This method retrieves pressure (P) and temperature (T) values from the GFEM
-        model results and interpolates the specified target values along the given
-        geotherm. The output is a DataFrame containing the P, T, and interpolated
-        target values.
-
-        Parameters:
-            target (str): The name of the target variable to extract.
-            geotherm (DataFrame): A DataFrame containing columns "P" and "T" representing
-                                  the pressure and temperature along the geotherm.
-
-        Returns:
-            DataFrame: A DataFrame with columns "P", "T", and the specified target variable,
-                       containing interpolated values along the geotherm.
-
-        Raises:
-            Exception: If there is an error in extracting or interpolating the target values.
         """
         try:
             P_vals = self.results["P"]
@@ -1925,20 +1381,6 @@ class GFEMModel:
     #++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def _check_model_array_images(self, geotherm_type="sub", gradient=False):
         """
-        Checks if model array images exist for specified targets.
-
-        This method checks for the existence of image files for the targets that
-        should be visualized based on the specified type and whether gradients
-        should be included. It returns a boolean indicating if all required
-        images are present.
-
-        Parameters:
-            geotherm_type (str): The type of image to check (default is "sub").
-            gradient (bool): If True, checks for gradient images; otherwise, checks
-                             for standard images (default is False).
-
-        Returns:
-            bool: True if all target images exist, False otherwise.
         """
         # Define targets to exclude based on whether gradients are requested
         targets_exclude = ["phase_assemblage"] + (
@@ -1970,14 +1412,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_model_array_surfs(self):
         """
-        Checks for the existence of surface images for specified targets.
-
-        This method verifies whether surface images for the targets to visualize
-        exist in the specified figure directory. It returns a boolean indicating
-        if all the required images are present, excluding specific targets.
-
-        Returns:
-            bool: True if all target surface images exist, False otherwise.
         """
         try:
             targets_exclude = ["phase_assemblage"]
@@ -2002,14 +1436,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_model_depth_profile_images(self):
         """
-        Checks if depth profile images exist for specified targets.
-
-        This method verifies the existence of depth profile images for the targets
-        to be visualized, differentiated by the pressure minimum. It returns a
-        boolean indicating whether all required images are present.
-
-        Returns:
-            bool: True if all target depth profile images exist, False otherwise.
         """
         # Define targets to exclude
         targets_exclude = [
@@ -2045,15 +1471,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _check_model_gt_assemblages_images(self):
         """
-        Checks if geotherm assemblage images exist for specified segments and potential
-        temperatures.
-
-        This method verifies the existence of assemblage images for segments at different
-        depth levels and for specified potential temperatures. It returns a boolean
-        indicating whether all required images are present based on the minimum pressure.
-
-        Returns:
-            bool: True if all target assemblage images exist, False otherwise.
         """
         existing_figs = []
 
@@ -2786,14 +2203,6 @@ class GFEMModel:
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def build(self):
         """
-        Builds the GFEM model by executing the Perple_X model building process.
-
-        This method attempts to build the model and process results with a maximum
-        number of retries if any errors occur during the process. If the model
-        has already been built, the method will skip the building process.
-
-        Raises:
-            Exception: If the model cannot be built after the specified number of retries.
         """
         max_retries = 3
         for retry in range(max_retries):
@@ -2824,59 +2233,27 @@ class GFEMModel:
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def get_sample_ids(filepath, batch="all", n_batches=8):
     """
-    Retrieves SAMPLEIDs from a CSV file.
-
-    This function reads a specified CSV file containing sample data and extracts
-    the SAMPLEID column. It raises an exception if the file does not exist.
-
-    Parameters:
-        filepath (str): The path to the CSV file containing sample data.
-        batch (str, optional): The batch identifier (default is "all").
-        n_batches (int, optional): The total number of batches (default is 8).
-
-    Returns:
-        numpy.ndarray: An array of SAMPLEIDs extracted from the file.
-        None: If an error occurs during the file reading process.
     """
     try:
         if not os.path.exists(filepath):
             raise Exception("Sample data source does not exist!")
 
         df = pd.read_csv(filepath)
-        sampleids = df["SAMPLEID"].values
+        sids = df["SAMPLEID"].values
 
     except Exception as e:
         print(f"Error in get_sample_ids(): {e}")
         return None
 
-    return sampleids
+    return sids
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def gfem_itr(args):
     """
-    Initializes and builds a GFEMModel instance based on provided parameters.
-
-    This function takes a tuple of arguments to create an instance of GFEMModel.
-    It attempts to build the model if it has not been built yet. Any errors during
-    the process are caught and reported.
-
-    Parameters:
-        args (tuple): A tuple containing the following elements:
-            perplex_db (str): The database for Perple_X.
-            sampleid (str): The identifier for the sample.
-            source (str): The source of the data.
-            res (str): Resolution of the model.
-            Pmin (float): Minimum pressure for the model.
-            Pmax (float): Maximum pressure for the model.
-            Tmin (float): Minimum temperature for the model.
-            Tmax (float): Maximum temperature for the model.
-
-    Returns:
-        GFEMModel: An initialized GFEMModel instance, or None if an error occurs.
     """
     try:
-        perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax = args
-        iteration = GFEMModel(perplex_db, sampleid, source, res, Pmin, Pmax, Tmin, Tmax)
+        sid, config_yaml = args
+        iteration = GFEMModel(sid, config_yaml)
 
         if not iteration.model_built:
             iteration.build()
@@ -2888,82 +2265,26 @@ def gfem_itr(args):
     return iteration
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8.1,
-                      T_min=273, T_max=1973, sids=None, nprocs=os.cpu_count() - 2,
-                      config_yaml=None, verbose=1):
+def build_gfem_models(config_yaml, nprocs=os.cpu_count() - 2, verbose=1):
     """
-    Builds GFEM models for specified sample IDs using a Perple_X database.
-
-    This function processes sample IDs from a provided source and constructs
-    Gibbs Free Energy minimization models (GFEM) across a set of pressure-temperature
-    conditions. The models are built in parallel to maximize efficiency, and custom
-    configuration options can be loaded from a YAML file.
-
-    Parameters:
-        source (str, optional): Path to the source file containing sample IDs.
-                                If not specified, it is loaded from the YAML configuration.
-        perplex_db (str, optional): Name of the Perple_X database to use
-                                    (default is "hp02").
-        res (int, optional): Grid resolution for the models (default is 32).
-        P_min (float, optional): Minimum pressure for the model in kilobars
-                                 (default is 0.1 GPa).
-        P_max (float, optional): Maximum pressure for the model in kilobars
-                                 (default is 8.1 GPa).
-        T_min (float, optional): Minimum temperature for the model in Kelvin
-                                 (default is 273 K).
-        T_max (float, optional): Maximum temperature for the model in Kelvin
-                                 (default is 1973 K).
-        sids (list, optional): A list of sample IDs to process. If None, sample IDs
-                               are read from the source file.
-        nprocs (int, optional): Number of parallel processes to use for model building
-                                (default is the number of CPUs minus 2).
-        config_yaml (str, optional): Path to a YAML configuration file that can
-                                     override the above parameters.
-        verbose (int, optional): Verbosity level for logging information (default is 1).
-
-    Returns:
-        list: A list of successfully built GFEMModel instances.
-
-    Raises:
-        Exception: If the source file or sample IDs are invalid or if model
-                   building encounters an error.
     """
     try:
-        if config_yaml:
-            if not os.path.exists(config_yaml):
-                raise Exception(f"No config_yaml found at {config_yaml}!")
-            with open(config_yaml, "r") as file:
-                config_data = yaml.safe_load(file)
-            perplex_options = config_data["perplex_options"]
-            res = perplex_options["res"]
-            P_min = perplex_options["P_min"]
-            P_max = perplex_options["P_max"]
-            T_min = perplex_options["T_min"]
-            T_max = perplex_options["T_max"]
-            source = perplex_options["source"]
-            perplex_db = perplex_options["perplex_db"]
+        if not os.path.exists(config_yaml):
+            raise Exception(f"No config_yaml found at {config_yaml}!")
 
-        # Validate source and sample IDs
-        if os.path.exists(source):
-            if sids is None:
-                sids = get_sample_ids(source)
-            else:
-                valid_sids = get_sample_ids(source)
-                if not set(sids).issubset(valid_sids):
-                    raise Exception(f"Sample IDs {sids} not found in source: {source}!")
-        else:
-            raise Exception(f"Source {source} does not exist!")
+        with open(config_yaml, "r") as file:
+            config_data = yaml.safe_load(file)
+
+        perplex_options = config_data["perplex_options"]
+        perplex_db = perplex_options["perplex_db"]
+        source = perplex_options["source"]
+
+        sids = get_sample_ids(source)
+        nprocs = min(nprocs, os.cpu_count() - 2, len(sids))
+        run_args = [(sid, config_yaml) for sid in sids]
 
         print(f"Building {perplex_db} GFEM models for {len(sids)} samples ...")
 
-        # Set up the number of processes
-        nprocs = min(nprocs, os.cpu_count() - 2, len(sids))
-
-        # Prepare arguments for model building
-        run_args = [
-            (perplex_db, sid, source, res, P_min, P_max, T_min, T_max) for sid in sids]
-
-        # Build models in parallel
         models = []
         with cf.ProcessPoolExecutor(max_workers=nprocs) as executor:
             futures = [executor.submit(gfem_itr, args) for args in run_args]
@@ -2971,7 +2292,6 @@ def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8
                 iteration = future.result()
                 models.append(iteration)
 
-        # Filter successfully built models and report errors
         gfems = [m for m in models if m.model_built]
         error_count = len([m for m in models if not m.model_built])
 
@@ -2991,28 +2311,16 @@ def build_gfem_models(source=None, perplex_db="hp02", res=32, P_min=0.1, P_max=8
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
-    Main function for building GFEM models from predefined YAML configurations.
-
-    The function loads configuration files for various GFEM models from specified
-    YAML sources, iterates through them, and builds models for each configuration.
-    Models are constructed based on the database, pressure, and temperature ranges
-    defined in the YAML files.
-
-    The function handles potential errors during the build process and prints a
-    summary message upon successful completion.
-
-    Raises:
-        Exception: Catches and prints any errors that occur during model building.
     """
     try:
         gfems = {}
-        configs = {"hp02m": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
-                   "hp02r": "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml",
-                   "stx21m": "assets/config_yamls/dry-deep-mantle-stx21m.yaml",
-                   "stx21r": "assets/config_yamls/dry-deep-mantle-stx21r.yaml"}
+        configs = ["assets/config_yamls/gfem-hydrated-shallow-upper-mantle-hp02m.yaml",
+                   "assets/config_yamls/gfem-hydrated-shallow-upper-mantle-hp02r.yaml",
+                   "assets/config_yamls/gfem-dry-deep-mantle-stx21m.yaml",
+                   "assets/config_yamls/gfem-dry-deep-mantle-stx21r.yaml"]
 
-        for name, yaml in configs.items():
-            build_gfem_models(config_yaml=yaml)
+        for yaml in configs:
+            build_gfem_models(yaml)
 
     except Exception as e:
         print(f"Error in main(): {e}")
