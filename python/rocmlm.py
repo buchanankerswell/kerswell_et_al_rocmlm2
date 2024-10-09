@@ -196,10 +196,12 @@ class UNet(nn.Module):
 
         return params_info
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #######################################################
     class DoubleConv(nn.Module):
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def __init__(self, in_channels, out_channels, mid_channels=None):
+            """
+            """
             super().__init__()
             if not mid_channels:
                 mid_channels = out_channels
@@ -214,13 +216,17 @@ class UNet(nn.Module):
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def forward(self, x):
+            """
+            """
             x = x.contiguous()
             return self.double_conv(x)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #######################################################
     class Down(nn.Module):
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def __init__(self, in_channels, out_channels):
+            """
+            """
             super().__init__()
             self.maxpool_conv = nn.Sequential(
                 nn.MaxPool2d(2),
@@ -229,12 +235,16 @@ class UNet(nn.Module):
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def forward(self, x):
+            """
+            """
             return self.maxpool_conv(x)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #######################################################
     class Up(nn.Module):
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def __init__(self, in_channels, out_channels, bilinear=False):
+            """
+            """
             super().__init__()
             self.bilinear = bilinear
 
@@ -248,6 +258,8 @@ class UNet(nn.Module):
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def forward(self, x1, x2):
+            """
+            """
             x1 = self.up(x1)
 
             if self.bilinear:
@@ -262,15 +274,19 @@ class UNet(nn.Module):
 
             return self.conv(x)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #######################################################
     class OutConv(nn.Module):
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def __init__(self, in_channels, out_channels):
+            """
+            """
             super().__init__()
             self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         def forward(self, x):
+            """
+            """
             return self.conv(x)
 
 #######################################################
@@ -343,16 +359,22 @@ class ScaledGFEMDataset(Dataset):
     """
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, dataset, scaler_X, scaler_y):
+        """
+        """
         self.dataset = dataset
         self.scaler_X = scaler_X
         self.scaler_y = scaler_y
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __len__(self):
+        """
+        """
         return len(self.dataset)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __getitem__(self, idx):
+        """
+        """
         X_batch, y_batch = self.dataset[idx]
         X_batch_scaled = self.scaler_X.transform(X_batch)
         y_batch_scaled = self.scaler_y.transform(y_batch)
@@ -713,6 +735,8 @@ class RocMLM:
             self.dropout_rate = None
             self.warmup_epochs = None
             self.warmup_start_lr = None
+            self.L2_regularization = None
+            self.weight_decay = None
 
             if self.ml_algo == "KN":
                 self.default_rocmlm = KNeighborsRegressor(
@@ -1018,6 +1042,9 @@ class RocMLM:
             if hasattr(self.rocmlm, "eval"):
                 self.rocmlm.eval()
 
+            if self.ml_algo == "UNet":
+                X = self._shape_for_unet(X, "features")
+
             with torch.no_grad():
                 if hasattr(self.rocmlm, "predict"):
                     y_pred = self.rocmlm.predict(X)
@@ -1025,6 +1052,9 @@ class RocMLM:
                     X = torch.tensor(X, dtype=torch.float32).to(self.device)
                     y_pred = self.rocmlm(X)
                     y_pred = y_pred.detach().cpu().numpy()
+
+            if self.ml_algo == "UNet":
+                y_pred = self._unshape_from_unet(y_pred, "targets")
 
         except Exception as e:
             print(f"Error in _do_inference(): {e}")
@@ -2244,37 +2274,35 @@ class RocMLM:
             if not self.model_trained:
                 raise Exception("No RocMLM! Call train() first ...")
 
-            # Ensure all necessary features are provided
             training_features = self.rocmlm_features
             missing_features = [f for f in training_features if f not in features]
+
             if missing_features:
                 raise Exception(f"Missing required features: {missing_features}")
 
-            # Validate that all input features are lists or numpy arrays
-            for feature_name, feature_data in features.items():
-                if not isinstance(feature_data, (list, np.ndarray)):
-                    raise TypeError(f"Feature {feature_name} must be a list or numpy array!")
+            for key, val in features.items():
+                if not isinstance(val, (list, np.ndarray)):
+                    raise TypeError(f"Feature {key} must be a list or numpy array!")
 
-            # Convert all feature inputs to numpy arrays and check dimensions
-            feature_arrays = [
-                np.asarray(features[f]).reshape(-1, 1) for f in training_features]
-            feature_shapes = [arr.shape[0] for arr in feature_arrays]
+            X_list = [np.asarray(features[f]).reshape(-1, 1) for f in training_features]
+            X_lengths = [arr.shape[0] for arr in X_list]
 
-            if len(set(feature_shapes)) != 1:
+            if len(set(X_lengths)) != 1:
                 raise Exception("All feature arrays must have the same length!")
 
-            # Concatenate the feature arrays
-            X = np.concatenate(feature_arrays, axis=0)
+            X = np.concatenate(X_list, axis=1)
             X = np.nan_to_num(X)
 
-            # Make predictions on features
-            X_scaled = self.rocmlm_scaler_X.transform(X)
+            X_scaled = self.scaler_X.transform(X)
+
             inference_start_time = time.time()
-            y_pred = self.rocmlm.predict(X)
+            y_pred = self._do_inference(X)
             inference_end_time = time.time()
+
             inference_time = (inference_end_time - inference_start_time) * 1e3
             inference_time_per_node = inference_time / X.shape[0]
-            y_pred = self.rocmlm_scaler_y.inverse_transform(y_pred)
+
+            y_pred = self.scaler_y.inverse_transform(y_pred)
 
             print(f"  {X.shape[0]} nodes completed in {inference_time:.4f} "
                   f"milliseconds ({inference_time_per_node:.4f} ms per node)...")
@@ -2285,6 +2313,8 @@ class RocMLM:
 
         return y_pred
 
+#######################################################
+## .4.              Train RocMLMs                !!! ##
 #######################################################
 def train_rocmlms(gfem_models, ml_algos=["DT", "KN", "SimpleNet", "ImprovedNet", "UNet"],
                   config_yaml=None):
@@ -2323,7 +2353,6 @@ def load_pretrained_rocmlm(rocmlm_path):
             print(f"Loading RocMLM object from {rocmlm_path} ...")
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
-            # Load RocMLM object
             with open(rocmlm_path, "rb") as file:
                 model = joblib.load(file)
 
