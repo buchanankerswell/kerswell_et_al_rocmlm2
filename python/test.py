@@ -10,33 +10,32 @@ def main():
     # Build training database and train RocMLM
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     gfem_config = "assets/config_yamls/gfem-cerpa2022-demo.yaml"
-    gfems = build_gfem_models(config_yaml=gfem_config)
-
-    gfem_config = "assets/config_yamls/gfem-stx-demo.yaml"
-    gfems = build_gfem_models(config_yaml=gfem_config)
+    gfems = build_gfem_models(gfem_config)
 
     paths = glob.glob("gfems/cerpa*/results.csv")
-    rocmlm_config = "assets/config_yamls/rocmlm-stx-demo.yaml"
+    rocmlm_config = "assets/config_yamls/rocmlm-cerpa2022-demo.yaml"
 
-    mod = RocMLM(paths, "SimpleNet", config_yaml=rocmlm_config)
+#    gfem_config = "assets/config_yamls/gfem-stx-demo.yaml"
+#    gfems = build_gfem_models(config_yaml=gfem_config)
+
+#    paths = glob.glob("gfems/sm*/results.csv")
+#    rocmlm_config = "assets/config_yamls/rocmlm-stx-demo.yaml"
+
+    mod = RocMLM(paths, "SimpleNet", rocmlm_config)
     mod.train()
     mod.visualize()
-#
-#    mod = RocMLM(paths, "ImprovedNet", config_yaml=rocmlm_config)
+
+#    mod = RocMLM(paths, "ImprovedNet", rocmlm_config)
 #    mod.train()
 #    mod.visualize()
-#
-#    mod = RocMLM(paths, "UNet", config_yaml=rocmlm_config)
+
+#    mod = RocMLM(paths, "KN", rocmlm_config)
 #    mod.train()
 #    mod.visualize()
-#
-#    mod = RocMLM(paths, "KN", config_yaml=rocmlm_config)
+
+#    mod = RocMLM(paths, "DT", rocmlm_config)
 #    mod.train()
 #    mod.visualize()
-#
-#    mod = RocMLM(paths, "DT", config_yaml=rocmlm_config)
-#   mod.train()
-#   mod.visualize()
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Test inference speed

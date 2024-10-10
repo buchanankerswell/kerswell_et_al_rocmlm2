@@ -22,12 +22,17 @@ DATAPURGE = log \
 						$(DATADIR)/bench-pca.csv \
 						$(DATADIR)/gfem_summaries \
 						$(DATADIR)/earthchem-pca.csv \
-						$(DATADIR)/earthchem-counts.csv
+						$(DATADIR)/earthchem-counts.csv \
+						$(DATADIR)/temp-dataset.parquet \
 DATACLEAN = assets Perple_X gfems pretrained_rocmlms
 FIGSPURGE =
 FIGSCLEAN = figs
 
 all: $(LOGFILE) $(PYTHON) gfems rocmlms
+
+datasets: $(LOGFILE) $(PYTHON)
+	@$(CONDAPYTHON) -u python/datasets.py $(LOG)
+	@echo "=============================================" $(LOG)
 
 test: $(LOGFILE) $(PYTHON) pca
 	@$(CONDAPYTHON) -u python/test.py $(LOG)
