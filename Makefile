@@ -34,7 +34,7 @@ datasets: $(LOGFILE) $(PYTHON)
 	@$(CONDAPYTHON) -u python/datasets.py $(LOG)
 	@echo "=============================================" $(LOG)
 
-test: $(LOGFILE) $(PYTHON) pca
+test: $(LOGFILE) $(PYTHON)
 	@$(CONDAPYTHON) -u python/test.py $(LOG)
 	@echo "=============================================" $(LOG)
 

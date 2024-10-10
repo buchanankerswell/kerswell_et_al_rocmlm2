@@ -19,9 +19,8 @@ class GFEMDataset(Dataset):
         self.features = features
         self.targets = targets
 
-        if any([not os.path.exists(p) for p in self.gfem_paths]):
-            invalid_paths = [p for p in self.gfem_paths if not os.path.exists(p)]
-            raise Exception(f"Cannot load data from: {', '.join(invalid_paths)}")
+        if not gfem_paths or any([not os.path.exists(p) for p in self.gfem_paths]):
+            raise Exception(f"Cannot load gfem data!")
 
         output_file = "assets/temp-dataset.parquet"
         self._combine_and_save_csv(self.gfem_paths, output_file)
@@ -31,13 +30,9 @@ class GFEMDataset(Dataset):
     def _combine_and_save_csv(self, filepaths, output_file):
         """
         """
-        print(f"  Combining {len(filepaths)} csv files into {output_file} ...")
-        combined_df = pd.concat((pd.read_csv(f) for f in filepaths), ignore_index=True)
-
-        combined_df = combined_df[self.features + self.targets]
-        combined_df[self.features] = combined_df[self.features].astype("float32")
-        combined_df[self.targets] = combined_df[self.targets].astype("float32")
-
+        combined_df = pd.concat(
+            map(pd.read_csv, filepaths)
+        )[self.features + self.targets].dropna().astype("float32")
         combined_df.to_parquet(output_file, index=False)
 
     def __len__(self):
@@ -48,12 +43,9 @@ class GFEMDataset(Dataset):
     def __getitem__(self, idx):
         """
         """
-        row = self.data.iloc[idx].values
-
-        X = np.array(row[:len(self.features)], dtype=np.float32).reshape(1, -1)
-        y = np.array(row[len(self.features):], dtype=np.float32).reshape(1, -1)
-
-        return np.nan_to_num(X), np.nan_to_num(y)
+        row = self.data.iloc[idx].to_numpy(dtype=np.float32, copy=False)
+        X, y = row[:len(self.features)], row[len(self.features):]
+        return np.nan_to_num(X).reshape(1, -1), np.nan_to_num(y).reshape(1, -1)
 
 #######################################################
 class ScaledGFEMDataset(Dataset):

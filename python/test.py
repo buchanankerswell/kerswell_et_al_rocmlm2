@@ -1,7 +1,7 @@
 import glob
 import numpy as np
+from rocmlm import RocMLM
 from gfem import GFEMModel, build_gfem_models
-from rocmlm import RocMLM, load_pretrained_rocmlm
 
 def main():
     """
@@ -9,31 +9,25 @@ def main():
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Build training database and train RocMLM
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gfem_config = "assets/config_yamls/gfem-cerpa2022-demo.yaml"
-    gfems = build_gfem_models(gfem_config)
+    gfem_config_yaml = "assets/config_yamls/gfem-stx21-demo.yaml"
+    gfems = build_gfem_models(gfem_config_yaml)
 
-    paths = glob.glob("gfems/cerpa*/results.csv")
-    rocmlm_config = "assets/config_yamls/rocmlm-cerpa2022-demo.yaml"
+    paths = glob.glob("gfems/sm*/results.csv")
+    rocmlm_config_yaml = "assets/config_yamls/rocmlm-stx21-demo.yaml"
 
-#    gfem_config = "assets/config_yamls/gfem-stx-demo.yaml"
-#    gfems = build_gfem_models(config_yaml=gfem_config)
-
-#    paths = glob.glob("gfems/sm*/results.csv")
-#    rocmlm_config = "assets/config_yamls/rocmlm-stx-demo.yaml"
-
-    mod = RocMLM(paths, "SimpleNet", rocmlm_config)
+    mod = RocMLM(paths, "SimpleNet", rocmlm_config_yaml)
     mod.train()
-    mod.visualize()
+#    mod.visualize()
 
-#    mod = RocMLM(paths, "ImprovedNet", rocmlm_config)
+#    mod = RocMLM(paths, "ImprovedNet", rocmlm_config_yaml)
 #    mod.train()
 #    mod.visualize()
 
-#    mod = RocMLM(paths, "KN", rocmlm_config)
+#    mod = RocMLM(paths, "KN", rocmlm_config_yaml)
 #    mod.train()
 #    mod.visualize()
 
-#    mod = RocMLM(paths, "DT", rocmlm_config)
+#    mod = RocMLM(paths, "DT", rocmlm_config_yaml)
 #    mod.train()
 #    mod.visualize()
 

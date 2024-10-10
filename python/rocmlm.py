@@ -5,6 +5,7 @@
 # utilities !!
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 import os
+import glob
 import yaml
 import time
 import joblib
@@ -355,6 +356,10 @@ class RocMLM:
                     raise Exception("All gfem models must have the same resolution!")
 
             data = GFEMDataset(self.gfem_paths, self.rocmlm_features, self.rocmlm_targets)
+
+            if len(data) == 0:
+                raise Exception(f"No data or all nans read from gfem_paths!")
+
             X_scaled, y_scaled, self.scaler_X, self.scaler_y = self._scale_dataset(data)
             data_scaled = ScaledGFEMDataset(X_scaled, y_scaled)
 
@@ -376,23 +381,19 @@ class RocMLM:
             scaler_X = StandardScaler()
             scaler_y = StandardScaler()
 
-            print("  Fitting scalers to the training dataset ...")
             X_all, y_all = [], []
-
             for X, y in dataset:
                 X_all.append(X)
                 y_all.append(y)
 
-            X_all = np.vstack(X_all)
-            y_all = np.vstack(y_all)
-
+            X_all, y_all = np.vstack(X_all), np.vstack(y_all)
             X_scaled = scaler_X.fit_transform(X_all)
             y_scaled = scaler_y.fit_transform(y_all)
 
         except Exception as e:
             print(f"Error in _scale_dataset(): {e}")
             traceback.print_exc()
-            return None, None, None
+            return None, None, None, None
 
         return X_scaled, y_scaled, scaler_X, scaler_y
 
@@ -426,40 +427,32 @@ class RocMLM:
         """
         """
         try:
-            return_torch = False if self.ml_algo in ["KN", "DT"] else True
-
             X, y = zip(*batch)
             X = np.concatenate(X, axis=0)
             y = np.concatenate(y, axis=0)
 
-            if return_torch:
-                X_tensor = torch.tensor(X)
-                y_tensor = torch.tensor(y)
-            else:
-                X_tensor = X
-                y_tensor = y
+            if not self.ml_algo in ["KN", "DT"]:
+                X = torch.tensor(X)
+                y = torch.tensor(y)
 
         except Exception as e:
             print(f"Error in _collate_fn(): {e}")
             traceback.print_exc()
             return None, None
 
-        return X_tensor, y_tensor
+        return X, y
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def _load_all_data_from_dataloader(self, dataloader):
         """
         """
         try:
-            X_list = []
-            y_list = []
+            X_all, y_all = [], []
+            for X, y in dataloader:
+                X_all.append(X)
+                y_all.append(y)
 
-            for X_batch, y_batch in dataloader:
-                X_list.append(X_batch)
-                y_list.append(y_batch)
-
-            X = np.concatenate(X_list, axis=0)
-            y = np.concatenate(y_list, axis=0)
+            X, y = np.concatenate(X_all, axis=0), np.concatenate(y_all, axis=0)
 
         except Exception as e:
             print(f"Error in _load_all_data_from_dataloader(): {e}")
@@ -564,7 +557,6 @@ class RocMLM:
         try:
             model = self.default_rocmlm
             rocmlm_gridsearch = self.rocmlm_gridsearch
-
             X, y = self._load_all_data_from_dataloader(self.loader_scaled)
 
             n_samples = len(self.loader_scaled.dataset)
@@ -618,7 +610,7 @@ class RocMLM:
                         Subset(self.loader_scaled.dataset, train_idx),
                         batch_size=self.minibatch_size, collate_fn=self._collate_fn)
                     test_loader = DataLoader(
-                        Subset(self.loader_scaled.dataset, train_idx),
+                        Subset(self.loader_scaled.dataset, test_idx),
                         batch_size=self.minibatch_size, collate_fn=self._collate_fn)
 
                     # Configure new model
@@ -658,7 +650,8 @@ class RocMLM:
                     fold_auc.append(auc_test_loss)
 
                     combined_score = (
-                        (0.33 * avg_score) + (0.33 * var_test_loss) + (0.33 * auc_test_loss))
+                        (0.33 * avg_score) + (0.33 * var_test_loss) + (0.33 * auc_test_loss)
+                    )
                     fold_combined_score.append(combined_score)
 
                     # Average score across folds
@@ -760,6 +753,9 @@ class RocMLM:
         """
         """
         try:
+            if self.rocmlm is None:
+                raise Exception("No RocMLM! Call _configure_rocmlm() first ...")
+
             n_samples = len(self.loader_scaled.dataset)
             n_splits = min(self.kfolds, n_samples)
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
@@ -772,7 +768,7 @@ class RocMLM:
                     Subset(self.loader_scaled.dataset, train_idx),
                     batch_size=self.minibatch_size, collate_fn=self._collate_fn)
                 test_loader = DataLoader(
-                    Subset(self.loader_scaled.dataset, train_idx),
+                    Subset(self.loader_scaled.dataset, test_idx),
                     batch_size=self.minibatch_size, collate_fn=self._collate_fn)
 
                 results = self._kfold_itr(train_loader, test_loader)
@@ -790,9 +786,6 @@ class RocMLM:
         """
         """
         try:
-            if self.rocmlm is None:
-                raise Exception("No RocMLM! Call _configure_rocmlm() first ...")
-
             training_start_time = time.time()
 
             if self.ml_algo in ["SimpleNet", "ImprovedNet"]:
@@ -806,13 +799,12 @@ class RocMLM:
 
             y_pred = self._do_batch_inference(test_loader)
 
-            y_test_list = [y_batch for _, y_batch in test_loader]
+            y_test_all = [y_batch for _, y_batch in test_loader]
             if self.ml_algo in ["KN", "DT"]:
-                y_test = np.concatenate(y_test_list, axis=0)
+                y_test = np.concatenate(y_test_all, axis=0)
             else:
-                y_test = torch.cat(y_test_list).numpy()
+                y_test = torch.cat(y_test_all).numpy()
 
-            # Calculate RMSE and R2 score
             rmse = np.sqrt(mean_squared_error(y_test, y_pred, multioutput="raw_values"))
             r2 = r2_score(y_test, y_pred, multioutput="raw_values")
 
@@ -918,6 +910,9 @@ class RocMLM:
         """
         """
         try:
+            if self.rocmlm is None:
+                raise Exception("No RocMLM! Call _configure_rocmlm() first ...")
+
             if not self.model_cross_validated:
                 print("  Warning: ML model not cross validated. "
                       "Cannot provide performance metrics ...")
@@ -1059,18 +1054,24 @@ class RocMLM:
             # Normalize losses
             norm_train_loss_ = [
                 (t - min_train_loss) / (max_train_loss - min_train_loss + 1e-8)
-                for t in train_loss_]
+                for t in train_loss_
+            ]
             norm_test_loss_ = [
                 (t - min_test_loss) / (max_test_loss - min_test_loss + 1e-8)
-                for t in test_loss_]
+                for t in test_loss_
+            ]
             norm_train_loss_ = np.array(
-                [loss.detach().cpu().numpy() for loss in norm_train_loss_])
+                [loss.detach().cpu().numpy() for loss in norm_train_loss_]
+            )
             norm_test_loss_ = np.array(
-                [loss.detach().cpu().numpy() for loss in norm_test_loss_])
+                [loss.detach().cpu().numpy() for loss in norm_test_loss_]
+            )
 
-            # Save loss curves
-            loss_curve = {"epoch": epoch_, "train_loss": norm_train_loss_,
-                          "test_loss": norm_test_loss_}
+            loss_curve = {
+                "epoch": epoch_,
+                "train_loss": norm_train_loss_,
+                "test_loss": norm_test_loss_
+            }
 
         except Exception as e:
             print(f"Error in _train_torch_net(): {e}")
@@ -1129,9 +1130,8 @@ class RocMLM:
                 if hasattr(self.rocmlm, "predict"):
                     y_pred = self.rocmlm.predict(X)
                 else:
-                    X = torch.tensor(X, dtype=torch.float32).to(self.device)
-                    y_pred = self.rocmlm(X)
-                    y_pred = y_pred.detach().cpu().numpy()
+                    X = torch.tensor(X).to(self.device)
+                    y_pred = self.rocmlm(X).detach().cpu().numpy()
 
         except Exception as e:
             print(f"Error in _do_inference(): {e}")
@@ -1148,24 +1148,20 @@ class RocMLM:
             if self.rocmlm is None:
                 raise Exception("No RocMLM! Load or train RocMLM first ...")
 
-            y_pred_list = []
-
             if hasattr(self.rocmlm, "eval"):
                 self.rocmlm.to(self.device)
                 self.rocmlm.eval()
 
+            y_pred_all = []
             with torch.no_grad():
-                for X_batch, _ in dataloader:
-                    X_batch = X_batch
-
+                for X, _ in dataloader:
                     if hasattr(self.rocmlm, "predict"):
-                        batch_y_pred = self.rocmlm.predict(X_batch)
-                        y_pred_list.append(batch_y_pred)
+                        y_pred_all.append(self.rocmlm.predict(X))
                     else:
-                        batch_y_pred = self.rocmlm(X_batch.to(self.device))
-                        y_pred_list.append(batch_y_pred.detach().cpu().numpy())
+                        X = torch.tensor(X).to(self.device)
+                        y_pred_all.append(self.rocmlm(X).detach().cpu().numpy())
 
-            y_pred = np.concatenate(y_pred_list, axis=0)
+            y_pred = np.concatenate(y_pred_all, axis=0)
 
         except Exception as e:
             print(f"Error in _do_batch_inference(): {e}")
@@ -1185,8 +1181,7 @@ class RocMLM:
             if not self.model_trained:
                 raise Exception("No RocMLM! Load or train RocMLM first ...")
 
-            training_features = self.rocmlm_features
-            missing_features = [f for f in training_features if f not in features]
+            missing_features = [f for f in self.rocmlm_features if f not in features]
 
             if missing_features:
                 raise Exception(f"Missing required features: {missing_features}")
@@ -1195,19 +1190,18 @@ class RocMLM:
                 if not isinstance(val, (list, np.ndarray)):
                     raise TypeError(f"Feature {key} must be a list or numpy array!")
 
-            X_list = [np.asarray(features[f]).reshape(-1, 1) for f in training_features]
-            X_lengths = [arr.shape[0] for arr in X_list]
+            X_all = [np.asarray(features[f]).reshape(-1, 1) for f in self.rocmlm_features]
+
+            X_lengths = [arr.shape[0] for arr in X_all]
 
             if len(set(X_lengths)) != 1:
                 raise Exception("All feature arrays must have the same length!")
 
-            X = np.concatenate(X_list, axis=1)
-            X = np.nan_to_num(X)
-
+            X = np.nan_to_num(np.concatenate(X_all, axis=1))
             X_scaled = self.scaler_X.transform(X)
 
             inference_start_time = time.time()
-            y_pred = self._do_inference(X)
+            y_pred = self._do_inference(X_scaled)
             inference_end_time = time.time()
 
             inference_time = (inference_end_time - inference_start_time) * 1e3
@@ -1226,7 +1220,7 @@ class RocMLM:
         return y_pred
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def visualize(self, indices=[0, 1]):
+    def visualize(self, indices=[0, -1]):
         """
         """
         try:
@@ -1653,7 +1647,7 @@ class RocMLM:
 #######################################################
 ## .2.              Train RocMLMs                !!! ##
 #######################################################
-def train_rocmlms(gfem_models, config_yaml,
+def train_rocmlms(gfem_paths, config_yaml,
                   ml_algos=["DT", "KN", "SimpleNet", "ImprovedNet"]):
     """
     """
@@ -1663,7 +1657,7 @@ def train_rocmlms(gfem_models, config_yaml,
 
         models = []
         for algo in ml_algos:
-            model = RocMLM(gfem_models, config_yaml, algo)
+            model = RocMLM(gfem_paths, algo, config_yaml)
             model.train()
             models.append(model)
 
@@ -1683,43 +1677,18 @@ def train_rocmlms(gfem_models, config_yaml,
     return rocmlms
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def load_pretrained_rocmlm(rocmlm_path):
-    """
-    """
-    try:
-        if (os.path.exists(rocmlm_path)):
-            print(f"Loading RocMLM object from {rocmlm_path} ...")
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
-            with open(rocmlm_path, "rb") as file:
-                model = joblib.load(file)
-
-            if model.rocmlm is None:
-                raise Exception("RocMLM not loaded properly!")
-        else:
-            print(f"File {rocmlm_path} does not exist!")
-
-    except Exception as e:
-        print(f"Error in load_pretrained_rocmlm(): {e}")
-        traceback.print_exc()
-
-    return model
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def main():
     """
     """
     from gfem import build_gfem_models
     try:
-        gfems = []
-        gfem_configs = ["assets/config_yamls/hydrated-shallow-upper-mantle-hp02m.yaml",
-                        "assets/config_yamls/hydrated-shallow-upper-mantle-hp02r.yaml"]
+        gfem_config_yaml = "assets/config_yamls/gfem-stx21-demo.yaml"
+        rocmlm_config_yaml = "assets/config_yamls/rocmlm-stx21-demo.yaml"
 
-        for yaml in gfem_configs:
-            gfems.extend(build_gfem_models(yaml))
+        gfems = build_gfem_models(gfem_config_yaml)
 
-        rocmlm_config = "assets/config_yamls/rocmlm-default.yaml"
-        rocmlms = train_rocmlms(gfems, rocmlm_config)
+        paths = glob.glob("gfems/sm*/results.csv")
+        rocmlms = train_rocmlms(paths, rocmlm_config_yaml)
 
     except Exception as e:
         print(f"Error in main(): {e}")
