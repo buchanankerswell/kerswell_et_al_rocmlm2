@@ -1335,8 +1335,13 @@ class RocMLM:
             T = self.square_y_shape[1]
             R = self.square_y_shape[2]
 
-            X, y = self.loader_raw.dataset[idx]
-            X_scaled, y_scaled = self.loader_scaled.dataset[idx]
+            X, y = self._load_all_data_from_dataloader(self.loader_raw)
+            X, y = X.reshape(-1, R, R, F), y.reshape(-1, R, R, T)
+            X, y = X[idx], y[idx]
+
+            X_scaled, y_scaled = self._load_all_data_from_dataloader(self.loader_scaled)
+            X_scaled, y_scaled = X_scaled.reshape(-1, R, R, F), y_scaled.reshape(-1, R, R, T)
+            X_scaled, y_scaled = X_scaled[idx].reshape(-1, F), y_scaled[idx].reshape(-1, T)
 
             y_pred = self._do_inference(X_scaled)
             y_pred = self.scaler_y.inverse_transform(y_pred)
